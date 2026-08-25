@@ -39,6 +39,7 @@ fun SettingsScreen(
     onOpenThemeSettings: () -> Unit,
     onOpenAbout: () -> Unit,
     onOpenScanSettings: () -> Unit,
+    onOpenStatistics: () -> Unit,
     scrollBehavior: ScrollBehavior,
     modifier: Modifier = Modifier,
     contentPadding: PaddingValues = PaddingValues(),
@@ -86,6 +87,10 @@ fun SettingsScreen(
                         stringResource(R.string.settings_scan_music_empty_summary)
                     },
                     onClick = onOpenScanSettings,
+                )
+                ArrowPreference(
+                    title = stringResource(R.string.settings_music_statistics_title),
+                    onClick = onOpenStatistics,
                 )
             }
         }

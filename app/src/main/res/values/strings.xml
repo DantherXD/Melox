@@ -173,12 +173,25 @@
 
     <string name="settings_section_music_library">Library</string>
     <string name="settings_scan_local_music_title">Scan music</string>
+    <string name="settings_music_statistics_title">Statistics</string>
     <string name="settings_scan_music_empty_summary">No songs</string>
     <plurals name="settings_scan_music_song_count">
         <item quantity="one">%1$d song</item>
         <item quantity="other">%1$d songs</item>
     </plurals>
     <string name="scan_music_page_title">Scan music</string>
+    <string name="music_statistics_page_title">Statistics</string>
+    <string name="music_statistics_tune_action">Statistics options</string>
+    <string name="music_statistics_group_quality">Song quality</string>
+    <string name="music_statistics_group_format">Music format</string>
+    <string name="music_statistics_metric_count">Count</string>
+    <string name="music_statistics_metric_size">Size</string>
+    <string name="music_statistics_other">Other</string>
+    <string name="music_statistics_empty">No songs</string>
+    <plurals name="music_statistics_song_count">
+        <item quantity="one">%1$d song</item>
+        <item quantity="other">%1$d songs</item>
+    </plurals>
     <string name="scan_music_card_title">Scan</string>
     <string name="scan_refresh_on_start">Refresh on every launch</string>
     <string name="scan_skip_short_audio">Skip audio shorter than 60s</string>

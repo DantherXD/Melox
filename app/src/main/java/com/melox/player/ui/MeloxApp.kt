@@ -148,6 +148,7 @@ import com.melox.player.ui.screen.playback.FullPlayerScreen
 import com.melox.player.ui.screen.playback.QueueSheet
 import com.melox.player.ui.screen.settings.SettingsScreen
 import com.melox.player.ui.screen.settings.ScanMusicScreen
+import com.melox.player.ui.screen.settings.MusicStatisticsScreen
 import com.melox.player.ui.screen.settings.AboutScreen
 import com.melox.player.ui.screen.settings.ThemeSettingsScreen
 import com.melox.player.ui.viewmodel.MeloxViewModel
@@ -202,6 +203,7 @@ internal fun rootPagerUserScrollEnabled(
 private enum class AppRoute {
     ROOT,
     SCAN_SETTINGS,
+    MUSIC_STATISTICS,
     THEME_SETTINGS,
     ABOUT,
     ALBUM_DETAIL,
@@ -1139,6 +1141,9 @@ fun MeloxApp(
                             onOpenScanSettings = {
                                 currentRoute = AppRoute.SCAN_SETTINGS
                             },
+                            onOpenStatistics = {
+                                currentRoute = AppRoute.MUSIC_STATISTICS
+                            },
                             scrollBehavior = scrollBehavior,
                             contentPadding = contentPadding,
                         )
@@ -1374,6 +1379,15 @@ fun MeloxApp(
                                                             onRemoveCustomFolder =
                                                                 viewModel::removeCustomFolderUri,
                                                             onStartScan = scanMusic,
+                                                        )
+
+                                                    AppRoute.MUSIC_STATISTICS ->
+                                                        MusicStatisticsScreen(
+                                                            tracks = uiState.tracks,
+                                                            blurEnabled = settings.blurEnabled,
+                                                            bottomContentPadding =
+                                                                routeBottomPadding,
+                                                            onBack = navigateBack,
                                                         )
 
                                                     AppRoute.ABOUT -> AboutScreen(
