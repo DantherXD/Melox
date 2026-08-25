@@ -3,7 +3,8 @@ package com.melox.player.model
 import java.util.Locale
 
 enum class AudioQuality {
-    HR,
+    RAW,
+    HI_RES,
     SQ,
     HQ,
 }
@@ -16,24 +17,27 @@ internal fun MusicTrack.resolveAudioQuality(): AudioQuality? {
     val normalizedMimeType = mimeType?.lowercase(Locale.ROOT).orEmpty()
     val isLossless = normalizedMimeType in LOSSLESS_MIME_TYPES ||
         extension in LOSSLESS_FILE_EXTENSIONS
-    val bitrate = bitrateBitsPerSecond
-        ?.toLong()
-        ?.takeIf { it > 0L }
 
     return when {
-        isLossless && (
-            sampleRateHz?.let { it >= HIGH_RESOLUTION_SAMPLE_RATE_HZ } == true ||
-                bitrate?.let { it >= HIGH_RESOLUTION_BITRATE_BITS_PER_SECOND } == true
-            ) -> AudioQuality.HR
+        isLossless &&
+            bitDepth?.let { it >= RAW_BIT_DEPTH } == true &&
+            sampleRateHz?.let { it >= RAW_SAMPLE_RATE_HZ } == true -> AudioQuality.RAW
+        isLossless &&
+            bitDepth?.let { it >= HIGH_RESOLUTION_BIT_DEPTH } == true &&
+            sampleRateHz?.let { it >= HIGH_RESOLUTION_SAMPLE_RATE_HZ } == true ->
+            AudioQuality.HI_RES
         isLossless -> AudioQuality.SQ
-        bitrate?.let { it >= HIGH_QUALITY_BITRATE_BITS_PER_SECOND } == true -> AudioQuality.HQ
+        bitrateBitsPerSecond?.let { it >= HIGH_QUALITY_BITRATE_BITS_PER_SECOND } == true ->
+            AudioQuality.HQ
         else -> null
     }
 }
 
-private const val HIGH_RESOLUTION_SAMPLE_RATE_HZ = 88_200
-private const val HIGH_RESOLUTION_BITRATE_BITS_PER_SECOND = 1_500_000L
-private const val HIGH_QUALITY_BITRATE_BITS_PER_SECOND = 256_000L
+private const val RAW_BIT_DEPTH = 32
+private const val RAW_SAMPLE_RATE_HZ = 192_000
+private const val HIGH_RESOLUTION_BIT_DEPTH = 24
+private const val HIGH_RESOLUTION_SAMPLE_RATE_HZ = 48_000
+private const val HIGH_QUALITY_BITRATE_BITS_PER_SECOND = 320_000
 
 private val LOSSLESS_MIME_TYPES = setOf(
     "audio/aiff",

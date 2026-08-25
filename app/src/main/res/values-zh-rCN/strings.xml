@@ -39,7 +39,8 @@
     <string name="lyrico_not_found">未发现 Lyrico 应用</string>
     <string name="music_album_label">专辑：%1$s</string>
     <string name="music_artist_label">艺术家：%1$s</string>
-    <string name="music_quality_hr">HR</string>
+    <string name="music_quality_raw">RAW</string>
+    <string name="music_quality_hi_res">Hi-Res</string>
     <string name="music_quality_sq">SQ</string>
     <string name="music_quality_hq">HQ</string>
     <string name="song_info_artist">艺术家</string>

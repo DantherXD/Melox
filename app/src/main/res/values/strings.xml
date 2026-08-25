@@ -39,7 +39,8 @@
     <string name="lyrico_not_found">Lyrico app not found</string>
     <string name="music_album_label">Album: %1$s</string>
     <string name="music_artist_label">Artist: %1$s</string>
-    <string name="music_quality_hr">HR</string>
+    <string name="music_quality_raw">RAW</string>
+    <string name="music_quality_hi_res">Hi-Res</string>
     <string name="music_quality_sq">SQ</string>
     <string name="music_quality_hq">HQ</string>
     <string name="song_info_artist">Artist</string>

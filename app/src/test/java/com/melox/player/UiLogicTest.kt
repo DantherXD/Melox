@@ -2391,12 +2391,30 @@ class UiLogicTest {
         )
 
         assertEquals(
-            AudioQuality.HR,
+            AudioQuality.RAW,
             baseTrack.copy(
                 fileName = "quality.flac",
                 mimeType = "audio/flac",
-                bitrateBitsPerSecond = 900_000,
-                sampleRateHz = 96_000,
+                sampleRateHz = 192_000,
+                bitDepth = 32,
+            ).resolveAudioQuality(),
+        )
+        assertEquals(
+            AudioQuality.HI_RES,
+            baseTrack.copy(
+                fileName = "quality.flac",
+                mimeType = "audio/flac",
+                sampleRateHz = 192_000,
+                bitDepth = 24,
+            ).resolveAudioQuality(),
+        )
+        assertEquals(
+            AudioQuality.HI_RES,
+            baseTrack.copy(
+                fileName = "quality.flac",
+                mimeType = "audio/flac",
+                sampleRateHz = 48_000,
+                bitDepth = 24,
             ).resolveAudioQuality(),
         )
         assertEquals(
@@ -2404,8 +2422,17 @@ class UiLogicTest {
             baseTrack.copy(
                 fileName = "quality.flac",
                 mimeType = "audio/flac",
-                bitrateBitsPerSecond = 900_000,
-                sampleRateHz = 44_100,
+                sampleRateHz = 192_000,
+                bitDepth = 16,
+            ).resolveAudioQuality(),
+        )
+        assertEquals(
+            AudioQuality.SQ,
+            baseTrack.copy(
+                fileName = "quality.flac",
+                mimeType = "audio/flac",
+                sampleRateHz = 47_999,
+                bitDepth = 32,
             ).resolveAudioQuality(),
         )
         assertEquals(
@@ -2413,7 +2440,7 @@ class UiLogicTest {
             baseTrack.copy(bitrateBitsPerSecond = 320_000).resolveAudioQuality(),
         )
         assertNull(
-            baseTrack.copy(bitrateBitsPerSecond = 128_000).resolveAudioQuality(),
+            baseTrack.copy(bitrateBitsPerSecond = 319_999).resolveAudioQuality(),
         )
         assertNull(baseTrack.resolveAudioQuality())
     }

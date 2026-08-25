@@ -19,6 +19,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.luminance
@@ -162,18 +163,36 @@ private fun RowScope.MusicTrackLeadingContent(
     val qualityLabel = quality?.let {
         stringResource(
             when (it) {
-                AudioQuality.HR -> R.string.music_quality_hr
+                AudioQuality.RAW -> R.string.music_quality_raw
+                AudioQuality.HI_RES -> R.string.music_quality_hi_res
                 AudioQuality.SQ -> R.string.music_quality_sq
                 AudioQuality.HQ -> R.string.music_quality_hq
             },
         )
     }
-    val qualityColor = quality?.let {
+    val qualityColors = quality?.let {
         val darkSurface = MiuixTheme.colorScheme.surface.luminance() < 0.5f
         when (it) {
-            AudioQuality.HR -> Color(0xFFFFD54F)
-            AudioQuality.SQ -> if (darkSurface) Color(0xFFB69CFF) else Color(0xFF7650D8)
-            AudioQuality.HQ -> if (darkSurface) Color(0xFF74B4FF) else Color(0xFF246FD1)
+            AudioQuality.RAW -> if (darkSurface) {
+                Color(0xFFFF858D) to Color(0xFF43191D)
+            } else {
+                Color(0xFFE24D4D) to Color(0xFFFFD6DA)
+            }
+            AudioQuality.HI_RES -> if (darkSurface) {
+                Color(0xFFE8C34A) to Color(0xFF3A3010)
+            } else {
+                Color(0xFFB88600) to Color(0xFFFFE1A8)
+            }
+            AudioQuality.SQ -> if (darkSurface) {
+                Color(0xFFC294F4) to Color(0xFF30203F)
+            } else {
+                Color(0xFF8A5ED3) to Color(0xFFE3D6FB)
+            }
+            AudioQuality.HQ -> if (darkSurface) {
+                Color(0xFF79B8FF) to Color(0xFF102A43)
+            } else {
+                Color(0xFF3A7DDE) to Color(0xFFD2E4FF)
+            }
         }
     }
 
@@ -209,8 +228,8 @@ private fun RowScope.MusicTrackLeadingContent(
             qualityLabel?.let {
                 ProjectBadge(
                     text = it,
-                    textColor = requireNotNull(qualityColor),
-                    containerColor = qualityColor.copy(alpha = 0.16f),
+                    textColor = requireNotNull(qualityColors).first,
+                    containerColor = qualityColors.second,
                 )
             }
             Text(
@@ -232,9 +251,12 @@ fun ProjectBadge(
     textColor: Color = MiuixTheme.colorScheme.primary,
     containerColor: Color = MiuixTheme.colorScheme.primaryContainer.copy(alpha = 0.2f),
 ) {
+    val descriptionTextHeight = with(LocalDensity.current) {
+        MiuixTheme.textStyles.footnote1.fontSize.toDp()
+    }
     Box(
         modifier = modifier
-            .defaultMinSize(minHeight = 16.dp)
+            .defaultMinSize(minHeight = descriptionTextHeight)
             .clip(RoundedCornerShape(3.dp))
             .background(containerColor)
             .padding(horizontal = 4.dp),
@@ -243,9 +265,10 @@ fun ProjectBadge(
         Text(
             text = text,
             color = textColor,
+            style = MiuixTheme.textStyles.footnote2,
             fontSize = 9.sp,
-            fontFamily = FontFamily.Monospace,
-            fontWeight = FontWeight.Bold,
+            fontFamily = FontFamily.SansSerif,
+            fontWeight = FontWeight.SemiBold,
             maxLines = 1,
             softWrap = false,
         )
