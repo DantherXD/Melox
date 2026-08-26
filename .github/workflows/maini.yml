@@ -1,0 +1,68 @@
+name: Sync & Build Android APK
+
+on:
+  schedule:
+    - cron: '0 0 * * *'  # Runs daily at midnight UTC
+  workflow_dispatch:      # Allows manual trigger
+
+jobs:
+  sync_and_build:
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+      with:
+        fetch-depth: 0
+        token: ${{ secrets.GITHUB_TOKEN }}
+
+    - name: Sync with Upstream
+      id: sync
+      run: |
+        git config user.name "github-actions[bot]"
+        git config user.email "github-actions[bot]@users.noreply.github.com"
+        
+        # Add original repository as upstream
+        git remote add upstream https://github.com/Inefy-03/Melox.git
+        git fetch upstream main
+
+        # Attempt to pull upstream changes into main
+        SYNC_OUTPUT=$(git pull upstream main --no-rebase --no-edit 2>&1) || {
+          echo "::error::Sync failed due to merge conflicts or git error."
+          exit 1
+        }
+
+        echo "$SYNC_OUTPUT"
+
+        # Check if the repository was already up to date
+        if echo "$SYNC_OUTPUT" | grep -q "Already up to date."; then
+          echo "No new changes from upstream. Stopping workflow."
+          echo "has_changes=false" >> $GITHUB_OUTPUT
+        else
+          echo "Sync successful! Pushing changes to fork..."
+          git push origin main
+          echo "has_changes=true" >> $GITHUB_OUTPUT
+        fi
+
+    - name: Set up JDK 17
+      if: steps.sync.outputs.has_changes == 'true' || github.event_name == 'workflow_dispatch'
+      uses: actions/setup-java@v4
+      with:
+        java-version: '17'
+        distribution: 'temurin'
+        cache: gradle
+
+    - name: Grant execute permission for gradlew
+      if: steps.sync.outputs.has_changes == 'true' || github.event_name == 'workflow_dispatch'
+      run: chmod +x gradlew
+
+    - name: Build Debug APK
+      if: steps.sync.outputs.has_changes == 'true' || github.event_name == 'workflow_dispatch'
+      run: ./gradlew assembleDebug
+
+    - name: Upload APK Artifact
+      if: steps.sync.outputs.has_changes == 'true' || github.event_name == 'workflow_dispatch'
+      uses: actions/upload-artifact@v4
+      with:
+        name: app-debug
+        path: app/build/outputs/apk/debug/app-debug.apk
