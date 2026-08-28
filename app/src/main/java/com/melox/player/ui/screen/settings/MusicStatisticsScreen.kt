@@ -8,7 +8,6 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
@@ -64,9 +63,9 @@ import com.melox.player.data.library.MusicLibraryStatistics
 import com.melox.player.data.library.buildMusicLibraryStatistics
 import com.melox.player.model.AudioQuality
 import com.melox.player.model.MusicTrack
-import com.melox.player.ui.component.MiuixBlurredBar
+import com.melox.player.ui.component.BlurredBar
 import com.melox.player.ui.component.miuixBarColor
-import com.melox.player.ui.component.rememberMiuixBlurBackdrop
+import com.melox.player.ui.component.rememberBlurBackdrop
 import java.util.Locale
 import top.yukonga.miuix.kmp.basic.DropdownImpl
 import top.yukonga.miuix.kmp.basic.HorizontalDivider
@@ -122,7 +121,6 @@ private data class CylinderSegment(
 @Composable
 fun MusicStatisticsScreen(
     tracks: List<MusicTrack>,
-    blurEnabled: Boolean,
     bottomContentPadding: Dp,
     onBack: () -> Unit,
 ) {
@@ -130,11 +128,15 @@ fun MusicStatisticsScreen(
     var group by remember { mutableStateOf(StatisticsGroup.QUALITY) }
     var metric by remember { mutableStateOf(StatisticsMetric.COUNT) }
     val scrollBehavior = MiuixScrollBehavior()
-    val topBarBackdrop = rememberMiuixBlurBackdrop(enabled = blurEnabled)
+    val topBarBackdrop = rememberBlurBackdrop()
 
     Scaffold(
-        topBar = {
-            MiuixBlurredBar(backdrop = topBarBackdrop) {
+            topBar = {
+            BlurredBar(
+                backdrop = topBarBackdrop,
+                blurEnabled = topBarBackdrop != null,
+                scrollBehavior = scrollBehavior,
+            ) {
                 TopAppBar(
                     title = stringResource(R.string.music_statistics_page_title),
                     color = topBarBackdrop.miuixBarColor(),
@@ -158,7 +160,7 @@ fun MusicStatisticsScreen(
                 )
             }
         },
-    ) { padding ->
+        ) { padding ->
         Box(
             modifier = Modifier
                 .fillMaxSize()
@@ -321,12 +323,7 @@ private fun StatisticsPage(
             }
         }
     }
-    BoxWithConstraints(modifier = Modifier.fillMaxSize()) {
-        val stableTopPadding = remember(maxHeight) { topPadding }
-        val chartHeight = maxOf(
-            1.dp,
-            maxHeight - stableTopPadding - bottomPadding - 24.dp,
-        )
+    Box(modifier = Modifier.fillMaxSize()) {
         LazyColumn(
             modifier = Modifier
                 .fillMaxSize()
@@ -334,7 +331,7 @@ private fun StatisticsPage(
                 .overScrollVertical()
                 .nestedScroll(scrollBehavior.nestedScrollConnection),
             contentPadding = PaddingValues(
-                top = topPadding + 8.dp,
+                top = topPadding + 32.dp,
                 bottom = bottomPadding + 16.dp,
             ),
             overscrollEffect = null,
@@ -344,7 +341,7 @@ private fun StatisticsPage(
                     Box(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .height(chartHeight),
+                            .height(CYLINDER_HEIGHT),
                         contentAlignment = Alignment.Center,
                     ) {
                         Text(
@@ -358,7 +355,7 @@ private fun StatisticsPage(
                         items = items,
                         modifier = Modifier
                             .fillMaxWidth()
-                            .height(chartHeight),
+                            .height(CYLINDER_HEIGHT),
                     )
                 }
             }
@@ -386,11 +383,10 @@ private fun CylinderStatistics(
     val legendWidthPx = groupWidthPx * LEGEND_WIDTH_SHARE
     val legendWidth = with(density) { legendWidthPx.toDp() }
     val groupLeftPx = ((chartSize.width - groupWidthPx) / 2f).coerceAtLeast(0f)
-    val cylinderBodyHeight = min(
-        cylinderWidthPx * CYLINDER_BODY_ASPECT_RATIO,
-        (chartSize.height - cylinderWidthPx * ELLIPSE_HEIGHT_RATIO)
-            .coerceAtLeast(items.size.toFloat()),
-    )
+    val cylinderBodyHeight = (
+        with(density) { CYLINDER_HEIGHT.toPx() } -
+            cylinderWidthPx * ELLIPSE_HEIGHT_RATIO
+    ).coerceAtLeast(items.size.toFloat())
     val cylinderTop = ((chartSize.height - cylinderBodyHeight) / 2f).coerceAtLeast(0f)
     val legendTopPx = (
         cylinderTop - cylinderWidthPx * ELLIPSE_HEIGHT_RATIO / 2f
@@ -686,13 +682,14 @@ private enum class GestureAxis {
 
 private const val ELLIPSE_CONTROL_POINT = 0.5522848f
 private const val ELLIPSE_HEIGHT_RATIO = 0.19f
-private const val CYLINDER_BODY_ASPECT_RATIO = 4.5f
 private const val CHART_GROUP_WIDTH_RATIO = 0.78f
 private const val CHART_GROUP_HEIGHT_RATIO = 0.56f
 private const val CYLINDER_WIDTH_SHARE = 0.39726028f
 private const val LEGEND_GAP_SHARE = 0.12328767f
 private const val LEGEND_WIDTH_SHARE = 0.47945205f
+private const val MIN_SEGMENT_HEIGHT_TO_WIDTH_RATIO = 0.05f
 private const val STATISTICS_OPTION_COUNT = 4
+private val CYLINDER_HEIGHT = 539.dp
 
 private data class CylinderGeometry(
     val left: Float,
@@ -729,6 +726,13 @@ private fun calculateCylinderGeometry(
     )
     val bottom = (size.height - bottomInset).coerceAtLeast(top + items.size)
     val availableHeight = (bottom - top).coerceAtLeast(items.size.toFloat())
+    val minimumSegmentHeight = min(
+        width * MIN_SEGMENT_HEIGHT_TO_WIDTH_RATIO,
+        availableHeight / items.size,
+    )
+    val proportionalHeight = (
+        availableHeight - minimumSegmentHeight * items.size
+    ).coerceAtLeast(0f)
     val summedWeight = items.sumOf { it.weight.coerceAtLeast(0L) }
     val hasWeight = summedWeight > 0L
     val totalWeight = summedWeight
@@ -744,7 +748,8 @@ private fun calculateCylinderGeometry(
         val height = if (index == items.lastIndex) {
             bottom - currentTop
         } else {
-            availableHeight * (weight.toFloat() / totalWeight.toFloat())
+            minimumSegmentHeight +
+                proportionalHeight * (weight.toFloat() / totalWeight.toFloat())
         }
         CylinderSegment(
             index = index,
