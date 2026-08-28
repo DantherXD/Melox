@@ -57,9 +57,35 @@ internal class AudioPropertiesReader(
         }
     } catch (exception: Exception) {
         Log.w(TAG, "Unable to read audio properties for $contentUri", exception)
-        null
+        readPlatformProperties(contentUri)
     } catch (error: LinkageError) {
         Log.e(TAG, "TagLib is unavailable for $contentUri", error)
+        readPlatformProperties(contentUri)
+    }
+
+    private fun readPlatformProperties(contentUri: String): LocalAudioProperties? = try {
+        val retriever = MediaMetadataRetriever()
+        try {
+            contentResolver.openFileDescriptor(contentUri.toUri(), "r")?.use { descriptor ->
+                retriever.setDataSource(descriptor.fileDescriptor)
+                LocalAudioProperties(
+                    durationMs = retriever
+                        .extractMetadata(MediaMetadataRetriever.METADATA_KEY_DURATION)
+                        ?.toLongOrNull()
+                        ?.takeIf { it > 0L },
+                    bitrateBitsPerSecond = retriever
+                        .extractMetadata(MediaMetadataRetriever.METADATA_KEY_BITRATE)
+                        ?.toIntOrNull()
+                        ?.takeIf { it > 0 },
+                    sampleRateHz = null,
+                    channelCount = null,
+                )
+            }
+        } finally {
+            retriever.release()
+        }
+    } catch (exception: Exception) {
+        Log.w(TAG, "Unable to read platform audio properties for $contentUri", exception)
         null
     }
 

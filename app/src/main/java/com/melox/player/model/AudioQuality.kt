@@ -36,7 +36,7 @@ internal fun MusicTrack.resolveAudioQuality(): AudioQuality? {
 private const val RAW_BIT_DEPTH = 32
 private const val RAW_SAMPLE_RATE_HZ = 192_000
 private const val HIGH_RESOLUTION_BIT_DEPTH = 24
-private const val HIGH_RESOLUTION_SAMPLE_RATE_HZ = 48_000
+private const val HIGH_RESOLUTION_SAMPLE_RATE_HZ = 44_100
 private const val HIGH_QUALITY_BITRATE_BITS_PER_SECOND = 320_000
 
 private val LOSSLESS_MIME_TYPES = setOf(

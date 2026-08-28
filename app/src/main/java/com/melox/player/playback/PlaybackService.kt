@@ -1,4 +1,4 @@
-package com.melox.player.playback
+ package com.melox.player.playback
 
 import android.app.PendingIntent
 import android.content.Intent
@@ -9,9 +9,11 @@ import androidx.media3.common.Player
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.exoplayer.DefaultRenderersFactory
 import androidx.media3.exoplayer.ExoPlayer
+import androidx.media3.session.DefaultMediaNotificationProvider
 import androidx.media3.session.MediaSession
 import androidx.media3.session.MediaSessionService
 import com.melox.player.MainActivity
+import com.melox.player.R
 import com.melox.player.data.playback.PlaybackSnapshotStore
 import com.melox.player.data.playback.MiniPlaybackSnapshotStore
 import com.melox.player.model.PlaybackMode
@@ -47,6 +49,10 @@ class PlaybackService : MediaSessionService() {
 
     override fun onCreate() {
         super.onCreate()
+        val notificationProvider = DefaultMediaNotificationProvider.Builder(this)
+            .build()
+            .apply { setSmallIcon(R.drawable.ic_notification_melox) }
+        setMediaNotificationProvider(notificationProvider)
         snapshotStore = PlaybackSnapshotStore(this)
         miniSnapshotStore = MiniPlaybackSnapshotStore(this)
         val startupSnapshot = miniSnapshotStore.load()
@@ -55,7 +61,7 @@ class PlaybackService : MediaSessionService() {
         val renderersFactory = DefaultRenderersFactory(this)
             .setEnableAudioFloatOutput(true)
             .setEnableDecoderFallback(true)
-            .setExtensionRendererMode(DefaultRenderersFactory.EXTENSION_RENDERER_MODE_ON)
+            .setExtensionRendererMode(DefaultRenderersFactory.EXTENSION_RENDERER_MODE_PREFER)
         val player = ExoPlayer.Builder(this, renderersFactory)
             .setAudioAttributes(
                 AudioAttributes.Builder()
