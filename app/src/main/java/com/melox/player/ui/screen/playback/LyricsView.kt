@@ -2,7 +2,6 @@
 // Rendering and placement behavior adapted from accompanist-lyrics-ui.
 package com.melox.player.ui.screen.playback
 
-import androidx.compose.animation.core.CubicBezierEasing
 import androidx.compose.animation.core.EaseInOut
 import androidx.compose.animation.core.LinearOutSlowInEasing
 import androidx.compose.animation.core.Animatable
@@ -18,10 +17,7 @@ import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.PaddingValues
-import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
@@ -57,7 +53,6 @@ import androidx.compose.ui.graphics.TileMode
 import androidx.compose.ui.graphics.TransformOrigin
 import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.graphics.drawscope.drawIntoCanvas
-import androidx.compose.ui.graphics.drawscope.withTransform
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.PointerEventPass
 import androidx.compose.ui.input.pointer.changedToUpIgnoreConsumed
@@ -80,8 +75,6 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.melox.player.model.LyricLine
-import com.melox.player.model.LyricTransition
-import com.melox.player.model.LyricsRenderItem
 import com.melox.player.model.LyricsDocument
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
@@ -162,9 +155,6 @@ internal fun lyricClockStartPosition(
     else -> publishedPositionMs.coerceAtLeast(0L)
 }
 
-internal fun lyricTransitionVerticalPaddingDp(afterLineIndex: Int): Float =
-    if (afterLineIndex >= 0) 10f else 5f
-
 internal fun lyricSeekUsesAnimatedCentering(
     hasPositionedInitialFocus: Boolean,
     centerOffsetUnchanged: Boolean,
@@ -205,39 +195,6 @@ internal fun lyricProgrammaticTranslationStart(
     targetRenderIndex > previousRenderIndex -> offscreenTravelPx
     targetRenderIndex < previousRenderIndex -> -offscreenTravelPx
     else -> 0f
-}
-
-internal data class LyricsRenderIndexMap(
-    val lineRenderIndices: IntArray,
-    val transitionRenderIndices: IntArray,
-)
-
-internal fun buildLyricsRenderIndexMap(
-    renderItems: List<LyricsRenderItem>,
-    lineCount: Int,
-    transitionCount: Int,
-): LyricsRenderIndexMap {
-    val lineRenderIndices = IntArray(lineCount) { -1 }
-    val transitionRenderIndices = IntArray(transitionCount) { -1 }
-    renderItems.forEachIndexed { renderIndex, item ->
-        when (item) {
-            is LyricsRenderItem.Line -> {
-                if (item.lineIndex in lineRenderIndices.indices) {
-                    lineRenderIndices[item.lineIndex] = renderIndex
-                }
-            }
-
-            is LyricsRenderItem.Transition -> {
-                if (item.transitionIndex in transitionRenderIndices.indices) {
-                    transitionRenderIndices[item.transitionIndex] = renderIndex
-                }
-            }
-        }
-    }
-    return LyricsRenderIndexMap(
-        lineRenderIndices = lineRenderIndices,
-        transitionRenderIndices = transitionRenderIndices,
-    )
 }
 
 internal fun lyricOffscreenTranslationDistance(
@@ -435,20 +392,6 @@ internal fun LyricsView(
     val viewConfiguration = LocalViewConfiguration.current
     val centerOffsetPx = with(density) { centerOffsetY.toPx() }
     val keepAliveZone = 100.dp
-    val renderItems = remember(document) { document.renderItems() }
-    val renderIndexMap = remember(
-        renderItems,
-        document.lines.size,
-        document.transitions.size,
-    ) {
-        buildLyricsRenderIndexMap(
-            renderItems = renderItems,
-            lineCount = document.lines.size,
-            transitionCount = document.transitions.size,
-        )
-    }
-    val lineRenderIndices = renderIndexMap.lineRenderIndices
-    val transitionRenderIndices = renderIndexMap.transitionRenderIndices
     val visualCurrentLineIndex by remember(document) {
         derivedStateOf { document.visualLineIndex(lyricTimeProvider()) }
     }
@@ -470,16 +413,7 @@ internal fun LyricsView(
     }
     var hasPositionedInitialFocus by remember(document) { mutableStateOf(false) }
     var lastCenterOffsetY by remember(document) { mutableStateOf(centerOffsetY) }
-    val activeTransitionIndex by remember(document) {
-        derivedStateOf { document.transitionIndex(lyricTimeProvider()) }
-    }
-    val playbackFocusRenderIndex = when {
-        activeTransitionIndex >= 0 -> transitionRenderIndices
-            .getOrNull(activeTransitionIndex)
-            ?: -1
-        else -> lineRenderIndices.getOrNull(focusLineIndex) ?: -1
-    }
-    val visualFocusRenderIndex = playbackFocusRenderIndex
+    val visualFocusRenderIndex = focusLineIndex
     val normalTextStyle = MiuixTheme.textStyles.title3.copy(
         fontSize = (LYRIC_PRIMARY_FONT_SIZE_SP * lyricFontScale).sp,
         lineHeight = (LYRIC_PRIMARY_LINE_HEIGHT_SP * lyricFontScale).sp,
@@ -579,11 +513,10 @@ internal fun LyricsView(
             centerOffsetUnchanged = lastCenterOffsetY == centerOffsetY,
             isPreviewing = isPreviewing,
         )
-        val centeringLineIndex = focusLineIndex.takeIf { activeTransitionIndex < 0 } ?: -1
-        val centeringLine = document.lines.getOrNull(centeringLineIndex)
+        val centeringLine = document.lines.getOrNull(visualFocusRenderIndex)
         val nextTimestampGapMs = centeringLine?.let { line ->
             document.lines
-                .getOrNull(centeringLineIndex + 1)
+                .getOrNull(visualFocusRenderIndex + 1)
                 ?.startTimeMs
                 ?.minus(line.startTimeMs)
         }
@@ -744,16 +677,11 @@ internal fun LyricsView(
                 ),
             ) {
                 itemsIndexed(
-                    items = renderItems,
-                    key = { index, item ->
-                        when (item) {
-                            is LyricsRenderItem.Line ->
-                                "line-${item.line.startTimeMs}-${item.line.endTimeMs}-${item.lineIndex}"
-                            is LyricsRenderItem.Transition ->
-                                "transition-${item.transition.startTimeMs}-${item.transition.endTimeMs}-${item.transitionIndex}"
-                        }
+                    items = document.lines,
+                    key = { index, line ->
+                        "line-${line.startTimeMs}-${line.endTimeMs}-$index"
                     },
-                ) { index, item ->
+                ) { index, line ->
                     val distanceFromFocus = if (visualFocusRenderIndex >= 0) {
                         kotlin.math.abs(index - visualFocusRenderIndex)
                     } else {
@@ -775,51 +703,37 @@ internal fun LyricsView(
                     Column(
                         modifier = Modifier.fillMaxWidth(),
                     ) {
-                        when (item) {
-                            is LyricsRenderItem.Line -> {
-                                val line = item.line
-                                val isFocused = item.lineIndex == visualCurrentLineIndex
-                                LyricsLineItem(
-                                    isFocused = isFocused,
-                                    centerLyrics = centerLyrics,
-                                    blurRadius = blurRadius,
-                                    onClick = {
-                                        isUserBrowsingLyrics = false
-                                        onSeek(line.startTimeMs)
-                                    },
-                                ) {
-                                    if (line.words.isNotEmpty()) {
-                                        TimedLyricLine(
-                                            line = line,
-                                            currentTimeProvider = lyricTimeProvider,
-                                            normalTextStyle = normalTextStyle,
-                                            translationTextStyle = translationTextStyle,
-                                            emphasisColor = emphasisColor,
-                                            centerLyrics = centerLyrics,
-                                            showLyricsTranslation = showLyricsTranslation,
-                                        )
-                                    } else {
-                                        SyncedLyricLine(
-                                            line = line,
-                                            isFocused = isFocused,
-                                            currentTimeProvider = lyricTimeProvider,
-                                            forceWordByWordLyrics = forceWordByWordLyrics,
-                                            normalTextStyle = normalTextStyle,
-                                            translationTextStyle = translationTextStyle,
-                                            emphasisColor = emphasisColor,
-                                            centerLyrics = centerLyrics,
-                                            showLyricsTranslation = showLyricsTranslation,
-                                        )
-                                    }
-                                }
-                            }
-                            is LyricsRenderItem.Transition -> {
-                                LyricTransitionItem(
-                                    transition = item.transition,
-                                    positionMs = lyricTimeProvider(),
-                                    lyricFontScale = lyricFontScale,
+                        val isFocused = index == visualCurrentLineIndex
+                        LyricsLineItem(
+                            isFocused = isFocused,
+                            centerLyrics = centerLyrics,
+                            blurRadius = blurRadius,
+                            onClick = {
+                                isUserBrowsingLyrics = false
+                                onSeek(line.startTimeMs)
+                            },
+                        ) {
+                            if (line.words.isNotEmpty()) {
+                                TimedLyricLine(
+                                    line = line,
+                                    currentTimeProvider = lyricTimeProvider,
+                                    normalTextStyle = normalTextStyle,
+                                    translationTextStyle = translationTextStyle,
                                     emphasisColor = emphasisColor,
                                     centerLyrics = centerLyrics,
+                                    showLyricsTranslation = showLyricsTranslation,
+                                )
+                            } else {
+                                SyncedLyricLine(
+                                    line = line,
+                                    isFocused = isFocused,
+                                    currentTimeProvider = lyricTimeProvider,
+                                    forceWordByWordLyrics = forceWordByWordLyrics,
+                                    normalTextStyle = normalTextStyle,
+                                    translationTextStyle = translationTextStyle,
+                                    emphasisColor = emphasisColor,
+                                    centerLyrics = centerLyrics,
+                                    showLyricsTranslation = showLyricsTranslation,
                                 )
                             }
                         }
@@ -885,56 +799,6 @@ private fun LyricsLineItem(
             ),
     ) {
         content()
-    }
-}
-
-@Composable
-private fun LyricTransitionItem(
-    transition: LyricTransition,
-    positionMs: Long,
-    lyricFontScale: Float,
-    emphasisColor: Color,
-    centerLyrics: Boolean,
-) {
-    val scale = lyricFontScale.coerceIn(0.7f, 1.3f)
-    val dotSize = 11.dp * scale
-    val dotSpacing = 7.dp * scale
-    val verticalPadding = lyricTransitionVerticalPaddingDp(
-        afterLineIndex = transition.afterLineIndex,
-    ).dp * scale
-    val isActive = transition.isActive(positionMs)
-    val visibilityAlpha by animateFloatAsState(
-        targetValue = if (isActive) 1f else 0f,
-        animationSpec = tween(180),
-        label = "lyricTransitionVisibility",
-    )
-    val progress = transition.progress(positionMs)
-
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .graphicsLayer { alpha = visibilityAlpha },
-        horizontalArrangement = if (centerLyrics) {
-            Arrangement.Center
-        } else {
-            Arrangement.Start
-        },
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        repeat(3) { dotIndex ->
-            val dotProgress = ((progress - dotIndex / 3f) / (1f / 3f))
-                .coerceIn(0f, 1f)
-            Canvas(
-                modifier = Modifier
-                    .padding(vertical = verticalPadding)
-                    .size(dotSize),
-            ) {
-                drawCircle(
-                    color = emphasisColor.copy(alpha = 0.2f + 0.8f * dotProgress),
-                )
-            }
-            if (dotIndex < 2) Spacer(Modifier.size(width = dotSpacing, height = 1.dp))
-        }
     }
 }
 
@@ -1261,9 +1125,7 @@ private data class WordAnimationInfo(
     val startTimeMs: Long,
     val endTimeMs: Long,
     val content: String,
-) {
-    val durationMs: Long = endTimeMs - startTimeMs
-}
+)
 
 private data class SyllableLayout(
     val syllable: Syllable,
@@ -1272,7 +1134,6 @@ private data class SyllableLayout(
     val useWordAnimation: Boolean,
     val width: Float = textLayoutResult.size.width.toFloat(),
     val position: Offset = Offset.Zero,
-    val wordPivot: Offset = Offset.Zero,
     val wordAnimationInfo: WordAnimationInfo? = null,
     val characterOffsetInWord: Int = 0,
     val characterLayouts: List<TextLayoutResult>? = null,
@@ -1605,14 +1466,7 @@ private fun calculateStaticLineLayout(
 
     return positionedLines.map { line ->
         line.map { positionedLayout ->
-            val wordLayouts = layoutsByWord.getValue(positionedLayout.wordId)
-            val minX = wordLayouts.minOf { it.position.x }
-            val maxX = wordLayouts.maxOf { it.position.x + it.width }
-            val bottomY = wordLayouts.maxOf {
-                it.position.y + it.textLayoutResult.size.height
-            }
             positionedLayout.copy(
-                wordPivot = Offset((minX + maxX) / 2f, bottomY),
                 wordAnimationInfo = animationInfoByWord[positionedLayout.wordId],
                 characterOffsetInWord = characterOffsets[positionedLayout] ?: 0,
             )
@@ -1731,7 +1585,7 @@ private fun DrawScope.drawRowText(
     color: Color,
     positionMs: Long,
 ) {
-    layouts.forEachIndexed { index, layout ->
+    layouts.forEach { layout ->
         val wordAnimationInfo = layout.wordAnimationInfo
         if (wordAnimationInfo != null) {
             val characterLayouts = layout.characterLayouts.orEmpty()
@@ -1750,65 +1604,35 @@ private fun DrawScope.drawRowText(
                     characterIndex = absoluteCharacterIndex,
                     characterCount = characterCount,
                 )
-                val motion = wordMotion(
-                    progress = progress,
-                    durationMs = wordAnimationInfo.durationMs,
-                    characterCount = characterCount,
-                )
+                val motion = wordMotion(progress)
                 val centeredOffsetX =
                     (characterBox.width - characterLayout.size.width) / 2f
                 val position = Offset(
                     x = layout.position.x + characterBox.left + centeredOffsetX,
-                    y = layout.position.y + characterBox.top + motion.offsetYPx,
+                    y = layout.position.y + characterBox.top,
                 )
-                withTransform({
-                    scale(
-                        scaleX = motion.scale,
-                        scaleY = motion.scale,
-                        pivot = layout.wordPivot,
-                    )
-                }) {
-                    drawText(
-                        textLayoutResult = characterLayout,
-                        color = color,
-                        topLeft = position,
-                        shadow = Shadow(
-                            color = color.copy(alpha = 0.4f),
-                            offset = Offset.Zero,
-                            blurRadius = motion.glowRadius,
-                        ),
-                    )
-                }
+                drawText(
+                    textLayoutResult = characterLayout,
+                    color = color,
+                    topLeft = position,
+                    shadow = Shadow(
+                        color = color.copy(alpha = 0.4f),
+                        offset = Offset.Zero,
+                        blurRadius = motion.glowRadius,
+                    ),
+                )
             }
         } else {
-            val driverLayout = if (layout.syllable.content.trim().all {
-                    it.isPunctuation()
-                }
-            ) {
-                layouts.subList(0, index).lastOrNull { candidate ->
-                    candidate.syllable.content.trim().any { character ->
-                        !character.isPunctuation()
-                    }
-                } ?: layout
-            } else {
-                layout
-            }
-            val floatOffset = simpleFloatOffset(
-                positionMs = positionMs,
-                startTimeMs = driverLayout.syllable.startTimeMs,
-            )
             drawText(
                 textLayoutResult = layout.textLayoutResult,
                 color = color,
-                topLeft = layout.position.copy(y = layout.position.y + floatOffset),
+                topLeft = layout.position,
             )
         }
     }
 }
 
 internal data class WordMotion(
-    val scale: Float,
-    val offsetYPx: Float,
     val glowRadius: Float,
 )
 
@@ -1861,34 +1685,11 @@ internal fun characterMotion(
         characterIndex = characterIndex,
         characterCount = characterCount,
     ),
-    durationMs = wordEndTimeMs - wordStartTimeMs,
-    characterCount = characterCount,
 )
 
-internal fun wordMotion(
-    progress: Float,
-    durationMs: Long,
-    characterCount: Int,
-): WordMotion {
-    val animationIntensity = (
-        (durationMs.coerceAtLeast(0L) - 200f * characterCount.coerceAtLeast(1)) / 1000f
-        )
-    val dip = (0.5f * animationIntensity).coerceIn(0f, 0.5f)
-    val swell = (0.1f * animationIntensity).coerceIn(0f, 0.1f)
+internal fun wordMotion(progress: Float): WordMotion {
     val boundedProgress = progress.coerceIn(0f, 1f)
     return WordMotion(
-        scale = 1f + threePointInterpolation(
-            fraction = boundedProgress,
-            middleX = 0.5f,
-            middleY = swell,
-            endY = 0f,
-        ),
-        offsetYPx = 4f * threePointInterpolation(
-            fraction = 1f - boundedProgress,
-            middleX = 0.5f,
-            middleY = -dip,
-            endY = 1f,
-        ),
         glowRadius = 10f * threePointInterpolation(
             fraction = boundedProgress,
             middleX = 0.7f,
@@ -1896,14 +1697,6 @@ internal fun wordMotion(
             endY = 0f,
         ).coerceAtLeast(0f),
     )
-}
-
-internal fun simpleFloatOffset(
-    positionMs: Long,
-    startTimeMs: Long,
-): Float {
-    val progress = ((positionMs - startTimeMs) / 700f).coerceIn(0f, 1f)
-    return 4f * SimpleFloatEasing.transform(1f - progress)
 }
 
 private fun threePointInterpolation(
@@ -1917,5 +1710,3 @@ private fun threePointInterpolation(
     val endTerm = endY * x * (x - middleX) / (1f - middleX)
     return middleTerm + endTerm
 }
-
-private val SimpleFloatEasing = CubicBezierEasing(0f, 0f, 0.2f, 1f)

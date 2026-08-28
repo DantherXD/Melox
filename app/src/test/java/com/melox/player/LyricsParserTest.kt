@@ -2,7 +2,6 @@ package com.melox.player
 
 import com.melox.player.data.lyrics.LyricsParser
 import com.melox.player.model.LyricsFormat
-import com.melox.player.model.LyricsRenderItem
 import com.melox.player.model.LyricsSource
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -141,7 +140,7 @@ class LyricsParserTest {
     }
 
     @Test
-    fun longTimedGapPrecomputesStableThreeDotTransition() {
+    fun longTimedGapKeepsTheCompletedLineFocusedUntilTheNextLine() {
         val document = LyricsParser.parse(
             raw = """
                 [00:01.00]<00:01.00>First
@@ -150,36 +149,10 @@ class LyricsParserTest {
             source = LyricsSource.SIDECAR,
         )!!
 
-        assertEquals(1, document.transitions.size)
-        val transition = document.transitions.single()
-        assertEquals(0, transition.afterLineIndex)
-        assertEquals(1_500L, transition.startTimeMs)
-        assertEquals(6_500L, transition.endTimeMs)
-        assertTrue(transition.isActive(4_000L))
         assertEquals(-1, document.currentLineIndex(4_000L))
         assertEquals(1, document.focusLineIndex(4_000L))
-        assertEquals(-1, document.visualLineIndex(4_000L))
-        assertEquals(1, document.visualFocusLineIndex(4_000L))
-        assertEquals(0, document.transitionIndex(4_000L))
-
-        val renderItems = document.renderItems()
-        assertEquals(3, renderItems.size)
-        assertTrue(renderItems[0] is LyricsRenderItem.Line)
-        assertTrue(renderItems[1] is LyricsRenderItem.Transition)
-        assertTrue(renderItems[2] is LyricsRenderItem.Line)
-    }
-
-    @Test
-    fun gapShorterThanFiveSecondsDoesNotCreateTransition() {
-        val document = LyricsParser.parse(
-            raw = """
-                [00:01.00]<00:01.00>First
-                [00:06.49]Second
-            """.trimIndent(),
-            source = LyricsSource.SIDECAR,
-        )!!
-
-        assertTrue(document.transitions.isEmpty())
+        assertEquals(0, document.visualLineIndex(4_000L))
+        assertEquals(0, document.visualFocusLineIndex(4_000L))
     }
 
     @Test

@@ -6,7 +6,6 @@ import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
-import com.materialkolor.hct.Hct
 import com.melox.player.data.library.AlbumGridStyle
 import com.melox.player.data.library.AlbumSortConfig
 import com.melox.player.data.library.AlbumSortField
@@ -48,6 +47,7 @@ import com.melox.player.model.AudioQuality
 import com.melox.player.model.BottomBarStyle
 import com.melox.player.model.DynamicColorSource
 import com.melox.player.model.MusicTrack
+import com.melox.player.model.NavigationTransitionStyle
 import com.melox.player.model.PlaybackMode
 import com.melox.player.model.PlaybackBackgroundStyle
 import com.melox.player.model.PlaybackQueueItem
@@ -55,9 +55,6 @@ import com.melox.player.model.PlaybackSnapshot
 import com.melox.player.model.PlaybackUiState
 import com.melox.player.model.ScanStatus
 import com.melox.player.model.ThemeMode
-import com.melox.player.model.LyricLine
-import com.melox.player.model.LyricTransition
-import com.melox.player.model.LyricsRenderItem
 import com.melox.player.model.resolveAudioQuality
 import com.melox.player.model.withTrackMetadata
 import com.melox.player.playback.isValidQueueIndex
@@ -84,8 +81,11 @@ import com.melox.player.ui.component.library.playbackArtworkCornerRadius
 import com.melox.player.ui.component.library.snapshotArtworkDiskCacheEntries
 import com.melox.player.ui.component.playback.hasDifferentMetadataSwipeTarget
 import com.melox.player.ui.component.playback.KenBurnsFrame
+import com.melox.player.ui.component.playback.DYNAMIC_FLOW_ARTWORK_SATURATION
+import com.melox.player.ui.component.playback.DYNAMIC_FLOW_BACKGROUND_DARKEN_AMOUNT
+import com.melox.player.ui.component.playback.advanceDynamicFlowClockMillis
 import com.melox.player.ui.component.playback.createRenderScriptBlurBoxSizes
-import com.melox.player.ui.component.playback.interpolateArtworkBackgroundField
+import com.melox.player.ui.component.playback.dynamicFlowDownsampleFactor
 import com.melox.player.ui.component.playback.interpolateKenBurnsFrame
 import com.melox.player.ui.component.playback.miniMetadataSwipeThresholdDirection
 import com.melox.player.ui.component.playback.shouldTriggerMiniMetadataSwipeThresholdHaptic
@@ -96,14 +96,10 @@ import com.melox.player.ui.component.playback.playerSheetDragProgress
 import com.melox.player.ui.component.playback.playerSheetDragTarget
 import com.melox.player.ui.component.playback.playerSheetGlassVisible
 import com.melox.player.ui.component.playback.playerSheetMiniPlayerAcceptsInput
+import com.melox.player.ui.component.playback.scaledDynamicFlowTimeMs
 import com.melox.player.ui.component.playback.playerSheetPageAlpha
-import com.melox.player.ui.component.playback.artworkBackgroundUsesLightStatusBarIcons
 import com.melox.player.ui.component.playback.playerSheetUsesFullPlayerStatusBar
 import com.melox.player.ui.component.playback.playerWindowUsesPhysicalScreenCorners
-import com.melox.player.ui.component.playback.resolveArtworkColorFieldPixel
-import com.melox.player.ui.component.playback.resolveArtworkBackgroundColorRotation
-import com.melox.player.ui.component.playback.resolveArtworkOrbitColors
-import com.melox.player.ui.component.playback.resolveArtworkOrbitProgress
 import com.melox.player.ui.component.playback.fittedArtworkRect
 import com.melox.player.ui.component.playback.artworkInsetRect
 import com.melox.player.ui.component.playback.sharedArtworkRect
@@ -114,6 +110,7 @@ import com.melox.player.ui.component.playback.sharedContainerRect
 import com.melox.player.ui.component.playback.sharedContainerRenderRect
 import com.melox.player.ui.component.playback.PlayerSheetTransitionState
 import com.melox.player.ui.navigation.predictiveBackHandlerEnabled
+import com.melox.player.ui.navigation.ordinaryBackHandlerEnabled
 import com.melox.player.ui.requiredAudioPermission
 import com.melox.player.ui.resolveBottomBarStyle
 import com.melox.player.ui.rootPagerUserScrollEnabled
@@ -132,9 +129,7 @@ import com.melox.player.ui.screen.playback.LYRIC_TRANSLATION_LINE_HEIGHT_SP
 import com.melox.player.ui.screen.playback.LYRICS_MANUAL_FOLLOW_RESUME_DELAY_MS
 import com.melox.player.ui.screen.playback.characterMotion
 import com.melox.player.ui.screen.playback.characterProgress
-import com.melox.player.ui.screen.playback.buildLyricsRenderIndexMap
 import com.melox.player.ui.screen.playback.shouldUseWordAnimation
-import com.melox.player.ui.screen.playback.simpleFloatOffset
 import com.melox.player.ui.screen.playback.wordMotion
 import com.melox.player.ui.screen.playback.forcedLyricRowProgress
 import com.melox.player.ui.screen.playback.lyricBlurRadiusTarget
@@ -152,12 +147,12 @@ import com.melox.player.ui.screen.playback.lyricScrollIsManual
 import com.melox.player.ui.screen.playback.lyricSeekUsesAnimatedCentering
 import com.melox.player.ui.screen.playback.lyricSeekPositionIsApplied
 import com.melox.player.ui.screen.playback.lyricTargetScrollOffset
-import com.melox.player.ui.screen.playback.lyricTransitionVerticalPaddingDp
 import com.melox.player.ui.screen.playback.lyricVerticalDragExceedsTouchSlop
 import com.melox.player.ui.screen.playback.progressGestureIsDrag
 import com.melox.player.ui.screen.playback.playerHeaderArtistText
 import com.melox.player.ui.screen.playback.queueListHeight
 import com.melox.player.ui.screen.playback.shouldAcceptPublishedLyricPosition
+import com.melox.player.ui.screen.playback.sliderValueAtPosition
 import com.melox.player.ui.theme.toColorSchemeMode
 import com.melox.player.ui.theme.resolveDynamicColorSeed
 import java.io.ByteArrayInputStream
@@ -178,140 +173,100 @@ import org.junit.Assert.assertThrows
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import top.yukonga.miuix.kmp.theme.ColorSchemeMode
-import kotlin.math.abs
 import kotlin.random.Random
 
 class UiLogicTest {
     @Test
-    fun artworkColorFieldCapsChromaAndUsesThemeTone() {
-        val sourceColor = 0xFFFF1744.toInt()
-        val source = Hct.fromInt(sourceColor)
-        val light = Hct.fromInt(resolveArtworkColorFieldPixel(sourceColor, isDark = false))
-        val dark = Hct.fromInt(resolveArtworkColorFieldPixel(sourceColor, isDark = true))
-        val lightHueDelta = abs(source.hue - light.hue).let { minOf(it, 360.0 - it) }
-        val darkHueDelta = abs(source.hue - dark.hue).let { minOf(it, 360.0 - it) }
-
-        assertTrue(light.chroma <= 32.01)
-        assertTrue(dark.chroma <= 32.01)
-        // HCT may shift the realized hue slightly when the requested tone and
-        // chroma sit near the target gamut boundary.
-        assertTrue(lightHueDelta <= 5.0)
-        assertTrue(darkHueDelta <= 5.0)
-        assertEquals(64.0, light.tone, 0.5)
-        assertEquals(32.0, dark.tone, 0.5)
-    }
-
-    @Test
-    fun artworkOrbitStartsFromTheCenterFourByFour() {
-        val fieldPixels = IntArray(8 * 8) { index -> 0xFF000000.toInt() or index }
-        val outputPixels = IntArray(4 * 4)
-
-        resolveArtworkOrbitColors(fieldPixels, cycleProgress = 0f, outputPixels)
-
-        for (outputY in 0 until 4) {
-            for (outputX in 0 until 4) {
-                val sourceIndex = (outputY + 2) * 8 + outputX + 2
-                assertEquals(fieldPixels[sourceIndex], outputPixels[outputY * 4 + outputX])
-            }
-        }
-    }
-
-    @Test
-    fun artworkOrbitMovesSidewaysBeforeTheOuterCorners() {
-        val fieldPixels = IntArray(8 * 8) { index -> 0xFF000000.toInt() or index }
-        val outputPixels = IntArray(4 * 4)
-
-        resolveArtworkOrbitColors(
-            fieldPixels,
-            cycleProgress = 6_000f / 42_000f,
-            outputPixels,
-        )
-        assertEquals(fieldPixels[2 * 8], outputPixels[0])
-        assertEquals(fieldPixels[5 * 8 + 7], outputPixels[3 * 4 + 3])
-
-        resolveArtworkOrbitColors(
-            fieldPixels,
-            cycleProgress = 4_500f / 42_000f,
-            outputPixels,
-        )
-        assertEquals(fieldPixels[2 * 8 + 7], outputPixels[3])
-        assertEquals(fieldPixels[5 * 8], outputPixels[3 * 4])
-    }
-
-    @Test
-    fun artworkOrbitAlternatesTwentyFourAndEighteenSecondLaps() {
-        assertEquals(0.25f, resolveArtworkOrbitProgress(6_000f, 24_000f, 18_000f), 0f)
-        assertEquals(1f, resolveArtworkOrbitProgress(24_000f, 24_000f, 18_000f), 0f)
-        assertEquals(1.25f, resolveArtworkOrbitProgress(28_500f, 24_000f, 18_000f), 0f)
-        assertEquals(0.25f, resolveArtworkOrbitProgress(4_500f, 18_000f, 24_000f), 0f)
-        assertEquals(1f, resolveArtworkOrbitProgress(18_000f, 18_000f, 24_000f), 0f)
-        assertEquals(2f, resolveArtworkOrbitProgress(42_000f, 18_000f, 24_000f), 0f)
-    }
-
-    @Test
-    fun artworkBackgroundRotatesTheWholeGridWithoutBreakingAdjacency() {
-        val sourcePixels = IntArray(4 * 4) { index -> 0xFF000000.toInt() or index }
-        val outputPixels = IntArray(4 * 4)
-
-        resolveArtworkBackgroundColorRotation(sourcePixels, 0f, outputPixels)
-        assertTrue(sourcePixels.contentEquals(outputPixels))
-
-        resolveArtworkBackgroundColorRotation(sourcePixels, 0.25f, outputPixels)
-        assertArrayEquals(
-            intArrayOf(12, 8, 4, 0, 13, 9, 5, 1, 14, 10, 6, 2, 15, 11, 7, 3)
-                .map { 0xFF000000.toInt() or it }
-                .toIntArray(),
-            outputPixels,
-        )
-
-        resolveArtworkBackgroundColorRotation(sourcePixels, 0.5f, outputPixels)
-        assertArrayEquals(sourcePixels.reversedArray(), outputPixels)
-
-        resolveArtworkBackgroundColorRotation(sourcePixels, 0.75f, outputPixels)
-        assertArrayEquals(
-            intArrayOf(3, 7, 11, 15, 2, 6, 10, 14, 1, 5, 9, 13, 0, 4, 8, 12)
-                .map { 0xFF000000.toInt() or it }
-                .toIntArray(),
-            outputPixels,
-        )
-
-        resolveArtworkBackgroundColorRotation(sourcePixels, 1f, outputPixels)
-        assertTrue(sourcePixels.contentEquals(outputPixels))
-    }
-
-    @Test
-    fun artworkBackgroundInterpolatesBetweenWholeGridRotations() {
-        val sourcePixels = IntArray(4 * 4) { index -> 0xFF000000.toInt() or index }
-        val outputPixels = IntArray(4 * 4)
-
-        resolveArtworkBackgroundColorRotation(sourcePixels, 0.125f, outputPixels)
-
-        assertEquals(0xFF000006.toInt(), outputPixels[0])
-        assertEquals(0xFF000009.toInt(), outputPixels[15])
-    }
-
-    @Test
-    fun artworkBackgroundColorTransitionInterpolatesAtTheFieldLevel() {
-        val startPixels = IntArray(8 * 8) { 0xFF000000.toInt() }
-        val endPixels = IntArray(8 * 8) { 0xFFFFFFFF.toInt() }
-
-        val midpoint = requireNotNull(
-            interpolateArtworkBackgroundField(
-                startFieldPixels = startPixels,
-                endFieldPixels = endPixels,
-                fraction = 0.5f,
+    fun sliderTapUsesTrackBoundsStepsKeyPointsAndLayoutDirection() {
+        assertEquals(
+            0.85f,
+            sliderValueAtPosition(
+                positionX = 82.5f,
+                width = 300,
+                height = 30,
+                valueRange = 0.7f..1.3f,
+                steps = 0,
+                keyPoints = listOf(0.7f, 1f, 1.3f),
+                magnetThreshold = 0.02f,
+                reverseDirection = false,
             ),
+            0.0001f,
+        )
+        assertEquals(
+            1f,
+            sliderValueAtPosition(
+                positionX = 150f,
+                width = 300,
+                height = 30,
+                valueRange = 0.7f..1.3f,
+                steps = 0,
+                keyPoints = listOf(0.7f, 1f, 1.3f),
+                magnetThreshold = 0.02f,
+                reverseDirection = false,
+            ),
+            0f,
+        )
+        assertEquals(
+            700f,
+            sliderValueAtPosition(
+                positionX = 215f,
+                width = 300,
+                height = 30,
+                valueRange = 100f..900f,
+                steps = 7,
+                keyPoints = null,
+                magnetThreshold = 0.02f,
+                reverseDirection = false,
+            ),
+            0f,
+        )
+        assertEquals(
+            0.75f,
+            sliderValueAtPosition(
+                positionX = 82.5f,
+                width = 300,
+                height = 30,
+                valueRange = 0f..1f,
+                steps = 0,
+                keyPoints = null,
+                magnetThreshold = 0.02f,
+                reverseDirection = true,
+            ),
+            0.0001f,
+        )
+    }
+
+    @Test
+    fun dynamicFlowUsesConfiguredVisualValuesAndHalcyonDownsampling() {
+        assertEquals(2f, DYNAMIC_FLOW_ARTWORK_SATURATION, 0f)
+        assertEquals(0.25f, DYNAMIC_FLOW_BACKGROUND_DARKEN_AMOUNT, 0f)
+        assertEquals(16f, dynamicFlowDownsampleFactor(419), 0f)
+        assertEquals(24f, dynamicFlowDownsampleFactor(420), 0f)
+        assertEquals(10_000L, scaledDynamicFlowTimeMs(10_000L, 10))
+    }
+
+    @Test
+    fun dynamicFlowClockStartsAndResumesWithoutJumpingToAbsoluteFrameTime() {
+        val absoluteFrameNanos = 987_654_321_000_000L
+        val initial = advanceDynamicFlowClockMillis(
+            elapsedMillis = 0L,
+            previousFrameNanos = null,
+            frameNanos = absoluteFrameNanos,
+        )
+        val advanced = advanceDynamicFlowClockMillis(
+            elapsedMillis = initial,
+            previousFrameNanos = absoluteFrameNanos,
+            frameNanos = absoluteFrameNanos + 42_000_000L,
+        )
+        val resumed = advanceDynamicFlowClockMillis(
+            elapsedMillis = advanced,
+            previousFrameNanos = null,
+            frameNanos = absoluteFrameNanos + 5_000_000_000L,
         )
 
-        assertTrue(midpoint.all { it == 0xFF808080.toInt() })
-        assertTrue(
-            requireNotNull(interpolateArtworkBackgroundField(startPixels, endPixels, 0f))
-                .contentEquals(startPixels),
-        )
-        assertTrue(
-            requireNotNull(interpolateArtworkBackgroundField(startPixels, endPixels, 1f))
-                .contentEquals(endPixels),
-        )
+        assertEquals(0L, initial)
+        assertEquals(42L, advanced)
+        assertEquals(42L, resumed)
     }
 
     @Test
@@ -371,9 +326,15 @@ class UiLogicTest {
         )
         assertEquals(400, settings.lyricFontWeight)
         assertFalse(settings.centerLyrics)
+        assertFalse(settings.leftAlignPlayerTitle)
         assertTrue(settings.showLyricsTranslation)
         assertEquals(true, settings.blurEnabled)
+        assertFalse(settings.progressiveTopBarBlurEnabled)
+        assertFalse(settings.hideBottomBar)
         assertEquals(true, settings.predictiveBackEnabled)
+        assertEquals(NavigationTransitionStyle.MIUIX, settings.navigationTransitionStyle)
+        assertFalse(settings.refreshLibraryOnStart)
+        assertFalse(settings.skipShortAudio)
         assertEquals(BottomBarStyle.NORMAL, settings.bottomBarStyle)
     }
 
@@ -524,13 +485,6 @@ class UiLogicTest {
     @Test
     fun unrevealedWordByWordTextMatchesInactiveLyricStrength() {
         assertEquals(0.4f, LYRIC_INACTIVE_TEXT_ALPHA, 0f)
-    }
-
-    @Test
-    fun middleLyricCountdownUsesNormalLineSpacing() {
-        assertEquals(5f, lyricTransitionVerticalPaddingDp(-1), 0f)
-        assertEquals(10f, lyricTransitionVerticalPaddingDp(0), 0f)
-        assertEquals(10f, lyricTransitionVerticalPaddingDp(8), 0f)
     }
 
     @Test
@@ -737,35 +691,6 @@ class UiLogicTest {
     }
 
     @Test
-    fun lyricRenderIndicesAreBuiltInOnePass() {
-        val line = LyricLine(
-            agent = "default",
-            startTimeMs = 0L,
-            endTimeMs = 1_000L,
-            text = "line",
-            words = emptyList(),
-            translation = null,
-        )
-        val transition = LyricTransition(
-            afterLineIndex = 0,
-            startTimeMs = 1_000L,
-            endTimeMs = 6_000L,
-        )
-        val map = buildLyricsRenderIndexMap(
-            renderItems = listOf(
-                LyricsRenderItem.Line(lineIndex = 0, line = line),
-                LyricsRenderItem.Transition(transitionIndex = 0, transition = transition),
-                LyricsRenderItem.Line(lineIndex = 1, line = line.copy(startTimeMs = 6_000L)),
-            ),
-            lineCount = 2,
-            transitionCount = 1,
-        )
-
-        assertArrayEquals(intArrayOf(0, 2), map.lineRenderIndices)
-        assertArrayEquals(intArrayOf(1), map.transitionRenderIndices)
-    }
-
-    @Test
     fun offscreenAndRepeatedLyricTargetsRetargetTheVisualAnimation() {
         assertEquals(
             96f,
@@ -936,31 +861,19 @@ class UiLogicTest {
     }
 
     @Test
-    fun wordMotionReturnsToRestAtBothEndpoints() {
+    fun wordMotionOnlyProvidesGlow() {
         val start = wordMotion(
             progress = 0f,
-            durationMs = 2_000L,
-            characterCount = 4,
         )
         val middle = wordMotion(
             progress = 0.5f,
-            durationMs = 2_000L,
-            characterCount = 4,
         )
         val end = wordMotion(
             progress = 1f,
-            durationMs = 2_000L,
-            characterCount = 4,
         )
 
-        assertEquals(1f, start.scale, 0f)
-        assertEquals(4f, start.offsetYPx, 0f)
         assertEquals(0f, start.glowRadius, 0f)
-        assertTrue(middle.scale > 1f)
-        assertTrue(middle.offsetYPx < 0f)
         assertTrue(middle.glowRadius > 0f)
-        assertEquals(1f, end.scale, 0.000001f)
-        assertEquals(0f, end.offsetYPx, 0.000001f)
         assertEquals(0f, end.glowRadius, 0.000001f)
     }
 
@@ -1006,13 +919,11 @@ class UiLogicTest {
             characterIndex = 2,
             characterCount = 3,
         )
-        assertEquals(1f, finalMotion.scale, 0.000001f)
-        assertEquals(0f, finalMotion.offsetYPx, 0.000001f)
         assertEquals(0f, finalMotion.glowRadius, 0.000001f)
     }
 
     @Test
-    fun simpleFloatIsUsedForCjkAndFastWords() {
+    fun wordAnimationEligibilityDistinguishesCjkAndFastWords() {
         assertFalse(
             shouldUseWordAnimation(
                 content = "中文",
@@ -1031,8 +942,6 @@ class UiLogicTest {
                 durationMs = 2_000L,
             ),
         )
-        assertEquals(4f, simpleFloatOffset(1_000L, 1_000L), 0f)
-        assertEquals(0f, simpleFloatOffset(1_700L, 1_000L), 0.000001f)
     }
 
     @Test
@@ -1061,6 +970,9 @@ class UiLogicTest {
         assertEquals(true, predictiveBackHandlerEnabled(true, true))
         assertFalse(predictiveBackHandlerEnabled(true, false))
         assertFalse(predictiveBackHandlerEnabled(false, true))
+        assertEquals(true, ordinaryBackHandlerEnabled(false, true))
+        assertFalse(ordinaryBackHandlerEnabled(true, true))
+        assertFalse(ordinaryBackHandlerEnabled(false, false))
     }
 
     @Test
@@ -1515,12 +1427,6 @@ class UiLogicTest {
         assertFalse(playerSheetUsesFullPlayerStatusBar(PLAYER_LAYER_HANDOFF_END_PROGRESS))
         assertTrue(playerSheetUsesFullPlayerStatusBar(PLAYER_LAYER_HANDOFF_END_PROGRESS + 0.001f))
         assertTrue(playerSheetUsesFullPlayerStatusBar(1f))
-    }
-
-    @Test
-    fun artworkBackgroundStatusBarIconsUseLuminanceContrast() {
-        assertTrue(artworkBackgroundUsesLightStatusBarIcons(IntArray(16) { 0xFF242424.toInt() }))
-        assertFalse(artworkBackgroundUsesLightStatusBarIcons(IntArray(16) { 0xFFFFFFFF.toInt() }))
     }
 
     @Test
@@ -2413,7 +2319,7 @@ class UiLogicTest {
             baseTrack.copy(
                 fileName = "quality.flac",
                 mimeType = "audio/flac",
-                sampleRateHz = 48_000,
+                sampleRateHz = 44_100,
                 bitDepth = 24,
             ).resolveAudioQuality(),
         )
@@ -2431,7 +2337,7 @@ class UiLogicTest {
             baseTrack.copy(
                 fileName = "quality.flac",
                 mimeType = "audio/flac",
-                sampleRateHz = 47_999,
+                sampleRateHz = 44_099,
                 bitDepth = 32,
             ).resolveAudioQuality(),
         )

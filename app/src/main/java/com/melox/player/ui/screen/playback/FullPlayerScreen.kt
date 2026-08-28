@@ -11,6 +11,8 @@ import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
+import androidx.compose.foundation.MarqueeSpacing
+import androidx.compose.foundation.basicMarquee
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
@@ -53,12 +55,17 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.clipToBounds
+import androidx.compose.ui.draw.drawWithContent
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.BlendMode
+import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.CompositingStrategy
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.layer.GraphicsLayer
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.layout.boundsInRoot
+import androidx.compose.ui.layout.layout
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalLayoutDirection
@@ -77,6 +84,7 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.Dp
+import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.zIndex
@@ -96,8 +104,8 @@ import com.melox.player.ui.component.library.PlaybackArtworkFrame
 import com.melox.player.ui.component.library.TrackActionsOverlay
 import com.melox.player.ui.component.library.formatDuration
 import com.melox.player.ui.component.library.rememberArtworkBitmap
-import com.melox.player.ui.component.playback.ArtworkFlowBackground
 import com.melox.player.ui.component.playback.BlurredArtworkBackground
+import com.melox.player.ui.component.playback.DynamicFlowBackground
 import com.melox.player.ui.component.playback.PLAYER_FULL_ARTWORK_CORNER_RADIUS
 import com.melox.player.ui.component.playback.PLAYER_FULL_ARTWORK_REQUEST_SIZE
 import com.melox.player.ui.component.playback.PLAYER_TRACK_ARTWORK_CROSSFADE_DURATION_MILLIS
@@ -112,11 +120,13 @@ import kotlin.math.roundToLong
 import kotlin.math.roundToInt
 import top.yukonga.miuix.kmp.basic.Card
 import top.yukonga.miuix.kmp.basic.CardDefaults
+import top.yukonga.miuix.kmp.basic.BasicComponent
 import top.yukonga.miuix.kmp.basic.Icon
 import top.yukonga.miuix.kmp.basic.IconButton
 import top.yukonga.miuix.kmp.basic.LinearProgressIndicator
 import top.yukonga.miuix.kmp.basic.ProgressIndicatorDefaults
 import top.yukonga.miuix.kmp.basic.Scaffold
+import top.yukonga.miuix.kmp.basic.Slider
 import top.yukonga.miuix.kmp.basic.Text
 import top.yukonga.miuix.kmp.icon.MiuixIcons
 import top.yukonga.miuix.kmp.icon.extended.ConvertFile
@@ -124,7 +134,6 @@ import top.yukonga.miuix.kmp.icon.extended.More
 import top.yukonga.miuix.kmp.icon.extended.Playlist
 import top.yukonga.miuix.kmp.icon.extended.Replace
 import top.yukonga.miuix.kmp.overlay.OverlayBottomSheet
-import top.yukonga.miuix.kmp.preference.SliderPreference
 import top.yukonga.miuix.kmp.preference.SwitchPreference
 import top.yukonga.miuix.kmp.theme.MiuixTheme
 
@@ -133,13 +142,13 @@ internal fun FullPlayerScreen(
     playback: PlaybackUiState,
     currentTrack: MusicTrack?,
     lyrics: LyricsUiState,
-    isDark: Boolean,
     playbackBackgroundStyle: PlaybackBackgroundStyle,
     lyricFontScale: Float,
     lyricFontWeight: Int,
     forceWordByWordLyrics: Boolean,
     lyricBlurEnabled: Boolean,
     centerLyrics: Boolean,
+    leftAlignPlayerTitle: Boolean,
     hideControlsOnLyrics: Boolean,
     showLyricsTranslation: Boolean,
     onLyricFontScaleChange: (Float) -> Unit,
@@ -147,6 +156,7 @@ internal fun FullPlayerScreen(
     onForceWordByWordLyricsChange: (Boolean) -> Unit,
     onLyricBlurEnabledChange: (Boolean) -> Unit,
     onCenterLyricsChange: (Boolean) -> Unit,
+    onLeftAlignPlayerTitleChange: (Boolean) -> Unit,
     onHideControlsOnLyricsChange: (Boolean) -> Unit,
     onShowLyricsTranslationChange: (Boolean) -> Unit,
     onDismiss: () -> Unit,
@@ -208,6 +218,9 @@ internal fun FullPlayerScreen(
     }
     var displayedLyricBlurEnabled by remember { mutableStateOf(lyricBlurEnabled) }
     var displayedCenterLyrics by remember { mutableStateOf(centerLyrics) }
+    var displayedLeftAlignPlayerTitle by remember {
+        mutableStateOf(leftAlignPlayerTitle)
+    }
     var displayedHideControlsOnLyrics by remember {
         mutableStateOf(hideControlsOnLyrics)
     }
@@ -263,6 +276,9 @@ internal fun FullPlayerScreen(
     LaunchedEffect(centerLyrics) {
         displayedCenterLyrics = centerLyrics
     }
+    LaunchedEffect(leftAlignPlayerTitle) {
+        displayedLeftAlignPlayerTitle = leftAlignPlayerTitle
+    }
     LaunchedEffect(hideControlsOnLyrics) {
         displayedHideControlsOnLyrics = hideControlsOnLyrics
     }
@@ -313,11 +329,9 @@ internal fun FullPlayerScreen(
                     modifier = Modifier.fillMaxSize(),
                 )
 
-                PlaybackBackgroundStyle.FLOWING_COLORS -> ArtworkFlowBackground(
+                PlaybackBackgroundStyle.DYNAMIC_FLOW -> DynamicFlowBackground(
                     artwork = artworkBlend.currentBitmap,
-                    isDark = isDark,
                     animate = drawInPlace && playback.isPlaying,
-                    animateColorTransition = drawInPlace,
                     onStatusBarBackgroundDarkChanged = onStatusBarBackgroundDarkChanged,
                     modifier = Modifier.fillMaxSize(),
                 )
@@ -342,6 +356,7 @@ internal fun FullPlayerScreen(
                         item = item,
                         titleColor = emphasisControlColor,
                         artistColor = artistControlColor,
+                        leftAligned = displayedLeftAlignPlayerTitle,
                         modifier = Modifier
                             .fillMaxWidth()
                             .padding(
@@ -656,8 +671,9 @@ internal fun FullPlayerScreen(
             onGoToArtist = onGoToArtist,
             onExternalEditReturned = onExternalEditReturned,
         )
-        LyricsSettingsSheet(
+        PlayerSettingsSheet(
             show = showLyricsSettings,
+            leftAlignPlayerTitle = displayedLeftAlignPlayerTitle,
             lyricFontScale = displayedLyricFontScale,
             lyricFontWeight = displayedLyricFontWeight,
             forceWordByWordLyrics = displayedForceWordByWordLyrics,
@@ -666,6 +682,10 @@ internal fun FullPlayerScreen(
             hideControlsOnLyrics = displayedHideControlsOnLyrics,
             showLyricsTranslation = displayedShowLyricsTranslation,
             onDismiss = { showLyricsSettings = false },
+            onLeftAlignPlayerTitleChange = {
+                displayedLeftAlignPlayerTitle = it
+                onLeftAlignPlayerTitleChange(it)
+            },
             onLyricFontScalePreview = { displayedLyricFontScale = it },
             onLyricFontScaleCommit = {
                 onLyricFontScaleChange(displayedLyricFontScale)
@@ -963,8 +983,9 @@ private fun SyncedLyrics(
 }
 
 @Composable
-private fun LyricsSettingsSheet(
+private fun PlayerSettingsSheet(
     show: Boolean,
+    leftAlignPlayerTitle: Boolean,
     lyricFontScale: Float,
     lyricFontWeight: Int,
     forceWordByWordLyrics: Boolean,
@@ -973,6 +994,7 @@ private fun LyricsSettingsSheet(
     hideControlsOnLyrics: Boolean,
     showLyricsTranslation: Boolean,
     onDismiss: () -> Unit,
+    onLeftAlignPlayerTitleChange: (Boolean) -> Unit,
     onLyricFontScalePreview: (Float) -> Unit,
     onLyricFontScaleCommit: () -> Unit,
     onLyricFontWeightPreview: (Int) -> Unit,
@@ -988,75 +1010,85 @@ private fun LyricsSettingsSheet(
         .calculateBottomPadding()
     OverlayBottomSheet(
         show = show,
-        title = stringResource(R.string.lyrics_settings),
+        title = stringResource(R.string.player_settings),
         enableWindowDim = true,
         onDismissRequest = onDismiss,
     ) {
-        Card(
+        Column(
             modifier = Modifier
                 .fillMaxWidth()
                 .padding(bottom = bottomPadding + 12.dp),
-            colors = CardDefaults.defaultColors(
-                color = MiuixTheme.colorScheme.secondaryContainer,
-            ),
+            verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {
-            Column(
+            Card(
                 modifier = Modifier.fillMaxWidth(),
+                colors = CardDefaults.defaultColors(
+                    color = MiuixTheme.colorScheme.secondaryContainer,
+                ),
             ) {
-                SwitchPreference(
-                    title = stringResource(R.string.lyrics_translation),
-                    checked = showLyricsTranslation,
-                    onCheckedChange = onShowLyricsTranslationChange,
-                )
-                SliderPreference(
-                    value = lyricFontScale,
-                    onValueChange = onLyricFontScalePreview,
-                    title = stringResource(R.string.lyrics_size),
-                    valueText = stringResource(
-                        R.string.lyrics_size_value,
-                        (lyricFontScale * 100f).roundToInt(),
-                    ),
-                    valueRange = MIN_LYRIC_FONT_SCALE..MAX_LYRIC_FONT_SCALE,
-                    onValueChangeFinished = onLyricFontScaleCommit,
-                    showKeyPoints = true,
-                    keyPoints = listOf(
-                        MIN_LYRIC_FONT_SCALE,
-                        DEFAULT_LYRIC_FONT_SCALE,
-                        MAX_LYRIC_FONT_SCALE,
-                    ),
-                )
-                SliderPreference(
-                    value = lyricFontWeight.toFloat(),
-                    onValueChange = { value ->
-                        onLyricFontWeightPreview(value.roundToInt())
-                    },
-                    title = stringResource(R.string.lyrics_weight),
-                    valueText = stringResource(
-                        R.string.lyrics_weight_value,
-                        lyricFontWeight,
-                    ),
-                    valueRange = MIN_LYRIC_FONT_WEIGHT.toFloat()..
-                        MAX_LYRIC_FONT_WEIGHT.toFloat(),
-                    steps = LYRICS_FONT_WEIGHT_STEP_COUNT,
-                    onValueChangeFinished = onLyricFontWeightCommit,
-                    showKeyPoints = true,
-                )
-                SwitchPreference(
-                    title = stringResource(R.string.lyrics_center),
-                    checked = centerLyrics,
-                    onCheckedChange = onCenterLyricsChange,
-                )
-                SwitchPreference(
-                    title = stringResource(R.string.lyrics_blur),
-                    summary = stringResource(R.string.lyrics_blur_summary),
-                    checked = lyricBlurEnabled,
-                    onCheckedChange = onLyricBlurEnabledChange,
-                )
-                SwitchPreference(
-                    title = stringResource(R.string.lyrics_hide_controls),
-                    checked = hideControlsOnLyrics,
-                    onCheckedChange = onHideControlsOnLyricsChange,
-                )
+                Column(modifier = Modifier.fillMaxWidth()) {
+                    SwitchPreference(
+                        title = stringResource(R.string.player_title_left_aligned),
+                        checked = leftAlignPlayerTitle,
+                        onCheckedChange = onLeftAlignPlayerTitleChange,
+                    )
+                    SwitchPreference(
+                        title = stringResource(R.string.lyrics_center),
+                        checked = centerLyrics,
+                        onCheckedChange = onCenterLyricsChange,
+                    )
+                    TappableSliderPreference(
+                        value = lyricFontScale,
+                        onValueChange = onLyricFontScalePreview,
+                        title = stringResource(R.string.lyrics_size),
+                        valueText = stringResource(
+                            R.string.lyrics_size_value,
+                            (lyricFontScale * 100f).roundToInt(),
+                        ),
+                        valueRange = MIN_LYRIC_FONT_SCALE..MAX_LYRIC_FONT_SCALE,
+                        onValueChangeFinished = onLyricFontScaleCommit,
+                        showKeyPoints = true,
+                        keyPoints = listOf(
+                            MIN_LYRIC_FONT_SCALE,
+                            DEFAULT_LYRIC_FONT_SCALE,
+                            MAX_LYRIC_FONT_SCALE,
+                        ),
+                    )
+                    TappableSliderPreference(
+                        value = lyricFontWeight.toFloat(),
+                        onValueChange = { value ->
+                            onLyricFontWeightPreview(value.roundToInt())
+                        },
+                        title = stringResource(R.string.lyrics_weight),
+                        valueText = stringResource(
+                            R.string.lyrics_weight_value,
+                            lyricFontWeight,
+                        ),
+                        valueRange = MIN_LYRIC_FONT_WEIGHT.toFloat()..
+                            MAX_LYRIC_FONT_WEIGHT.toFloat(),
+                        steps = LYRICS_FONT_WEIGHT_STEP_COUNT,
+                        onValueChangeFinished = onLyricFontWeightCommit,
+                        showKeyPoints = true,
+                    )
+                    SwitchPreference(
+                        title = stringResource(R.string.lyrics_translation),
+                        checked = showLyricsTranslation,
+                        onCheckedChange = onShowLyricsTranslationChange,
+                    )
+                    SwitchPreference(
+                        title = stringResource(R.string.lyrics_blur),
+                        summary = stringResource(R.string.lyrics_blur_summary),
+                        checked = lyricBlurEnabled,
+                        onCheckedChange = onLyricBlurEnabledChange,
+                    )
+                }
+            }
+            Card(
+                modifier = Modifier.fillMaxWidth(),
+                colors = CardDefaults.defaultColors(
+                    color = MiuixTheme.colorScheme.secondaryContainer,
+                ),
+            ) {
                 SwitchPreference(
                     title = stringResource(R.string.lyrics_force_word_by_word),
                     summary = stringResource(R.string.lyrics_force_word_by_word_summary),
@@ -1064,7 +1096,141 @@ private fun LyricsSettingsSheet(
                     onCheckedChange = onForceWordByWordLyricsChange,
                 )
             }
+            Card(
+                modifier = Modifier.fillMaxWidth(),
+                colors = CardDefaults.defaultColors(
+                    color = MiuixTheme.colorScheme.secondaryContainer,
+                ),
+            ) {
+                SwitchPreference(
+                    title = stringResource(R.string.lyrics_hide_controls),
+                    checked = hideControlsOnLyrics,
+                    onCheckedChange = onHideControlsOnLyricsChange,
+                )
+            }
         }
+    }
+}
+
+@Composable
+private fun TappableSliderPreference(
+    value: Float,
+    onValueChange: (Float) -> Unit,
+    title: String,
+    valueText: String,
+    valueRange: ClosedFloatingPointRange<Float>,
+    steps: Int = 0,
+    onValueChangeFinished: (() -> Unit)? = null,
+    showKeyPoints: Boolean = false,
+    keyPoints: List<Float>? = null,
+    magnetThreshold: Float = 0.02f,
+) {
+    val layoutDirection = LocalLayoutDirection.current
+    val currentOnValueChange by rememberUpdatedState(onValueChange)
+    val currentOnValueChangeFinished by rememberUpdatedState(onValueChangeFinished)
+
+    BasicComponent(
+        title = title,
+        endActions = {
+            Row(
+                modifier = Modifier
+                    .padding(end = 8.dp)
+                    .align(Alignment.CenterVertically)
+                    .weight(1f, fill = false),
+            ) {
+                Text(
+                    text = valueText,
+                    fontSize = MiuixTheme.textStyles.body2.fontSize,
+                    color = MiuixTheme.colorScheme.onSurfaceVariantActions,
+                )
+            }
+        },
+        bottomAction = {
+            Slider(
+                value = value,
+                onValueChange = { currentOnValueChange(it) },
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .pointerInput(valueRange, steps, keyPoints, magnetThreshold, layoutDirection) {
+                        awaitEachGesture {
+                            val down = awaitFirstDown(requireUnconsumed = false)
+                            var pointerPosition = down.position
+                            var maxDistance = 0f
+                            while (true) {
+                                val change = awaitPointerEvent().changes
+                                    .firstOrNull { it.id == down.id }
+                                    ?: break
+                                pointerPosition = change.position
+                                maxDistance = maxOf(
+                                    maxDistance,
+                                    (pointerPosition - down.position).getDistance(),
+                                )
+                                if (!change.pressed) {
+                                    if (maxDistance < viewConfiguration.touchSlop) {
+                                        val tappedValue = sliderValueAtPosition(
+                                            positionX = pointerPosition.x,
+                                            width = size.width,
+                                            height = size.height,
+                                            valueRange = valueRange,
+                                            steps = steps,
+                                            keyPoints = keyPoints,
+                                            magnetThreshold = magnetThreshold,
+                                            reverseDirection = layoutDirection == LayoutDirection.Rtl,
+                                        )
+                                        currentOnValueChange(tappedValue)
+                                        currentOnValueChangeFinished?.invoke()
+                                    }
+                                    break
+                                }
+                            }
+                        }
+                    },
+                valueRange = valueRange,
+                steps = steps,
+                onValueChangeFinished = currentOnValueChangeFinished,
+                showKeyPoints = showKeyPoints,
+                keyPoints = keyPoints,
+                magnetThreshold = magnetThreshold,
+            )
+        },
+    )
+}
+
+internal fun sliderValueAtPosition(
+    positionX: Float,
+    width: Int,
+    height: Int,
+    valueRange: ClosedFloatingPointRange<Float>,
+    steps: Int,
+    keyPoints: List<Float>?,
+    magnetThreshold: Float,
+    reverseDirection: Boolean,
+): Float {
+    val thumbRadius = height / 2f
+    val availableWidth = (width - 2f * thumbRadius).coerceAtLeast(0f)
+    val visualFraction = if (availableWidth == 0f) {
+        0f
+    } else {
+        ((positionX - thumbRadius) / availableWidth).coerceIn(0f, 1f)
+    }
+    val fraction = if (reverseDirection) 1f - visualFraction else visualFraction
+    val rangeLength = valueRange.endInclusive - valueRange.start
+    if (steps > 0) {
+        val intervalCount = steps + 1
+        val stepIndex = (fraction * intervalCount).roundToInt().coerceIn(0, intervalCount)
+        return valueRange.start + rangeLength * stepIndex / intervalCount
+    }
+    val baseValue = valueRange.start + rangeLength * fraction
+    val nearestKeyPoint = keyPoints
+        ?.minByOrNull { point ->
+            abs((point - valueRange.start) / rangeLength - fraction)
+        }
+        ?: return baseValue
+    val keyPointFraction = (nearestKeyPoint - valueRange.start) / rangeLength
+    return if (abs(keyPointFraction - fraction) < magnetThreshold) {
+        nearestKeyPoint
+    } else {
+        baseValue
     }
 }
 
@@ -1171,6 +1337,7 @@ private fun PlayerHeader(
     item: PlaybackQueueItem?,
     titleColor: Color,
     artistColor: Color,
+    leftAligned: Boolean,
     modifier: Modifier = Modifier,
 ) {
     val header = PlayerHeaderContent(
@@ -1189,33 +1356,71 @@ private fun PlayerHeader(
     ) { target ->
         Column(
             modifier = Modifier.fillMaxWidth(),
-            horizontalAlignment = Alignment.CenterHorizontally,
+            horizontalAlignment = if (leftAligned) {
+                Alignment.Start
+            } else {
+                Alignment.CenterHorizontally
+            },
             verticalArrangement = Arrangement.spacedBy(1.dp),
         ) {
             Box(
                 modifier = Modifier
                     .fillMaxWidth()
                     .height(PLAYER_HEADER_TITLE_SLOT_HEIGHT),
-                contentAlignment = Alignment.Center,
+                contentAlignment = if (leftAligned) Alignment.CenterStart else Alignment.Center,
             ) {
-                Text(
-                    text = target.title,
-                    modifier = Modifier.fillMaxWidth(),
-                    style = MiuixTheme.textStyles.title3.copy(
-                        lineHeight = PLAYER_HEADER_TITLE_LINE_HEIGHT,
-                    ),
-                    color = titleColor,
-                    fontWeight = FontWeight.Bold,
-                    textAlign = TextAlign.Center,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                )
+                Box(
+                    modifier = Modifier
+                        .expandLeftForMarquee(PLAYER_HEADER_TITLE_EDGE_FADE_WIDTH)
+                        .fillMaxWidth()
+                        .graphicsLayer {
+                            compositingStrategy = CompositingStrategy.Offscreen
+                        }
+                        .drawWithContent {
+                            drawContent()
+                            val fadeWidth = PLAYER_HEADER_TITLE_EDGE_FADE_WIDTH.toPx()
+                            val edgeFraction = (
+                                fadeWidth / size.width.coerceAtLeast(1f)
+                            ).coerceIn(0f, 0.18f)
+                            drawRect(
+                                brush = Brush.horizontalGradient(
+                                    0f to Color.Transparent,
+                                    edgeFraction to Color.Black,
+                                    1f - edgeFraction to Color.Black,
+                                    1f to Color.Transparent,
+                                ),
+                                blendMode = BlendMode.DstIn,
+                            )
+                        }
+                        .basicMarquee(
+                            iterations = 1,
+                            spacing = MarqueeSpacing.fractionOfContainer(
+                                PLAYER_HEADER_MARQUEE_SPACING_FRACTION,
+                            ),
+                        ),
+                    contentAlignment = Alignment.CenterStart,
+                ) {
+                    Text(
+                        text = target.title,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(start = PLAYER_HEADER_TITLE_EDGE_FADE_WIDTH),
+                        style = MiuixTheme.textStyles.title3.copy(
+                            lineHeight = PLAYER_HEADER_TITLE_LINE_HEIGHT,
+                        ),
+                        color = titleColor,
+                        fontWeight = FontWeight.Bold,
+                        textAlign = if (leftAligned) TextAlign.Start else TextAlign.Center,
+                        maxLines = 1,
+                        overflow = TextOverflow.Clip,
+                    )
+                }
             }
             Box(
                 modifier = Modifier
                     .fillMaxWidth()
                     .height(PLAYER_HEADER_ARTIST_SLOT_HEIGHT),
-                contentAlignment = Alignment.Center,
+                contentAlignment = if (leftAligned) Alignment.CenterStart else Alignment.Center,
             ) {
                 Text(
                     text = playerHeaderArtistText(target.artist),
@@ -1225,12 +1430,24 @@ private fun PlayerHeader(
                         lineHeight = PLAYER_HEADER_ARTIST_LINE_HEIGHT,
                     ),
                     color = artistColor,
-                    textAlign = TextAlign.Center,
+                    textAlign = if (leftAligned) TextAlign.Start else TextAlign.Center,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
                 )
             }
         }
+    }
+}
+
+private fun Modifier.expandLeftForMarquee(extra: Dp): Modifier = layout { measurable, constraints ->
+    val extraPx = extra.roundToPx()
+    val expandedConstraints = constraints.copy(
+        minWidth = constraints.minWidth + extraPx,
+        maxWidth = constraints.maxWidth + extraPx,
+    )
+    val placeable = measurable.measure(expandedConstraints)
+    layout(constraints.maxWidth, placeable.height) {
+        placeable.placeRelative(-extraPx, 0)
     }
 }
 
@@ -1321,7 +1538,7 @@ private fun PlayerDetails(
                 )
                 PlayerIconButton(
                     icon = MiuixIcons.ConvertFile,
-                    description = stringResource(R.string.lyrics_settings_open),
+                    description = stringResource(R.string.player_settings_open),
                     tint = controlColor,
                     onClick = onOpenLyricsSettings,
                 )
@@ -1600,6 +1817,8 @@ private const val MIN_LYRIC_FONT_WEIGHT = 100
 private const val MAX_LYRIC_FONT_WEIGHT = 900
 // 歌词设置区域：100 至 900 字重的可选档位数。
 private const val LYRICS_FONT_WEIGHT_STEP_COUNT = 7
+private const val PLAYER_HEADER_MARQUEE_SPACING_FRACTION = 0.15f
+private val PLAYER_HEADER_TITLE_EDGE_FADE_WIDTH = 12.dp
 
 // 播放页封面区域：播放状态下封面四周内边距。
 private val PLAYER_ARTWORK_PLAYING_PADDING = 6.dp

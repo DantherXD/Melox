@@ -1,7 +1,6 @@
 package com.melox.player.data.lyrics
 
 import com.melox.player.model.LyricLine
-import com.melox.player.model.LyricTransition
 import com.melox.player.model.LyricWord
 import com.melox.player.model.LyricsDocument
 import com.melox.player.model.LyricsFormat
@@ -301,36 +300,10 @@ internal object LyricsParser {
             )
         }.filter { line -> line.displayText.isNotBlank() }
         if (lines.isEmpty()) return null
-        val transitions = buildList {
-            lines.firstOrNull()?.let { firstLine ->
-                if (firstLine.startTimeMs >= COUNTDOWN_GAP_THRESHOLD_MS) {
-                    add(
-                        LyricTransition(
-                            afterLineIndex = -1,
-                            startTimeMs = 0L,
-                            endTimeMs = firstLine.startTimeMs,
-                        ),
-                    )
-                }
-            }
-            lines.zipWithNext().forEachIndexed { lineIndex, (line, nextLine) ->
-                val gapStartTimeMs = line.endTimeMs.coerceAtMost(nextLine.startTimeMs)
-                if (nextLine.startTimeMs - gapStartTimeMs >= COUNTDOWN_GAP_THRESHOLD_MS) {
-                    add(
-                        LyricTransition(
-                            afterLineIndex = lineIndex,
-                            startTimeMs = gapStartTimeMs,
-                            endTimeMs = nextLine.startTimeMs,
-                        ),
-                    )
-                }
-            }
-        }
         return LyricsDocument(
             lines = lines,
             format = format,
             source = source,
-            transitions = transitions,
         )
     }
 
@@ -408,5 +381,4 @@ internal object LyricsParser {
     private const val DEFAULT_WORD_DURATION_MS = 500L
     private const val MIN_WORD_DURATION_MS = 50L
     private const val DEFAULT_FRAME_RATE = 30.0
-    private const val COUNTDOWN_GAP_THRESHOLD_MS = 5_000L
 }
