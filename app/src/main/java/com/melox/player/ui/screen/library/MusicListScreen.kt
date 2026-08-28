@@ -224,6 +224,35 @@ private fun EmptyMusicState(
     }
 }
 
+@Composable
+internal fun MusicLibraryEmptyState(
+    scanStatus: ScanStatus,
+    query: String,
+    emptyMessageRes: Int,
+    noSearchResultsRes: Int,
+    modifier: Modifier = Modifier,
+) {
+    Box(
+        modifier = modifier,
+        contentAlignment = Alignment.Center,
+    ) {
+        when (scanStatus.toMusicLibraryPlaceholder()) {
+            MusicLibraryPlaceholder.Loading -> InfiniteProgressIndicator(
+                color = MiuixTheme.colorScheme.onSurface,
+            )
+
+            MusicLibraryPlaceholder.Error,
+            MusicLibraryPlaceholder.Empty,
+            -> Text(
+                text = stringResource(
+                    if (query.isBlank()) emptyMessageRes else noSearchResultsRes,
+                ),
+                color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+            )
+        }
+    }
+}
+
 internal enum class MusicLibraryPlaceholder {
     Loading,
     Empty,

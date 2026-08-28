@@ -34,9 +34,9 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import com.melox.player.R
 import com.melox.player.model.BottomBarStyle
-import com.melox.player.ui.component.MiuixBlurredBar
+import com.melox.player.ui.component.GaussianBlurredBar
 import com.melox.player.ui.component.miuixBarColor
-import com.melox.player.ui.component.rememberMiuixBlurBackdrop
+import com.melox.player.ui.component.rememberBlurBackdrop
 import top.yukonga.miuix.kmp.basic.NavigationBar
 import top.yukonga.miuix.kmp.basic.NavigationBarItem
 import top.yukonga.miuix.kmp.basic.NavigationItem
@@ -213,9 +213,7 @@ private fun BasePlayerScaffold(
     backdropRefreshSignal: () -> Float,
     content: @Composable (PaddingValues) -> Unit,
 ) {
-    val bottomBarBackdrop = rememberMiuixBlurBackdrop(
-        enabled = blurEnabled,
-    )
+    val bottomBarBackdrop = rememberBlurBackdrop()
     val normalBarColor = bottomBarBackdrop.miuixBarColor()
 
     Scaffold(
@@ -242,28 +240,27 @@ private fun BasePlayerScaffold(
                         targetOffsetY = { it },
                     ) + shrinkVertically(tween(240)) + fadeOut(tween(140)),
                 ) {
-                    MiuixBlurredBar(
-                        backdrop = bottomBarBackdrop,
-                        modifier = Modifier.background(normalBarColor),
-                    ) {
-                        Column {
-                            HorizontalDivider(
-                                thickness = DividerDefaults.Thickness,
-                                color = DividerDefaults.DividerColor.copy(
-                                    alpha = NORMAL_BAR_STROKE_ALPHA,
-                                ),
-                            )
-                            NavigationBar(
-                                color = normalBarColor,
-                                showDivider = false,
-                            ) {
-                                navigationItems.forEachIndexed { index, item ->
-                                    NavigationBarItem(
-                                        selected = selectedTab == index,
-                                        onClick = { onTabSelected(index) },
-                                        icon = item.icon,
-                                        label = item.label,
-                                    )
+                    Box(modifier = Modifier.background(normalBarColor)) {
+                        GaussianBlurredBar(backdrop = bottomBarBackdrop) {
+                            Column {
+                                HorizontalDivider(
+                                    thickness = DividerDefaults.Thickness,
+                                    color = DividerDefaults.DividerColor.copy(
+                                        alpha = NORMAL_BAR_STROKE_ALPHA,
+                                    ),
+                                )
+                                NavigationBar(
+                                    color = normalBarColor,
+                                    showDivider = false,
+                                ) {
+                                    navigationItems.forEachIndexed { index, item ->
+                                        NavigationBarItem(
+                                            selected = selectedTab == index,
+                                            onClick = { onTabSelected(index) },
+                                            icon = item.icon,
+                                            label = item.label,
+                                        )
+                                    }
                                 }
                             }
                         }

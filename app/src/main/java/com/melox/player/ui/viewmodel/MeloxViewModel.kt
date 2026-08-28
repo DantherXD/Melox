@@ -43,6 +43,7 @@ import com.melox.player.model.BottomBarStyle
 import com.melox.player.model.DefaultHomePage
 import com.melox.player.model.DynamicColorSource
 import com.melox.player.model.MusicTrack
+import com.melox.player.model.NavigationTransitionStyle
 import com.melox.player.model.LyricsUiState
 import com.melox.player.model.PlaybackUiState
 import com.melox.player.model.PlaybackBackgroundStyle
@@ -80,6 +81,7 @@ data class AppUiState(
     val artists: List<ArtistGroup>,
     val folders: List<FolderGroup>,
     val scanStatus: ScanStatus,
+    val scanGeneration: Long,
 )
 
 data class MusicPresentationState(
@@ -168,6 +170,7 @@ class MeloxViewModel(application: Application) : AndroidViewModel(application) {
     private val scanStatus = MutableStateFlow<ScanStatus>(
         if (hasInitialAudioPermission) ScanStatus.Scanning else ScanStatus.PermissionRequired,
     )
+    private val scanGeneration = MutableStateFlow(0L)
     private val mutableScanCompletionEvents = MutableSharedFlow<Int>(extraBufferCapacity = 1)
     val scanCompletionEvents: SharedFlow<Int> = mutableScanCompletionEvents.asSharedFlow()
     private val mutableScanNoChangesEvents = MutableSharedFlow<Unit>(extraBufferCapacity = 1)
@@ -262,7 +265,8 @@ class MeloxViewModel(application: Application) : AndroidViewModel(application) {
         library,
         scanStatus,
         recentlyAddedTrackIds,
-    ) { loadedSettings, library, scanStatus, recentlyAddedTrackIds ->
+        scanGeneration,
+    ) { loadedSettings, library, scanStatus, recentlyAddedTrackIds, scanGeneration ->
         AppUiState(
             settings = loadedSettings.value,
             settingsLoaded = loadedSettings.loaded,
@@ -272,6 +276,7 @@ class MeloxViewModel(application: Application) : AndroidViewModel(application) {
             artists = library.artists,
             folders = library.folders,
             scanStatus = scanStatus,
+            scanGeneration = scanGeneration,
         )
     }.stateIn(
         scope = viewModelScope,
@@ -285,6 +290,7 @@ class MeloxViewModel(application: Application) : AndroidViewModel(application) {
             artists = emptyList(),
             folders = emptyList(),
             scanStatus = scanStatus.value,
+            scanGeneration = scanGeneration.value,
         ),
     )
 
@@ -485,6 +491,12 @@ class MeloxViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
+    fun setLeftAlignPlayerTitle(enabled: Boolean) {
+        viewModelScope.launch {
+            settingsRepository.setLeftAlignPlayerTitle(enabled)
+        }
+    }
+
     fun setHideControlsOnLyrics(enabled: Boolean) {
         viewModelScope.launch {
             settingsRepository.setHideControlsOnLyrics(enabled)
@@ -509,6 +521,18 @@ class MeloxViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
+    fun setProgressiveTopBarBlurEnabled(enabled: Boolean) {
+        viewModelScope.launch {
+            settingsRepository.setProgressiveTopBarBlurEnabled(enabled)
+        }
+    }
+
+    fun setHideBottomBar(enabled: Boolean) {
+        viewModelScope.launch {
+            settingsRepository.setHideBottomBar(enabled)
+        }
+    }
+
     fun setFloatingBottomBar(enabled: Boolean) {
         viewModelScope.launch {
             settingsRepository.setFloatingBottomBar(enabled)
@@ -524,6 +548,12 @@ class MeloxViewModel(application: Application) : AndroidViewModel(application) {
     fun setPredictiveBackEnabled(enabled: Boolean) {
         viewModelScope.launch {
             settingsRepository.setPredictiveBackEnabled(enabled)
+        }
+    }
+
+    fun setNavigationTransitionStyle(style: NavigationTransitionStyle) {
+        viewModelScope.launch {
+            settingsRepository.setNavigationTransitionStyle(style)
         }
     }
 
@@ -551,6 +581,29 @@ class MeloxViewModel(application: Application) : AndroidViewModel(application) {
         viewModelScope.launch {
             settingsRepository.removeCustomFolderUri(uriString)
             musicRepository.clearCachedMusic()
+        }
+    }
+
+    fun addBlockedFolderPath(path: String) {
+        viewModelScope.launch {
+            settingsRepository.addBlockedFolderPath(path)
+            val blocked = loadedSettings.value.value.blockedFolderPaths + path
+            val filtered = library.value.tracks.filterNot { track ->
+                isPathBlocked(track.folderPath, blocked)
+            }
+            library.value = createLibraryProjection(filtered)
+            musicRepository.cacheMusic(filtered)
+        }
+    }
+
+    fun removeBlockedFolderPath(path: String) {
+        viewModelScope.launch {
+            settingsRepository.removeBlockedFolderPath(path)
+            startMusicScan(
+                restoreCachedTracks = false,
+                refreshAfterRestore = true,
+                settingsOverride = settingsRepository.loadSettings(),
+            )
         }
     }
 
@@ -704,6 +757,7 @@ class MeloxViewModel(application: Application) : AndroidViewModel(application) {
         restoreCachedTracks: Boolean,
         refreshAfterRestore: Boolean,
         notifyUser: Boolean = false,
+        settingsOverride: AppSettings? = null,
     ) {
         // The UI invokes commands on the main thread, so this debounces repeated scan taps.
         if (scanJob?.isActive == true) return
@@ -711,6 +765,7 @@ class MeloxViewModel(application: Application) : AndroidViewModel(application) {
         // Publish loading before launch so an empty initial list can never render as confirmed empty.
         scanStatus.value = ScanStatus.Scanning
         scanJob = viewModelScope.launch {
+            val settings = settingsOverride ?: loadedSettings.value.value
             val cachedTracks = if (restoreCachedTracks) {
                 try {
                     musicRepository.loadCachedMusic()
@@ -722,43 +777,61 @@ class MeloxViewModel(application: Application) : AndroidViewModel(application) {
             } else {
                 null
             }
-            if (cachedTracks != null) {
+            val visibleCachedTracks = cachedTracks?.filterNot { track ->
+                isPathBlocked(track.folderPath, settings.blockedFolderPaths)
+            }
+            if (visibleCachedTracks != null) {
                 // Publish the lightweight root-page data before grouping. Home and Songs
                 // become usable while the library tabs are prepared off the UI thread.
-                library.value = LibraryProjection(tracks = cachedTracks)
-                library.value = createLibraryProjection(cachedTracks)
+                library.value = LibraryProjection(tracks = visibleCachedTracks)
+                library.value = createLibraryProjection(visibleCachedTracks)
+                if (visibleCachedTracks.size != cachedTracks.size) {
+                    musicRepository.cacheMusic(visibleCachedTracks)
+                }
                 if (!refreshAfterRestore) {
-                    scanStatus.value = ScanStatus.Success(cachedTracks.size)
+                    scanStatus.value = ScanStatus.Success(visibleCachedTracks.size)
+                    scanGeneration.value += 1L
                     return@launch
                 }
             }
 
+            val previousProjection = library.value
+            val previousTracks = visibleCachedTracks ?: previousProjection.tracks
             try {
-                val settings = loadedSettings.value.value
-                val previousTracks = cachedTracks ?: library.value.tracks
-                val previousTrackIds = previousTracks.mapTo(mutableSetOf(), MusicTrack::id)
+                val previousTrackUris = previousTracks
+                    .mapTo(mutableSetOf(), MusicTrack::contentUri)
                 val scannedTracks = musicRepository.scanMusic(
                     previousTracks = previousTracks,
                     refreshAudioProperties = false,
                     customFolderUris = settings.customFolderUris,
+                    blockedFolderPaths = settings.blockedFolderPaths,
                     skipShortAudio = settings.skipShortAudio,
+                    onInitialTracks = { initialTracks ->
+                        if (initialTracks != library.value.tracks) {
+                            library.value = LibraryProjection(tracks = initialTracks)
+                            library.value = createLibraryProjection(initialTracks)
+                        }
+                    },
                 )
                 recentlyAddedTrackIds.value = if (previousTracks.isEmpty()) {
                     emptySet()
                 } else {
                     scannedTracks
                         .asSequence()
+                        .filterNot { track -> track.contentUri in previousTrackUris }
                         .map(MusicTrack::id)
-                        .filterNot(previousTrackIds::contains)
                         .toSet()
                 }
                 val libraryChanged = scannedTracks != previousTracks
-                if (libraryChanged) {
+                if (scannedTracks != library.value.tracks) {
                     library.value = LibraryProjection(tracks = scannedTracks)
                     library.value = createLibraryProjection(scannedTracks)
+                }
+                if (libraryChanged) {
                     musicRepository.cacheMusic(scannedTracks)
                 }
                 scanStatus.value = ScanStatus.Success(scannedTracks.size)
+                scanGeneration.value += 1L
                 if (shouldEmitScanCompletion(libraryChanged, notifyUser)) {
                     mutableScanCompletionEvents.emit(scannedTracks.size)
                 }
@@ -769,6 +842,7 @@ class MeloxViewModel(application: Application) : AndroidViewModel(application) {
                 throw cancellation
             } catch (exception: Exception) {
                 // A failed refresh keeps the last successful list visible.
+                library.value = previousProjection
                 scanStatus.value = ScanStatus.Error(
                     exception.message.orEmpty(),
                 )
@@ -806,6 +880,15 @@ class MeloxViewModel(application: Application) : AndroidViewModel(application) {
             getApplication(),
             permission,
         ) == PackageManager.PERMISSION_GRANTED
+    }
+
+    private fun isPathBlocked(path: String?, blockedPaths: List<String>): Boolean {
+        val normalized = path?.trim()?.replace('\\', '/')?.trimEnd('/') ?: return false
+        return blockedPaths.any { blocked ->
+            val prefix = blocked.trim().replace('\\', '/').trimEnd('/').ifEmpty { "/" }
+            prefix == "/" || normalized.equals(prefix, ignoreCase = true) ||
+                normalized.startsWith("$prefix/", ignoreCase = true)
+        }
     }
 
     override fun onCleared() {

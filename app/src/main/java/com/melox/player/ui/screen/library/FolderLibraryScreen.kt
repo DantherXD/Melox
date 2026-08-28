@@ -2,17 +2,21 @@ package com.melox.player.ui.screen.library
 
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.calculateEndPadding
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.items
@@ -20,6 +24,8 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.input.nestedscroll.nestedScroll
@@ -36,11 +42,15 @@ import com.melox.player.R
 import com.melox.player.data.library.FolderGroup
 import com.melox.player.data.library.FolderSortConfig
 import com.melox.player.data.library.FolderSortField
+import com.melox.player.model.ScanStatus
 import com.melox.player.ui.component.library.AlphabetSections
 import com.melox.player.ui.component.library.AlphabetSideBar
 import top.yukonga.miuix.kmp.basic.Icon
 import top.yukonga.miuix.kmp.basic.ScrollBehavior
 import top.yukonga.miuix.kmp.basic.Text
+import top.yukonga.miuix.kmp.basic.TextButton
+import top.yukonga.miuix.kmp.basic.ButtonDefaults
+import top.yukonga.miuix.kmp.overlay.OverlayDialog
 import top.yukonga.miuix.kmp.icon.MiuixIcons
 import top.yukonga.miuix.kmp.icon.basic.ArrowRight
 import top.yukonga.miuix.kmp.theme.MiuixTheme
@@ -52,8 +62,10 @@ fun FolderLibraryScreen(
     displayedFolders: List<FolderGroup>,
     sectionIndexMap: Map<String, Int>,
     query: String,
+    scanStatus: ScanStatus,
     sortConfig: FolderSortConfig,
     onFolderClick: (FolderGroup) -> Unit,
+    onBlockFolder: (String) -> Unit = {},
     scrollBehavior: ScrollBehavior,
     indexTopPadding: Dp,
     listState: LazyListState,
@@ -62,6 +74,7 @@ fun FolderLibraryScreen(
     showIndex: Boolean = true,
     indexBottomSpacing: Dp = 12.dp,
 ) {
+    var pendingBlockFolder by remember { mutableStateOf<FolderGroup?>(null) }
     val layoutDirection = LocalLayoutDirection.current
     val sections = remember(sortConfig.descending) {
         if (sortConfig.descending) AlphabetSections.asReversed() else AlphabetSections
@@ -71,29 +84,34 @@ fun FolderLibraryScreen(
     }
 
     Box(modifier = modifier.fillMaxSize()) {
-        if (displayedFolders.isEmpty()) {
-            Text(
-                text = stringResource(
-                    if (query.isBlank()) R.string.folder_empty
-                    else R.string.folder_no_search_results,
-                ),
-                modifier = Modifier.align(Alignment.Center),
-                color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
-            )
-        } else {
-            LazyColumn(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .scrollEndHaptic()
-                    .overScrollVertical()
-                    .nestedScroll(scrollBehavior.nestedScrollConnection),
-                state = listState,
-                contentPadding = PaddingValues(
-                    top = contentPadding.calculateTopPadding() + 12.dp,
-                    bottom = contentPadding.calculateBottomPadding() + 12.dp,
-                ),
-                overscrollEffect = null,
-            ) {
+        LazyColumn(
+            modifier = Modifier
+                .fillMaxSize()
+                .scrollEndHaptic()
+                .overScrollVertical()
+                .nestedScroll(scrollBehavior.nestedScrollConnection),
+            state = listState,
+            contentPadding = PaddingValues(
+                top = contentPadding.calculateTopPadding() + 12.dp,
+                bottom = contentPadding.calculateBottomPadding() + 12.dp,
+            ),
+            overscrollEffect = null,
+        ) {
+            if (displayedFolders.isEmpty()) {
+                item(key = "empty_folder") {
+                    Box(
+                        modifier = Modifier.fillParentMaxSize(),
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        MusicLibraryEmptyState(
+                            scanStatus = scanStatus,
+                            query = query,
+                            emptyMessageRes = R.string.folder_empty,
+                            noSearchResultsRes = R.string.folder_no_search_results,
+                        )
+                    }
+                }
+            } else {
                 items(
                     items = displayedFolders,
                     key = FolderGroup::key,
@@ -101,6 +119,7 @@ fun FolderLibraryScreen(
                     FolderListItem(
                         folder = folder,
                         onClick = { onFolderClick(folder) },
+                        onLongClick = { pendingBlockFolder = folder },
                     )
                 }
             }
@@ -145,12 +164,43 @@ fun FolderLibraryScreen(
             )
         }
     }
+
+    OverlayDialog(
+        show = pendingBlockFolder != null,
+        title = stringResource(R.string.folder_block_title),
+        summary = stringResource(R.string.folder_block_message),
+        enableWindowDim = true,
+        onDismissRequest = { pendingBlockFolder = null },
+    ) {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+        ) {
+            TextButton(
+                text = stringResource(R.string.clear_queue_confirm_cancel),
+                onClick = { pendingBlockFolder = null },
+                modifier = Modifier.weight(1f),
+            )
+            Spacer(modifier = Modifier.width(20.dp))
+            TextButton(
+                text = stringResource(R.string.clear_queue_confirm_confirm),
+                onClick = {
+                    pendingBlockFolder?.path?.let(onBlockFolder)
+                    pendingBlockFolder = null
+                },
+                modifier = Modifier.weight(1f),
+                colors = ButtonDefaults.textButtonColorsPrimary(),
+            )
+        }
+    }
 }
 
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
 internal fun FolderListItem(
     folder: FolderGroup,
     onClick: () -> Unit,
+    onLongClick: () -> Unit = {},
     modifier: Modifier = Modifier,
 ) {
     val songCount = pluralStringResource(
@@ -161,7 +211,7 @@ internal fun FolderListItem(
     Row(
         modifier = modifier
             .fillMaxWidth()
-            .clickable(onClick = onClick)
+            .combinedClickable(onClick = onClick, onLongClick = onLongClick)
             .padding(start = 30.dp, end = 28.dp, top = 16.dp, bottom = 16.dp),
         horizontalArrangement = Arrangement.spacedBy(20.dp),
         verticalAlignment = Alignment.CenterVertically,

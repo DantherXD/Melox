@@ -35,10 +35,10 @@ import com.melox.player.model.MusicTrack
 import com.melox.player.model.ScanStatus
 import com.melox.player.ui.LibrarySearchBar
 import com.melox.player.ui.LibrarySearchButton
-import com.melox.player.ui.component.MiuixBlurredBar
+import com.melox.player.ui.component.BlurredBar
 import com.melox.player.ui.component.library.MusicSortButton
 import com.melox.player.ui.component.miuixBarColor
-import com.melox.player.ui.component.rememberMiuixBlurBackdrop
+import com.melox.player.ui.component.rememberBlurBackdrop
 import top.yukonga.miuix.kmp.basic.Icon
 import top.yukonga.miuix.kmp.basic.IconButton
 import top.yukonga.miuix.kmp.basic.MiuixScrollBehavior
@@ -53,7 +53,6 @@ import kotlinx.coroutines.launch
 fun FolderDetailScreen(
     folder: FolderGroup,
     currentTrackId: Long?,
-    blurEnabled: Boolean,
     bottomContentPadding: Dp,
     onBack: () -> Unit,
     onTrackClick: (List<MusicTrack>, Int) -> Unit,
@@ -80,7 +79,7 @@ fun FolderDetailScreen(
     val scrollBehavior = MiuixScrollBehavior()
     val listState = rememberLazyListState()
     val scope = rememberCoroutineScope()
-    val backdrop = rememberMiuixBlurBackdrop(blurEnabled)
+    val backdrop = rememberBlurBackdrop()
     val layoutDirection = LocalLayoutDirection.current
     val density = LocalDensity.current
     var bottomContentHeightPx by remember { mutableIntStateOf(0) }
@@ -103,8 +102,12 @@ fun FolderDetailScreen(
     }
 
     Scaffold(
-        topBar = {
-            MiuixBlurredBar(backdrop) {
+            topBar = {
+            BlurredBar(
+                backdrop = backdrop,
+                blurEnabled = backdrop != null,
+                scrollBehavior = scrollBehavior,
+            ) {
                 TopAppBar(
                     title = folder.name ?: stringResource(R.string.folder_unknown),
                     color = backdrop.miuixBarColor(),
@@ -166,7 +169,7 @@ fun FolderDetailScreen(
                 )
             }
         },
-    ) { padding ->
+        ) { padding ->
         val bottomContentHeight = with(density) { bottomContentHeightPx.toDp() }
         val currentBarPadding =
             (padding.calculateTopPadding() - bottomContentHeight).coerceAtLeast(0.dp)

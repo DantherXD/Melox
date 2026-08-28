@@ -13,29 +13,33 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import com.melox.player.R
 import com.melox.player.model.AppSettings
 import com.melox.player.model.DynamicColorSource
+import com.melox.player.model.NavigationTransitionStyle
 import com.melox.player.model.PlaybackBackgroundStyle
 import com.melox.player.model.ThemeMode
-import com.melox.player.ui.component.MiuixBlurredBar
+import com.melox.player.ui.component.BlurredBar
 import com.melox.player.ui.component.miuixBarColor
-import com.melox.player.ui.component.rememberMiuixBlurBackdrop
+import com.melox.player.ui.component.rememberBlurBackdrop
 import top.yukonga.miuix.kmp.basic.Card
 import top.yukonga.miuix.kmp.basic.Icon
 import top.yukonga.miuix.kmp.basic.IconButton
 import top.yukonga.miuix.kmp.basic.Scaffold
+import top.yukonga.miuix.kmp.basic.ScrollBehavior
 import top.yukonga.miuix.kmp.basic.SmallTitle
-import top.yukonga.miuix.kmp.basic.SmallTopAppBar
+import top.yukonga.miuix.kmp.basic.TopAppBar
 import top.yukonga.miuix.kmp.blur.layerBackdrop
 import top.yukonga.miuix.kmp.icon.MiuixIcons
 import top.yukonga.miuix.kmp.icon.extended.Back
@@ -49,20 +53,31 @@ fun ThemeSettingsScreen(
     settings: AppSettings,
     bottomContentPadding: Dp,
     liquidGlassSupported: Boolean,
+    listState: LazyListState,
+    scrollBehavior: ScrollBehavior,
     onBack: () -> Unit,
     onThemeModeChange: (ThemeMode) -> Unit,
     onDynamicColorChange: (Boolean) -> Unit,
     onDynamicColorSourceChange: (DynamicColorSource) -> Unit,
     onPlaybackBackgroundStyleChange: (PlaybackBackgroundStyle) -> Unit,
     onBlurChange: (Boolean) -> Unit,
+    onProgressiveTopBarBlurChange: (Boolean) -> Unit,
+    onHideBottomBarChange: (Boolean) -> Unit,
     onFloatingBottomBarChange: (Boolean) -> Unit,
     onLiquidGlassChange: (Boolean) -> Unit,
     onPredictiveBackChange: (Boolean) -> Unit,
+    onNavigationTransitionStyleChange: (NavigationTransitionStyle) -> Unit,
 ) {
     val dynamicColorSupported = Build.VERSION.SDK_INT >= Build.VERSION_CODES.S
     val blurSupported = liquidGlassSupported
     var blurChecked by remember(settings.blurEnabled) {
         mutableStateOf(settings.blurEnabled)
+    }
+    var progressiveTopBarBlurChecked by remember(settings.progressiveTopBarBlurEnabled) {
+        mutableStateOf(settings.progressiveTopBarBlurEnabled)
+    }
+    var hideBottomBarChecked by remember(settings.hideBottomBar) {
+        mutableStateOf(settings.hideBottomBar)
     }
     var floatingBottomBarChecked by remember(settings.floatingBottomBar) {
         mutableStateOf(settings.floatingBottomBar)
@@ -82,6 +97,9 @@ fun ThemeSettingsScreen(
     var predictiveBackChecked by remember(settings.predictiveBackEnabled) {
         mutableStateOf(settings.predictiveBackEnabled)
     }
+    var navigationTransitionStyle by remember(settings.navigationTransitionStyle) {
+        mutableStateOf(settings.navigationTransitionStyle)
+    }
     var selectedThemeMode by remember(settings.themeMode) {
         mutableStateOf(settings.themeMode)
     }
@@ -93,18 +111,21 @@ fun ThemeSettingsScreen(
     val playbackBackgroundStyles = listOf(
         PlaybackBackgroundStyle.BLURRED_ARTWORK to
             stringResource(R.string.settings_playback_background_blurred_artwork),
-        PlaybackBackgroundStyle.FLOWING_COLORS to
-            stringResource(R.string.settings_playback_background_flowing_colors),
+        PlaybackBackgroundStyle.DYNAMIC_FLOW to
+            stringResource(R.string.settings_playback_background_dynamic_flow),
     )
-    val topBarBackdrop = rememberMiuixBlurBackdrop(
-        enabled = blurChecked && blurSupported,
-    )
+    val topBarBackdrop = rememberBlurBackdrop()
     Scaffold(
-        topBar = {
-            MiuixBlurredBar(backdrop = topBarBackdrop) {
-                SmallTopAppBar(
+            topBar = {
+            BlurredBar(
+                backdrop = topBarBackdrop,
+                blurEnabled = topBarBackdrop != null,
+                scrollBehavior = scrollBehavior,
+            ) {
+                TopAppBar(
                     title = stringResource(R.string.settings_theme_settings_title),
                     color = topBarBackdrop.miuixBarColor(),
+                    scrollBehavior = scrollBehavior,
                     navigationIcon = {
                         IconButton(onClick = onBack) {
                             Icon(
@@ -116,7 +137,7 @@ fun ThemeSettingsScreen(
                 )
             }
         },
-    ) { padding ->
+        ) { padding ->
         Box(
             modifier = Modifier
                 .fillMaxSize()
@@ -128,7 +149,9 @@ fun ThemeSettingsScreen(
                 modifier = Modifier
                     .fillMaxSize()
                     .scrollEndHaptic()
-                    .overScrollVertical(),
+                    .overScrollVertical()
+                    .nestedScroll(scrollBehavior.nestedScrollConnection),
+                state = listState,
                 contentPadding = PaddingValues(
                     top = padding.calculateTopPadding(),
                     bottom = maxOf(
@@ -174,6 +197,25 @@ fun ThemeSettingsScreen(
                             ),
                             enabled = blurSupported,
                         )
+                        AnimatedVisibility(
+                            visible = blurChecked && blurSupported,
+                            enter = fadeIn(animationSpec = tween(200)) +
+                                expandVertically(animationSpec = tween(250)),
+                            exit = fadeOut(animationSpec = tween(150)) +
+                                shrinkVertically(animationSpec = tween(200)),
+                            label = "progressiveTopBarBlurPreferenceVisibility",
+                        ) {
+                            SwitchPreference(
+                                checked = progressiveTopBarBlurChecked,
+                                onCheckedChange = { checked ->
+                                    progressiveTopBarBlurChecked = checked
+                                    onProgressiveTopBarBlurChange(checked)
+                                },
+                                title = stringResource(
+                                    R.string.settings_progressive_top_bar_blur_title,
+                                ),
+                            )
+                        }
                         SwitchPreference(
                             checked = floatingBottomBarChecked,
                             onCheckedChange = { checked ->
@@ -209,6 +251,14 @@ fun ThemeSettingsScreen(
                                 enabled = liquidGlassSupported,
                             )
                         }
+                        SwitchPreference(
+                            checked = hideBottomBarChecked,
+                            onCheckedChange = { checked ->
+                                hideBottomBarChecked = checked
+                                onHideBottomBarChange(checked)
+                            },
+                            title = stringResource(R.string.settings_hide_bottom_bar_title),
+                        )
                         SwitchPreference(
                             checked = dynamicColorChecked && dynamicColorSupported,
                             onCheckedChange = { checked ->
@@ -286,8 +336,39 @@ fun ThemeSettingsScreen(
                                 onPredictiveBackChange(checked)
                             },
                             title = stringResource(R.string.settings_predictive_back_title),
-                            summary = stringResource(R.string.settings_predictive_back_summary),
                         )
+                        AnimatedVisibility(
+                            visible = predictiveBackChecked,
+                            enter = fadeIn(animationSpec = tween(200)) +
+                                expandVertically(animationSpec = tween(250)),
+                            exit = fadeOut(animationSpec = tween(150)) +
+                                shrinkVertically(animationSpec = tween(200)),
+                            label = "navigationTransitionStyleVisibility",
+                        ) {
+                            val transitionStyles = listOf(
+                                NavigationTransitionStyle.MIUIX to stringResource(
+                                    R.string.settings_navigation_transition_style_miuix,
+                                ),
+                                NavigationTransitionStyle.AOSP to stringResource(
+                                    R.string.settings_navigation_transition_style_aosp,
+                                ),
+                            )
+                            OverlayDropdownPreference(
+                                title = stringResource(
+                                    R.string.settings_navigation_transition_style_title,
+                                ),
+                                items = transitionStyles.map { it.second },
+                                selectedIndex = transitionStyles.indexOfFirst {
+                                    it.first == navigationTransitionStyle
+                                }.coerceAtLeast(0),
+                                onSelectedIndexChange = { index ->
+                                    transitionStyles.getOrNull(index)?.first?.let { style ->
+                                        navigationTransitionStyle = style
+                                        onNavigationTransitionStyleChange(style)
+                                    }
+                                },
+                            )
+                        }
                     }
                 }
             }

@@ -36,9 +36,9 @@ import androidx.compose.ui.unit.dp
 import com.melox.player.R
 import com.melox.player.model.AppSettings
 import com.melox.player.model.ScanStatus
-import com.melox.player.ui.component.MiuixBlurredBar
+import com.melox.player.ui.component.BlurredBar
 import com.melox.player.ui.component.miuixBarColor
-import com.melox.player.ui.component.rememberMiuixBlurBackdrop
+import com.melox.player.ui.component.rememberBlurBackdrop
 import top.yukonga.miuix.kmp.basic.BasicComponent
 import top.yukonga.miuix.kmp.basic.Button
 import top.yukonga.miuix.kmp.basic.ButtonDefaults
@@ -78,12 +78,13 @@ fun ScanMusicScreen(
     onSkipShortAudioChange: (Boolean) -> Unit,
     onAddCustomFolder: (Uri) -> Unit,
     onRemoveCustomFolder: (String) -> Unit,
+    onOpenBlockedFolders: () -> Unit,
     onStartScan: () -> Unit,
 ) {
     val context = LocalContext.current
     val isScanning = scanStatus is ScanStatus.Scanning
     val scrollBehavior = MiuixScrollBehavior()
-    val topBarBackdrop = rememberMiuixBlurBackdrop(enabled = settings.blurEnabled)
+    val topBarBackdrop = rememberBlurBackdrop()
     var refreshOnStartChecked by remember(settings.refreshLibraryOnStart) {
         mutableStateOf(settings.refreshLibraryOnStart)
     }
@@ -115,8 +116,12 @@ fun ScanMusicScreen(
     }
 
     Scaffold(
-        topBar = {
-            MiuixBlurredBar(backdrop = topBarBackdrop) {
+            topBar = {
+            BlurredBar(
+                backdrop = topBarBackdrop,
+                blurEnabled = topBarBackdrop != null,
+                scrollBehavior = scrollBehavior,
+            ) {
                 TopAppBar(
                     title = stringResource(R.string.scan_music_page_title),
                     color = topBarBackdrop.miuixBarColor(),
@@ -132,7 +137,7 @@ fun ScanMusicScreen(
                 )
             }
         },
-    ) { padding ->
+        ) { padding ->
         Box(
             modifier = Modifier
                 .fillMaxSize()
@@ -220,6 +225,14 @@ fun ScanMusicScreen(
                         }
                     }
                 }
+                item(key = "blocked_folders") {
+                    ScanCard(topPadding = 16.dp, bottomPadding = 0.dp) {
+                        ArrowPreference(
+                            title = stringResource(R.string.scan_blocked_folder_title),
+                            onClick = onOpenBlockedFolders,
+                        )
+                    }
+                }
             }
         }
     }
@@ -304,6 +317,7 @@ private fun CustomFolderRow(
 
 @Composable
 private fun ScanCard(
+    topPadding: Dp = 0.dp,
     bottomPadding: Dp = 12.dp,
     content: @Composable () -> Unit,
 ) {
@@ -311,7 +325,7 @@ private fun ScanCard(
         modifier = Modifier
             .fillMaxWidth()
             .padding(horizontal = 12.dp)
-            .padding(bottom = bottomPadding),
+            .padding(top = topPadding, bottom = bottomPadding),
         content = { content() },
     )
 }

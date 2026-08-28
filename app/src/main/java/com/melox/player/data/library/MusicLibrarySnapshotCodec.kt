@@ -15,7 +15,7 @@ import java.util.zip.CheckedOutputStream
 /** Compact, versioned encoding for the last successful local-library snapshot. */
 internal object MusicLibrarySnapshotCodec {
     private const val MAGIC = 0x5549584D
-    private const val VERSION = 7
+    private const val VERSION = 8
     private const val MIN_SUPPORTED_VERSION = 1
     private const val MAX_TRACK_COUNT = 100_000
     private const val MAX_STRING_BYTES = 1_048_576
@@ -60,6 +60,7 @@ internal object MusicLibrarySnapshotCodec {
             output.writeInt(track.trackNumber ?: 0)
             output.writeInt(track.discNumber ?: 0)
             output.writeInt(track.bitDepth ?: 0)
+            output.writeLong(track.mediaStoreId ?: 0L)
         }
         output.writeLong(checksum.value)
         output.flush()
@@ -108,6 +109,7 @@ internal object MusicLibrarySnapshotCodec {
             val trackNumber = if (version >= 7) input.readInt().takeIf { it > 0 } else null
             val discNumber = if (version >= 7) input.readInt().takeIf { it > 0 } else null
             val bitDepth = if (version >= 7) input.readInt().takeIf { it > 0 } else null
+            val mediaStoreId = if (version >= 8) input.readLong().takeIf { it > 0L } else null
             MusicTrack(
                 id = id,
                 title = title,
@@ -123,6 +125,7 @@ internal object MusicLibrarySnapshotCodec {
                 fileName = fileName,
                 folderPath = folderPath,
                 albumId = albumId,
+                mediaStoreId = mediaStoreId,
                 fileSizeBytes = fileSizeBytes,
                 contentUri = contentUri,
                 titleSectionKey = titleSectionKey,

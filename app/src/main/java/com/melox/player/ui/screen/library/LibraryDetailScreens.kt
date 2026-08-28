@@ -27,7 +27,6 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
@@ -43,9 +42,9 @@ import com.melox.player.data.library.ArtistGroup
 import com.melox.player.data.library.buildAlbumGroups
 import com.melox.player.data.library.displayArtistName
 import com.melox.player.model.MusicTrack
-import com.melox.player.ui.component.MiuixBlurredBar
+import com.melox.player.ui.component.BlurredBar
 import com.melox.player.ui.component.miuixBarColor
-import com.melox.player.ui.component.rememberMiuixBlurBackdrop
+import com.melox.player.ui.component.rememberBlurBackdrop
 import com.melox.player.ui.component.library.ArtistArtwork
 import com.melox.player.ui.component.library.ArtistListItem
 import com.melox.player.ui.component.library.MusicTrackDescriptionMode
@@ -76,7 +75,6 @@ fun AlbumDetailScreen(
     album: AlbumGroup,
     artistGroups: List<ArtistGroup>,
     currentTrackId: Long?,
-    blurEnabled: Boolean,
     bottomContentPadding: Dp,
     onBack: () -> Unit,
     onTrackClick: (List<MusicTrack>, Int) -> Unit,
@@ -87,7 +85,7 @@ fun AlbumDetailScreen(
     onExternalEditReturned: (Long) -> Unit,
 ) {
     val scrollBehavior = MiuixScrollBehavior()
-    val backdrop = rememberMiuixBlurBackdrop(blurEnabled)
+    val backdrop = rememberBlurBackdrop()
     val pagerState = rememberPagerState(pageCount = { 2 })
     val scope = rememberCoroutineScope()
     val tabRowBackgroundColor = backdrop.miuixBarColor()
@@ -96,14 +94,15 @@ fun AlbumDetailScreen(
     }
     var selectedTrack by remember { mutableStateOf<MusicTrack?>(null) }
     Scaffold(
-        topBar = {
-            MiuixBlurredBar(
+            topBar = {
+            BlurredBar(
                 backdrop = backdrop,
-                modifier = Modifier.background(backdrop.miuixBarColor()),
+                blurEnabled = backdrop != null,
+                scrollBehavior = scrollBehavior,
             ) {
                 SmallTopAppBar(
                     title = "",
-                    color = Color.Transparent,
+                    color = backdrop.miuixBarColor(),
                     scrollBehavior = scrollBehavior,
                     navigationIcon = {
                         IconButton(onClick = onBack) {
@@ -145,7 +144,7 @@ fun AlbumDetailScreen(
                 )
             }
         },
-    ) { padding ->
+        ) { padding ->
         Box(
             modifier = Modifier
                 .fillMaxSize()
@@ -156,7 +155,6 @@ fun AlbumDetailScreen(
                 modifier = Modifier
                     .fillMaxSize(),
                 userScrollEnabled = true,
-                beyondViewportPageCount = 1,
                 key = { it },
             ) { page ->
                 if (page == 0) {
@@ -246,7 +244,6 @@ fun ArtistDetailScreen(
     artist: ArtistGroup,
     artistGroups: List<ArtistGroup>,
     currentTrackId: Long?,
-    blurEnabled: Boolean,
     bottomContentPadding: Dp,
     albumGridStyle: AlbumGridStyle,
     onBack: () -> Unit,
@@ -259,21 +256,22 @@ fun ArtistDetailScreen(
     onExternalEditReturned: (Long) -> Unit,
 ) {
     val scrollBehavior = MiuixScrollBehavior()
-    val backdrop = rememberMiuixBlurBackdrop(blurEnabled)
+    val backdrop = rememberBlurBackdrop()
     val albums = remember(artist.tracks) { buildAlbumGroups(artist.tracks) }
     val pagerState = rememberPagerState(pageCount = { 2 })
     val scope = rememberCoroutineScope()
     val tabRowBackgroundColor = backdrop.miuixBarColor()
     var selectedTrack by remember { mutableStateOf<MusicTrack?>(null) }
     Scaffold(
-        topBar = {
-            MiuixBlurredBar(
+            topBar = {
+            BlurredBar(
                 backdrop = backdrop,
-                modifier = Modifier.background(backdrop.miuixBarColor()),
+                blurEnabled = backdrop != null,
+                scrollBehavior = scrollBehavior,
             ) {
                 SmallTopAppBar(
                     title = "",
-                    color = Color.Transparent,
+                    color = backdrop.miuixBarColor(),
                     scrollBehavior = scrollBehavior,
                     navigationIcon = {
                         IconButton(onClick = onBack) {
@@ -315,7 +313,7 @@ fun ArtistDetailScreen(
                 )
             }
         },
-    ) { padding ->
+        ) { padding ->
         Box(
             modifier = Modifier
                 .fillMaxSize()
@@ -325,7 +323,6 @@ fun ArtistDetailScreen(
                 state = pagerState,
                 modifier = Modifier.fillMaxSize(),
                 userScrollEnabled = true,
-                beyondViewportPageCount = 1,
                 key = { it },
             ) { page ->
                 if (page == 0) {

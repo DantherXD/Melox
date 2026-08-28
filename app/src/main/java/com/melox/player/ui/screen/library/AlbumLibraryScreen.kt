@@ -10,8 +10,10 @@ import androidx.compose.foundation.layout.calculateEndPadding
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.grid.GridCells
+import androidx.compose.foundation.lazy.grid.GridItemSpan
 import androidx.compose.foundation.lazy.grid.LazyGridState
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
@@ -35,6 +37,7 @@ import com.melox.player.data.library.AlbumGroup
 import com.melox.player.data.library.AlbumGridStyle
 import com.melox.player.data.library.AlbumSortConfig
 import com.melox.player.data.library.AlbumSortField
+import com.melox.player.model.ScanStatus
 import com.melox.player.ui.component.library.AlphabetSections
 import com.melox.player.ui.component.library.AlphabetSideBar
 import com.melox.player.ui.component.library.PlaybackArtwork
@@ -52,6 +55,7 @@ fun AlbumLibraryScreen(
     displayedAlbums: List<AlbumGroup>,
     sectionIndexMap: Map<String, Int>,
     query: String,
+    scanStatus: ScanStatus,
     sortConfig: AlbumSortConfig,
     onAlbumClick: (AlbumGroup) -> Unit,
     scrollBehavior: ScrollBehavior,
@@ -72,34 +76,52 @@ fun AlbumLibraryScreen(
         derivedStateOf { scrollBehavior.state.collapsedFraction > 0.01f }
     }
 
-    Box(modifier = modifier.fillMaxSize()) {
-        if (displayedAlbums.isEmpty()) {
-            Text(
-                text = stringResource(
-                    if (query.isBlank()) R.string.album_empty else R.string.album_no_search_results,
-                ),
-                modifier = Modifier.align(Alignment.Center),
-                color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
-            )
-        } else {
-            LazyVerticalGrid(
-                columns = GridCells.Fixed(sortConfig.gridStyle.columns),
-                modifier = Modifier
-                    .fillMaxSize()
-                    .scrollEndHaptic()
-                    .overScrollVertical()
-                    .nestedScroll(scrollBehavior.nestedScrollConnection),
-                state = gridState,
-                contentPadding = PaddingValues(
-                    start = 20.dp,
-                    top = contentPadding.calculateTopPadding() + 12.dp,
-                    end = 20.dp,
-                    bottom = contentPadding.calculateBottomPadding() + 12.dp,
-                ),
-                horizontalArrangement = Arrangement.spacedBy(12.dp),
-                verticalArrangement = Arrangement.spacedBy(12.dp),
-                overscrollEffect = null,
-            ) {
+    BoxWithConstraints(modifier = modifier.fillMaxSize()) {
+        val gridContentPadding = PaddingValues(
+            start = 20.dp,
+            top = contentPadding.calculateTopPadding() + 12.dp,
+            end = 20.dp,
+            bottom = contentPadding.calculateBottomPadding() + 12.dp,
+        )
+        LazyVerticalGrid(
+            columns = GridCells.Fixed(sortConfig.gridStyle.columns),
+            modifier = Modifier
+                .fillMaxSize()
+                .scrollEndHaptic()
+                .overScrollVertical()
+                .nestedScroll(scrollBehavior.nestedScrollConnection),
+            state = gridState,
+            contentPadding = gridContentPadding,
+            horizontalArrangement = Arrangement.spacedBy(12.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp),
+            overscrollEffect = null,
+        ) {
+            if (displayedAlbums.isEmpty()) {
+                item(
+                    key = "empty_album",
+                    span = { GridItemSpan(maxLineSpan) },
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(
+                                (
+                                    maxHeight -
+                                        gridContentPadding.calculateTopPadding() -
+                                        gridContentPadding.calculateBottomPadding()
+                                    ).coerceAtLeast(1.dp),
+                            ),
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        MusicLibraryEmptyState(
+                            scanStatus = scanStatus,
+                            query = query,
+                            emptyMessageRes = R.string.album_empty,
+                            noSearchResultsRes = R.string.album_no_search_results,
+                        )
+                    }
+                }
+            } else {
                 items(
                     items = displayedAlbums,
                     key = AlbumGroup::key,
@@ -240,8 +262,15 @@ private fun AlbumGridLabels(
             overflow = TextOverflow.Ellipsis,
         )
         Text(
-            text = pluralStringResource(
-                R.plurals.album_song_count,
+            text = album.year?.takeIf { it > 0 }?.let { year ->
+                pluralStringResource(
+                    R.plurals.album_grid_song_count_with_year,
+                    album.tracks.size,
+                    album.tracks.size,
+                    year,
+                )
+            } ?: pluralStringResource(
+                R.plurals.album_grid_song_count,
                 album.tracks.size,
                 album.tracks.size,
             ),

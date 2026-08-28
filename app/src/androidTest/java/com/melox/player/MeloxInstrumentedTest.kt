@@ -7,6 +7,7 @@ import androidx.test.core.app.ActivityScenario
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
 import com.melox.player.data.repository.SettingsRepository
+import com.melox.player.model.NavigationTransitionStyle
 import com.melox.player.model.ThemeMode
 import kotlinx.coroutines.runBlocking
 import org.junit.Assert.assertEquals
@@ -46,24 +47,38 @@ class MeloxInstrumentedTest {
             repository.setThemeMode(ThemeMode.DARK)
             repository.setDynamicColorEnabled(true)
             repository.setBlurEnabled(false)
+            repository.setProgressiveTopBarBlurEnabled(true)
+            repository.setHideBottomBar(true)
             repository.setFloatingBottomBar(true)
             repository.setLiquidGlass(true)
             repository.setPredictiveBackEnabled(true)
+            repository.setNavigationTransitionStyle(NavigationTransitionStyle.AOSP)
 
             val restored = repository.loadSettings()
             assertEquals(ThemeMode.DARK, restored.themeMode)
             assertEquals(true, restored.dynamicColorEnabled)
             assertEquals(false, restored.blurEnabled)
+            assertEquals(true, restored.progressiveTopBarBlurEnabled)
+            assertEquals(true, restored.hideBottomBar)
             assertEquals(true, restored.floatingBottomBar)
             assertEquals(true, restored.liquidGlass)
             assertEquals(true, restored.predictiveBackEnabled)
+            assertEquals(
+                NavigationTransitionStyle.AOSP,
+                restored.navigationTransitionStyle,
+            )
         } finally {
             repository.setThemeMode(original.themeMode)
             repository.setDynamicColorEnabled(original.dynamicColorEnabled)
             repository.setBlurEnabled(original.blurEnabled)
+            repository.setProgressiveTopBarBlurEnabled(
+                original.progressiveTopBarBlurEnabled,
+            )
+            repository.setHideBottomBar(original.hideBottomBar)
             repository.setFloatingBottomBar(original.floatingBottomBar)
             repository.setLiquidGlass(original.liquidGlass)
             repository.setPredictiveBackEnabled(original.predictiveBackEnabled)
+            repository.setNavigationTransitionStyle(original.navigationTransitionStyle)
         }
     }
 

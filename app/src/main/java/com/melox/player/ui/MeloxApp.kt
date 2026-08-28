@@ -49,6 +49,7 @@ import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.shrinkVertically
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.SideEffect
@@ -93,7 +94,6 @@ import androidx.compose.ui.zIndex
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
-import androidx.navigation3.runtime.NavEntry
 import com.melox.player.R
 import com.melox.player.data.library.AlbumGroup
 import com.melox.player.data.library.MusicSortConfig
@@ -113,9 +113,11 @@ import com.melox.player.model.PlaybackBackgroundStyle
 import com.melox.player.model.ScanStatus
 import com.melox.player.model.ThemeMode
 import com.melox.player.model.MusicTrack
-import com.melox.player.ui.component.MiuixBlurredBar
+import com.melox.player.ui.component.BlurredBar
+import com.melox.player.ui.component.LocalTopBarBlurSettings
+import com.melox.player.ui.component.TopBarBlurSettings
 import com.melox.player.ui.component.miuixBarColor
-import com.melox.player.ui.component.rememberMiuixBlurBackdrop
+import com.melox.player.ui.component.rememberBlurBackdrop
 import com.melox.player.ui.component.library.MusicSortButton
 import com.melox.player.ui.component.library.prefetchArtwork
 import com.melox.player.ui.component.library.extractArtworkColor
@@ -131,7 +133,6 @@ import com.melox.player.ui.component.playback.PlayerSheetArtworkOverlay
 import com.melox.player.ui.component.playback.PlayerSheetContentOverlay
 import com.melox.player.ui.component.playback.sharedArtworkTargetIsOnscreen
 import com.melox.player.ui.component.playback.playerSheetUsesFullPlayerStatusBar
-import com.melox.player.ui.component.playback.prefetchArtworkColorField
 import com.melox.player.ui.component.playback.prefetchBlurredArtworkBackground
 import com.melox.player.ui.component.playback.rememberPlayerSheetTransitionState
 import com.melox.player.ui.navigation.PredictiveNavDisplay
@@ -151,6 +152,7 @@ import com.melox.player.ui.screen.settings.ScanMusicScreen
 import com.melox.player.ui.screen.settings.MusicStatisticsScreen
 import com.melox.player.ui.screen.settings.AboutScreen
 import com.melox.player.ui.screen.settings.ThemeSettingsScreen
+import com.melox.player.ui.screen.settings.BlockedFoldersScreen
 import com.melox.player.ui.viewmodel.MeloxViewModel
 import com.melox.player.ui.theme.MeloxTheme
 import top.yukonga.miuix.kmp.basic.MiuixScrollBehavior
@@ -167,6 +169,9 @@ import top.yukonga.miuix.kmp.blur.layerBackdrop
 import top.yukonga.miuix.kmp.icon.MiuixIcons
 import top.yukonga.miuix.kmp.icon.basic.SearchCleanup
 import top.yukonga.miuix.kmp.icon.extended.Search
+import top.yukonga.miuix.kmp.nav.core.NavBackStack
+import top.yukonga.miuix.kmp.nav.core.NavKey
+import top.yukonga.miuix.kmp.nav.core.navBackStackOf
 import top.yukonga.miuix.kmp.squircle.squircleBorder
 import top.yukonga.miuix.kmp.squircle.squircleBackground
 import top.yukonga.miuix.kmp.theme.MiuixTheme
@@ -209,18 +214,35 @@ private enum class AppRoute {
     ALBUM_DETAIL,
     ARTIST_DETAIL,
     FOLDER_DETAIL,
+    BLOCKED_FOLDERS,
 }
 
 private data class AppNavDestination(
     val route: AppRoute,
     val contentKey: String? = null,
     val depth: Int,
-)
+) : NavKey
 
-// Keep Navigation3 identity tied to the stack slot so a return can swap the displayed
+// Keep miuix-nav identity tied to the stack slot so a return can swap the displayed
 // detail object without changing a pop into a forward replacement transition.
 private fun AppNavDestination.entryContentKey(): String =
     "melox:${route.name}:$depth"
+
+private fun synchronizeAppNavBackStack(
+    backStack: NavBackStack,
+    destinations: List<AppNavDestination>,
+) {
+    var sharedCount = 0
+    while (sharedCount < backStack.size && sharedCount < destinations.size) {
+        val current = backStack[sharedCount] as? AppNavDestination ?: break
+        val target = destinations[sharedCount]
+        if (current.entryContentKey() != target.entryContentKey()) break
+        if (current != target) backStack[sharedCount] = target
+        sharedCount += 1
+    }
+    while (backStack.size > sharedCount) backStack.removeAt(backStack.lastIndex)
+    for (index in sharedCount until destinations.size) backStack.add(destinations[index])
+}
 
 private enum class PermissionRequestSource {
     STARTUP,
@@ -283,7 +305,6 @@ fun MeloxApp(
     }
     PlaybackArtworkPrefetchEffect(
         viewModel = viewModel,
-        isDark = isDark,
         playbackBackgroundStyle = settings.playbackBackgroundStyle,
     )
     // API level alone is insufficient: liquid glass also needs RuntimeShader support at runtime.
@@ -560,6 +581,7 @@ fun MeloxApp(
         val albumsGridState = rememberLazyGridState()
         val artistsListState = rememberLazyListState()
         val foldersListState = rememberLazyListState()
+        val themeSettingsListState = rememberLazyListState()
         val windowWidth = with(LocalDensity.current) {
             LocalWindowInfo.current.containerSize.width.toDp()
         }
@@ -586,6 +608,7 @@ fun MeloxApp(
         val songsScrollBehavior = MiuixScrollBehavior()
         val libraryScrollBehavior = MiuixScrollBehavior()
         val settingsScrollBehavior = MiuixScrollBehavior()
+        val themeSettingsScrollBehavior = MiuixScrollBehavior()
         LaunchedEffect(
             pendingAlbumSortReset,
             librarySearchQuery,
@@ -728,15 +751,12 @@ fun MeloxApp(
                 ),
                 verticalAlignment = Alignment.Top,
                 overscrollEffect = null,
-                // Precomposing a blurred page records another full-screen backdrop.
-                beyondViewportPageCount = if (settings.blurEnabled) 0 else 1,
                 key = { it },
             ) { page ->
                 when (page) {
                     HOME_TAB_INDEX -> PlayerPage(
                         title = homeTitle,
                         outerPadding = outerPadding,
-                        blurEnabled = settings.blurEnabled,
                         scrollBehavior = homeScrollBehavior,
                     ) { contentPadding, scrollBehavior, _ ->
                         HomeScreen(
@@ -760,7 +780,6 @@ fun MeloxApp(
                     SONGS_TAB_INDEX -> PlayerPage(
                         title = musicTitle,
                         outerPadding = outerPadding,
-                        blurEnabled = settings.blurEnabled,
                         scrollBehavior = songsScrollBehavior,
                         actions = {
                             LibrarySearchButton(
@@ -842,7 +861,6 @@ fun MeloxApp(
                     LIBRARY_TAB_INDEX -> PlayerPage(
                         title = libraryTitle,
                         outerPadding = outerPadding,
-                        blurEnabled = settings.blurEnabled,
                         scrollBehavior = libraryScrollBehavior,
                         actions = {
                             LibrarySearchButton(
@@ -983,7 +1001,6 @@ fun MeloxApp(
                                 modifier = Modifier.fillMaxSize(),
                                 userScrollEnabled = false,
                                 verticalAlignment = Alignment.Top,
-                                beyondViewportPageCount = if (settings.blurEnabled) 0 else 1,
                                 key = { it },
                             ) { libraryPage ->
                                 when (libraryPage) {
@@ -991,6 +1008,7 @@ fun MeloxApp(
                                         displayedAlbums = albumPresentation.items,
                                         sectionIndexMap = albumPresentation.sectionIndexMap,
                                         query = librarySearchQuery,
+                                        scanStatus = uiState.scanStatus,
                                         sortConfig = albumSortConfig,
                                         onAlbumClick = { album ->
                                             dismissLibrarySearchFocus()
@@ -1010,6 +1028,7 @@ fun MeloxApp(
                                         displayedArtists = artistPresentation.items,
                                         sectionIndexMap = artistPresentation.sectionIndexMap,
                                         query = librarySearchQuery,
+                                        scanStatus = uiState.scanStatus,
                                         sortConfig = artistSortConfig,
                                         onArtistClick = { artist ->
                                             dismissLibrarySearchFocus()
@@ -1022,15 +1041,19 @@ fun MeloxApp(
                                         showIndex = false,
                                     )
 
-                                    LIBRARY_FOLDERS_TAB_INDEX -> FolderLibraryScreen(
+                                                    LIBRARY_FOLDERS_TAB_INDEX -> FolderLibraryScreen(
                                         displayedFolders = folderPresentation.items,
                                         sectionIndexMap = folderPresentation.sectionIndexMap,
                                         query = librarySearchQuery,
+                                        scanStatus = uiState.scanStatus,
                                         sortConfig = folderSortConfig,
                                         onFolderClick = { folder ->
                                             dismissLibrarySearchFocus()
                                             selectedFolderKey = folder.key
                                             currentRoute = AppRoute.FOLDER_DETAIL
+                                        },
+                                        onBlockFolder = { path ->
+                                            viewModel.addBlockedFolderPath(path)
                                         },
                                         scrollBehavior = libraryScrollBehavior,
                                         indexTopPadding = indexTopPadding,
@@ -1127,7 +1150,6 @@ fun MeloxApp(
                     SETTINGS_TAB_INDEX -> PlayerPage(
                         title = settingsTitle,
                         outerPadding = outerPadding,
-                        blurEnabled = settings.blurEnabled,
                         scrollBehavior = settingsScrollBehavior,
                     ) { contentPadding, scrollBehavior, _ ->
                         SettingsScreen(
@@ -1160,7 +1182,7 @@ fun MeloxApp(
             AppRoute.FOLDER_DETAIL -> selectedFolderKey
             else -> null
         }
-        val navBackStack = remember(
+        val desiredNavBackStack = remember(
             currentRoute,
             currentRouteContentKey,
             albumParentRoute,
@@ -1217,6 +1239,17 @@ fun MeloxApp(
                         ),
                     )
                 }
+                currentRoute == AppRoute.BLOCKED_FOLDERS -> listOf(
+                    root,
+                    AppNavDestination(
+                        route = AppRoute.SCAN_SETTINGS,
+                        depth = 1,
+                    ),
+                    AppNavDestination(
+                        route = AppRoute.BLOCKED_FOLDERS,
+                        depth = 2,
+                    ),
+                )
                 else -> listOf(
                     root,
                     AppNavDestination(
@@ -1226,6 +1259,12 @@ fun MeloxApp(
                     ),
                 )
             }
+        }
+        val navBackStack = remember {
+            navBackStackOf(*desiredNavBackStack.toTypedArray())
+        }
+        LaunchedEffect(desiredNavBackStack) {
+            synchronizeAppNavBackStack(navBackStack, desiredNavBackStack)
         }
         val navigateBack = {
             if (showQueue) {
@@ -1242,6 +1281,8 @@ fun MeloxApp(
                 artistParentAlbumKey != null
             ) {
                 returnToArtistParentAlbum(null)
+            } else if (currentRoute == AppRoute.BLOCKED_FOLDERS) {
+                currentRoute = AppRoute.SCAN_SETTINGS
             } else {
                 currentRoute = AppRoute.ROOT
             }
@@ -1252,11 +1293,17 @@ fun MeloxApp(
                 MiuixPopupHost()
             },
         ) { _ ->
-            Box(modifier = Modifier.fillMaxSize()) {
-                PlayerScaffold(
+            CompositionLocalProvider(
+                LocalTopBarBlurSettings provides TopBarBlurSettings(
+                    blurEnabled = settings.blurEnabled,
+                    progressiveEnabled = settings.progressiveTopBarBlurEnabled,
+                ),
+            ) {
+                Box(modifier = Modifier.fillMaxSize()) {
+                    PlayerScaffold(
                             selectedTab = playerPagerState.selectedPage,
                             onTabSelected = playerPagerState::animateToPage,
-                            showNavigation = currentRoute == AppRoute.ROOT,
+                            showNavigation = currentRoute == AppRoute.ROOT && !settings.hideBottomBar,
                             bottomBarStyle = renderedBottomBarStyle,
                             liquidGlassSupported = liquidGlassSupported,
                             isDark = isDark,
@@ -1292,7 +1339,7 @@ fun MeloxApp(
                                     onArtworkBoundsChanged = playerTransition::updateMiniArtworkBounds,
                                 )
                             },
-                        ) { outerPadding ->
+                    ) { outerPadding ->
                             val layoutDirection = LocalLayoutDirection.current
                             val currentOuterPadding by rememberUpdatedState(outerPadding)
                             var retainedRootBottomPadding by remember(
@@ -1320,13 +1367,14 @@ fun MeloxApp(
                                     backStack = navBackStack,
                                     predictiveBackEnabled =
                                         settings.predictiveBackEnabled && !showQueue,
+                                    transitionStyle = settings.navigationTransitionStyle,
+                                    isDark = isDark,
                                     onBack = navigateBack,
                                     modifier = Modifier.fillMaxSize(),
-                                    entryProvider = { route ->
-                                        NavEntry(
-                                            route,
-                                            contentKey = route.entryContentKey(),
-                                        ) {
+                                ) {
+                                    entry<AppNavDestination>(
+                                        contentKey = AppNavDestination::entryContentKey,
+                                    ) { route ->
                                             if (route.route == AppRoute.ROOT) {
                                                 content(currentRootPadding)
                                             } else {
@@ -1344,6 +1392,9 @@ fun MeloxApp(
                                                                 routeBottomPadding,
                                                             liquidGlassSupported =
                                                                 liquidGlassSupported,
+                                                            listState = themeSettingsListState,
+                                                            scrollBehavior =
+                                                                themeSettingsScrollBehavior,
                                                             onBack = navigateBack,
                                                             onThemeModeChange =
                                                                 viewModel::setThemeMode,
@@ -1355,12 +1406,18 @@ fun MeloxApp(
                                                                 viewModel::setPlaybackBackgroundStyle,
                                                             onBlurChange =
                                                                 viewModel::setBlurEnabled,
+                                                            onProgressiveTopBarBlurChange =
+                                                                viewModel::setProgressiveTopBarBlurEnabled,
+                                                            onHideBottomBarChange =
+                                                                viewModel::setHideBottomBar,
                                                             onFloatingBottomBarChange =
                                                                 viewModel::setFloatingBottomBar,
                                                             onLiquidGlassChange =
                                                                 viewModel::setLiquidGlass,
                                                             onPredictiveBackChange =
                                                                 viewModel::setPredictiveBackEnabled,
+                                                            onNavigationTransitionStyleChange =
+                                                                viewModel::setNavigationTransitionStyle,
                                                         )
 
                                                     AppRoute.SCAN_SETTINGS ->
@@ -1378,20 +1435,29 @@ fun MeloxApp(
                                                                 viewModel::addCustomFolderUri,
                                                             onRemoveCustomFolder =
                                                                 viewModel::removeCustomFolderUri,
+                                                            onOpenBlockedFolders = {
+                                                                currentRoute = AppRoute.BLOCKED_FOLDERS
+                                                            },
                                                             onStartScan = scanMusic,
+                                                        )
+
+                                                    AppRoute.BLOCKED_FOLDERS ->
+                                                        BlockedFoldersScreen(
+                                                            paths = settings.blockedFolderPaths,
+                                                            bottomContentPadding = routeBottomPadding,
+                                                            onBack = navigateBack,
+                                                            onUnblock = viewModel::removeBlockedFolderPath,
                                                         )
 
                                                     AppRoute.MUSIC_STATISTICS ->
                                                         MusicStatisticsScreen(
                                                             tracks = uiState.tracks,
-                                                            blurEnabled = settings.blurEnabled,
                                                             bottomContentPadding =
                                                                 routeBottomPadding,
                                                             onBack = navigateBack,
                                                         )
 
                                                     AppRoute.ABOUT -> AboutScreen(
-                                                        blurEnabled = settings.blurEnabled,
                                                         bottomContentPadding = routeBottomPadding,
                                                         onBack = navigateBack,
                                                     )
@@ -1410,7 +1476,6 @@ fun MeloxApp(
                                                                 album = it,
                                                                 artistGroups = uiState.artists,
                                                                 currentTrackId = currentTrackId,
-                                                                blurEnabled = settings.blurEnabled,
                                                                 bottomContentPadding =
                                                                     routeBottomPadding,
                                                                 onBack = navigateBack,
@@ -1442,7 +1507,6 @@ fun MeloxApp(
                                                                 artist = it,
                                                                 artistGroups = uiState.artists,
                                                                 currentTrackId = currentTrackId,
-                                                                blurEnabled = settings.blurEnabled,
                                                                 bottomContentPadding =
                                                                     routeBottomPadding,
                                                                 albumGridStyle =
@@ -1477,7 +1541,6 @@ fun MeloxApp(
                                                                 folder = it,
                                                                 artistGroups = uiState.artists,
                                                                 currentTrackId = currentTrackId,
-                                                                blurEnabled = settings.blurEnabled,
                                                                 bottomContentPadding =
                                                                     routeBottomPadding,
                                                                 onBack = navigateBack,
@@ -1500,16 +1563,14 @@ fun MeloxApp(
                                                 }
                                             }
                                         }
-                                    },
-                                )
-                            }
+                                    }
+                                }
                         }
                     if (playerTransition.isMounted) {
                         FullPlayerHost(
                             viewModel = viewModel,
                             tracks = uiState.tracks,
                             artistGroups = uiState.artists,
-                            isDark = isDark,
                             playbackBackgroundStyle =
                                 settings.playbackBackgroundStyle,
                             lyricFontScale = settings.lyricFontScale,
@@ -1517,6 +1578,7 @@ fun MeloxApp(
                             forceWordByWordLyrics = settings.forceWordByWordLyrics,
                             lyricBlurEnabled = settings.lyricBlurEnabled,
                             centerLyrics = settings.centerLyrics,
+                            leftAlignPlayerTitle = settings.leftAlignPlayerTitle,
                             hideControlsOnLyrics = settings.hideControlsOnLyrics,
                             showLyricsTranslation = settings.showLyricsTranslation,
                             onDismiss = closePlayer,
@@ -1576,19 +1638,20 @@ fun MeloxApp(
         }
     }
 }
+}
 
 @Composable
 private fun FullPlayerHost(
     viewModel: MeloxViewModel,
     tracks: List<MusicTrack>,
     artistGroups: List<ArtistGroup>,
-    isDark: Boolean,
     playbackBackgroundStyle: PlaybackBackgroundStyle,
     lyricFontScale: Float,
     lyricFontWeight: Int,
     forceWordByWordLyrics: Boolean,
     lyricBlurEnabled: Boolean,
     centerLyrics: Boolean,
+    leftAlignPlayerTitle: Boolean,
     hideControlsOnLyrics: Boolean,
     showLyricsTranslation: Boolean,
     onDismiss: () -> Unit,
@@ -1621,13 +1684,13 @@ private fun FullPlayerHost(
         playback = playback,
         currentTrack = currentTrack,
         lyrics = lyrics,
-        isDark = isDark,
         playbackBackgroundStyle = playbackBackgroundStyle,
         lyricFontScale = lyricFontScale,
         lyricFontWeight = lyricFontWeight,
         forceWordByWordLyrics = forceWordByWordLyrics,
         lyricBlurEnabled = lyricBlurEnabled,
         centerLyrics = centerLyrics,
+        leftAlignPlayerTitle = leftAlignPlayerTitle,
         hideControlsOnLyrics = hideControlsOnLyrics,
         showLyricsTranslation = showLyricsTranslation,
         onLyricFontScaleChange = viewModel::setLyricFontScale,
@@ -1635,6 +1698,7 @@ private fun FullPlayerHost(
         onForceWordByWordLyricsChange = viewModel::setForceWordByWordLyrics,
         onLyricBlurEnabledChange = viewModel::setLyricBlurEnabled,
         onCenterLyricsChange = viewModel::setCenterLyrics,
+        onLeftAlignPlayerTitleChange = viewModel::setLeftAlignPlayerTitle,
         onHideControlsOnLyricsChange = viewModel::setHideControlsOnLyrics,
         onShowLyricsTranslationChange = viewModel::setShowLyricsTranslation,
         onDismiss = onDismiss,
@@ -1724,7 +1788,6 @@ private fun playerSheetArtworkIsOffscreen(
 @Composable
 private fun PlaybackArtworkPrefetchEffect(
     viewModel: MeloxViewModel,
-    isDark: Boolean,
     playbackBackgroundStyle: PlaybackBackgroundStyle,
 ) {
     val playback by viewModel.compactPlaybackState.collectAsStateWithLifecycle()
@@ -1736,7 +1799,6 @@ private fun PlaybackArtworkPrefetchEffect(
         playback.currentIndex,
         playback.queue,
         artworkPrefetchSizePx,
-        isDark,
         playbackBackgroundStyle,
     ) {
         if (playback.queue.isEmpty() || playback.currentIndex !in playback.queue.indices) {
@@ -1748,7 +1810,7 @@ private fun PlaybackArtworkPrefetchEffect(
             (playback.currentIndex - 1 + playback.queue.size) % playback.queue.size,
         ).distinct().forEach { index ->
             val item = playback.queue[index]
-            val artwork = prefetchArtwork(
+            prefetchArtwork(
                 context = applicationContext,
                 contentUri = item.contentUri,
                 dateModifiedEpochSeconds = item.dateModifiedEpochSeconds,
@@ -1756,9 +1818,7 @@ private fun PlaybackArtworkPrefetchEffect(
                 targetSizePx = artworkPrefetchSizePx,
             )
             when (playbackBackgroundStyle) {
-                PlaybackBackgroundStyle.FLOWING_COLORS -> {
-                    prefetchArtworkColorField(artwork, isDark)
-                }
+                PlaybackBackgroundStyle.DYNAMIC_FLOW -> Unit
 
                 PlaybackBackgroundStyle.BLURRED_ARTWORK -> {
                     prefetchBlurredArtworkBackground(
@@ -1767,11 +1827,11 @@ private fun PlaybackArtworkPrefetchEffect(
                         dateModifiedEpochSeconds = item.dateModifiedEpochSeconds,
                         fileSizeBytes = item.fileSizeBytes,
                     )
+                    }
                 }
             }
         }
     }
-}
 
 @Composable
 private fun QueueSheetHost(
@@ -1815,6 +1875,9 @@ private fun LibraryTabRow(
     modifier: Modifier = Modifier,
     blurred: Boolean = false,
 ) {
+    val progressiveBlurActive = blurred &&
+        LocalTopBarBlurSettings.current.progressiveEnabled &&
+        isRuntimeShaderSupported()
     Row(
         modifier = modifier
             .height(38.dp)
@@ -1842,7 +1905,9 @@ private fun LibraryTabRow(
                     .then(
                         if (selected) {
                             Modifier.squircleBackground(
-                                color = MiuixTheme.colorScheme.surfaceContainer,
+                                color = MiuixTheme.colorScheme.surfaceContainer.copy(
+                                    alpha = if (progressiveBlurActive) 0.8f else 1f,
+                                ),
                                 cornerRadius = 12.dp,
                             )
                         } else {
@@ -1902,6 +1967,10 @@ internal fun LibrarySearchBar(
     onFocusedChange: (Boolean) -> Unit,
     onVisibleChange: (Boolean) -> Unit,
 ) {
+    val topBarBlurSettings = LocalTopBarBlurSettings.current
+    val progressiveBlurActive = topBarBlurSettings.blurEnabled &&
+        topBarBlurSettings.progressiveEnabled &&
+        isRuntimeShaderSupported()
     val clearSearchContentDescription = stringResource(R.string.search_clear)
     val imeVisible = WindowInsets.isImeVisible
     val searchFocusManager = LocalFocusManager.current
@@ -1952,6 +2021,9 @@ internal fun LibrarySearchBar(
                     expanded = visible,
                     onExpandedChange = handleExpandedChange,
                     label = label,
+                    color = MiuixTheme.colorScheme.surfaceContainerHigh.copy(
+                        alpha = if (progressiveBlurActive) 0.8f else 1f,
+                    ),
                     trailingIcon = {
                         AnimatedVisibility(
                             visible = query.isNotEmpty(),
@@ -2001,7 +2073,6 @@ private fun expandedTopBarBottomContentGap(
 private fun PlayerPage(
     title: String,
     outerPadding: PaddingValues,
-    blurEnabled: Boolean,
     scrollBehavior: ScrollBehavior,
     actions: @Composable RowScope.() -> Unit = {},
     bottomContent: @Composable () -> Unit = {},
@@ -2010,7 +2081,7 @@ private fun PlayerPage(
     val layoutDirection = LocalLayoutDirection.current
     val density = LocalDensity.current
     val windowSize = LocalWindowInfo.current.containerSize
-    val topBarBackdrop = rememberMiuixBlurBackdrop(enabled = blurEnabled)
+    val topBarBackdrop = rememberBlurBackdrop()
     var bottomContentHeightPx by remember { mutableIntStateOf(0) }
     var bottomContentMeasured by remember { mutableStateOf(false) }
     var fixedExpandedBarPadding by remember(scrollBehavior, density, windowSize) {
@@ -2018,8 +2089,12 @@ private fun PlayerPage(
     }
 
     Scaffold(
-        topBar = {
-            MiuixBlurredBar(topBarBackdrop) {
+            topBar = {
+            BlurredBar(
+                backdrop = topBarBackdrop,
+                blurEnabled = topBarBackdrop != null,
+                scrollBehavior = scrollBehavior,
+            ) {
                 TopAppBar(
                     title = title,
                     color = topBarBackdrop.miuixBarColor(),
@@ -2038,7 +2113,7 @@ private fun PlayerPage(
                 )
             }
         },
-    ) { innerPadding ->
+        ) { innerPadding ->
         val bottomContentHeight = with(density) { bottomContentHeightPx.toDp() }
         val currentBarPadding =
             (innerPadding.calculateTopPadding() - bottomContentHeight).coerceAtLeast(0.dp)

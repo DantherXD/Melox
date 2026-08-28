@@ -8,8 +8,9 @@ package com.melox.player.model
  * [titleSectionKey] and [titleSortKey] keep the displayed order aligned with the fast index.
  * [dateAddedEpochSeconds], [dateModifiedEpochSeconds], [fileName], and [fileSizeBytes] preserve
  * MediaStore values used by sorting and artwork-cache invalidation. [albumId] keeps the stable
- * MediaStore album identity, while [folderPath] is the normalized direct parent directory used by
- * the folder library. Optional audio format fields come from TagLib and support quality badges.
+ * MediaStore album identity, [mediaStoreId] retains the source row ID when [id] is made globally
+ * unique across storage volumes, while [folderPath] is the normalized direct parent directory used
+ * by the folder library. Optional audio format fields come from TagLib and support quality badges.
  * [audioPropertiesScanned] distinguishes an unreadable file from an older snapshot that has not
  * attempted the descriptor-based read yet.
  */
@@ -32,6 +33,7 @@ data class MusicTrack(
     val titleSortKey: String,
     val folderPath: String? = null,
     val albumId: Long? = null,
+    val mediaStoreId: Long? = null,
     val mimeType: String? = null,
     val bitrateBitsPerSecond: Int? = null,
     val sampleRateHz: Int? = null,
