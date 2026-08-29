@@ -19,6 +19,8 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
+import androidx.compose.ui.draw.blur
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
@@ -41,6 +43,7 @@ import top.yukonga.miuix.kmp.basic.Icon
 import top.yukonga.miuix.kmp.basic.Text
 import top.yukonga.miuix.kmp.icon.MiuixIcons
 import top.yukonga.miuix.kmp.icon.extended.More
+import top.yukonga.miuix.kmp.squircle.squircleClip
 import top.yukonga.miuix.kmp.theme.MiuixTheme
 
 enum class MusicTrackDescriptionMode {
@@ -57,6 +60,7 @@ fun MusicTrackRow(
     onMoreClick: () -> Unit,
     modifier: Modifier = Modifier,
     descriptionMode: MusicTrackDescriptionMode = MusicTrackDescriptionMode.ArtistAndAlbum,
+    artworkOverlayText: String? = null,
 ) {
     val title = track.title ?: stringResource(R.string.music_unknown_title)
     val moreActionLabel = stringResource(R.string.music_more_actions, title)
@@ -81,6 +85,7 @@ fun MusicTrackRow(
             track = track,
             isCurrent = isCurrent,
             descriptionMode = descriptionMode,
+            artworkOverlayText = artworkOverlayText,
         )
 
         Row(
@@ -148,6 +153,7 @@ private fun RowScope.MusicTrackLeadingContent(
     descriptionMode: MusicTrackDescriptionMode,
     artworkSize: Dp = 48.dp,
     artworkCornerRadius: Dp = 6.dp,
+    artworkOverlayText: String? = null,
 ) {
     val title = track.title ?: stringResource(R.string.music_unknown_title)
     val artist = displayArtistName(track.artist) ?: stringResource(R.string.music_unknown_artist)
@@ -196,13 +202,39 @@ private fun RowScope.MusicTrackLeadingContent(
         }
     }
 
-    TrackArtwork(
-        contentUri = track.contentUri,
-        dateModifiedEpochSeconds = track.dateModifiedEpochSeconds,
-        fileSizeBytes = track.fileSizeBytes,
-        size = artworkSize,
-        cornerRadius = artworkCornerRadius,
-    )
+    if (artworkOverlayText == null) {
+        TrackArtwork(
+            contentUri = track.contentUri,
+            dateModifiedEpochSeconds = track.dateModifiedEpochSeconds,
+            fileSizeBytes = track.fileSizeBytes,
+            size = artworkSize,
+            cornerRadius = artworkCornerRadius,
+        )
+    } else {
+        Box(
+            modifier = Modifier.size(artworkSize),
+            contentAlignment = Alignment.Center,
+        ) {
+            TrackArtwork(
+                contentUri = track.contentUri,
+                dateModifiedEpochSeconds = track.dateModifiedEpochSeconds,
+                fileSizeBytes = track.fileSizeBytes,
+                modifier = Modifier
+                    .squircleClip(artworkCornerRadius)
+                    .blur(6.dp)
+                    .alpha(0.1f),
+                size = artworkSize,
+                cornerRadius = artworkCornerRadius,
+            )
+            Text(
+                text = artworkOverlayText,
+                style = MiuixTheme.textStyles.headline1,
+                color = MiuixTheme.colorScheme.onSurface,
+                fontWeight = FontWeight.Medium,
+                maxLines = 1,
+            )
+        }
+    }
 
     Column(
         modifier = Modifier.weight(1f),

@@ -17,6 +17,7 @@
     <string name="music_scan_failed">Scan failed</string>
     <string name="music_empty_after_scan">No music found</string>
     <string name="music_unknown_title">Unknown title</string>
+    <string name="music_track_number_missing">-</string>
     <string name="music_unknown_artist">Unknown artist</string>
     <string name="music_sort_action">Sort songs</string>
     <string name="music_sort_title">Title</string>
@@ -85,6 +86,8 @@
         <item quantity="other">%1$d songs  %2$d</item>
     </plurals>
     <string name="album_detail_year">%1$d</string>
+    <string name="album_disc_title">DISC %1$d</string>
+    <string name="album_disc_details">( %1$d / %2$s )</string>
 
     <string name="artist_sort_action">Sort artists</string>
     <string name="artist_sort_name">Name</string>

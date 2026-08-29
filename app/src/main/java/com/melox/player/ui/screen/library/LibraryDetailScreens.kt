@@ -30,15 +30,20 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.text.SpanStyle
+import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.melox.player.R
 import com.melox.player.data.library.AlbumGroup
+import com.melox.player.data.library.AlbumDiscSection
 import com.melox.player.data.library.AlbumGridStyle
 import com.melox.player.data.library.ArtistGroup
+import com.melox.player.data.library.buildAlbumDiscSections
 import com.melox.player.data.library.buildAlbumGroups
 import com.melox.player.data.library.displayArtistName
 import com.melox.player.model.MusicTrack
@@ -51,6 +56,7 @@ import com.melox.player.ui.component.library.MusicTrackDescriptionMode
 import com.melox.player.ui.component.library.MusicTrackRow
 import com.melox.player.ui.component.library.PlaybackArtwork
 import com.melox.player.ui.component.library.TrackActionsOverlay
+import com.melox.player.ui.component.library.formatDuration
 import com.melox.player.ui.component.library.participatingArtistGroups
 import kotlinx.coroutines.launch
 import top.yukonga.miuix.kmp.basic.Card
@@ -89,6 +95,11 @@ fun AlbumDetailScreen(
     val pagerState = rememberPagerState(pageCount = { 2 })
     val scope = rememberCoroutineScope()
     val tabRowBackgroundColor = backdrop.miuixBarColor()
+    val trackSections = remember(album.tracks) { buildAlbumDiscSections(album.tracks) }
+    val orderedTracks = remember(trackSections) { trackSections.flatMap(AlbumDiscSection::tracks) }
+    val orderedTrackIndices = remember(orderedTracks) {
+        orderedTracks.mapIndexed { index, track -> track.id to index }.toMap()
+    }
     val participatingArtists = remember(album.tracks, artistGroups) {
         participatingArtistGroups(album.tracks, artistGroups)
     }
@@ -173,17 +184,33 @@ fun AlbumDetailScreen(
                         ),
                         overscrollEffect = null,
                     ) {
-                        itemsIndexed(
-                            items = album.tracks,
-                            key = { _, track -> track.id },
-                        ) { index, track ->
-                            MusicTrackRow(
-                                track = track,
-                                isCurrent = track.id == currentTrackId,
-                                onClick = { onTrackClick(album.tracks, index) },
-                                onMoreClick = { selectedTrack = track },
-                                descriptionMode = MusicTrackDescriptionMode.Artist,
-                            )
+                        trackSections.forEach { section ->
+                            section.discNumber?.let { discNumber ->
+                                item(key = "disc:$discNumber") {
+                                    AlbumDiscSectionHeader(section)
+                                }
+                            }
+                            items(
+                                items = section.tracks,
+                                key = MusicTrack::id,
+                            ) { track ->
+                                MusicTrackRow(
+                                    track = track,
+                                    isCurrent = track.id == currentTrackId,
+                                    onClick = {
+                                        onTrackClick(
+                                            orderedTracks,
+                                            orderedTrackIndices.getValue(track.id),
+                                        )
+                                    },
+                                    onMoreClick = { selectedTrack = track },
+                                    descriptionMode = MusicTrackDescriptionMode.Artist,
+                                    artworkOverlayText = track.trackNumber
+                                        ?.takeIf { it > 0 }
+                                        ?.toString()
+                                        ?: stringResource(R.string.music_track_number_missing),
+                                )
+                            }
                         }
                     }
                 } else if (participatingArtists.isEmpty()) {
@@ -237,6 +264,37 @@ fun AlbumDetailScreen(
             onExternalEditReturned = onExternalEditReturned,
         )
     }
+}
+
+@Composable
+private fun AlbumDiscSectionHeader(section: AlbumDiscSection) {
+    val discTitle = stringResource(
+        R.string.album_disc_title,
+        requireNotNull(section.discNumber),
+    )
+    val discDetails = stringResource(
+        R.string.album_disc_details,
+        section.tracks.size,
+        formatDuration(section.totalDurationMs),
+    )
+    val titleColor = MiuixTheme.colorScheme.onSurface
+    val detailsColor = MiuixTheme.colorScheme.onSurfaceVariantSummary
+    Text(
+        modifier = Modifier.padding(
+            start = 28.dp,
+            top = 20.dp,
+            end = 28.dp,
+            bottom = 8.dp,
+        ),
+        text = buildAnnotatedString {
+            withStyle(SpanStyle(color = titleColor)) { append(discTitle) }
+            append(' ')
+            withStyle(SpanStyle(color = detailsColor)) { append(discDetails) }
+        },
+        style = MiuixTheme.textStyles.subtitle,
+        maxLines = 1,
+        overflow = TextOverflow.Ellipsis,
+    )
 }
 
 @Composable

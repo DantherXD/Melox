@@ -18,6 +18,7 @@ import com.melox.player.data.library.MusicLibrarySnapshotCodec
 import com.melox.player.data.library.MusicSortConfig
 import com.melox.player.data.library.MusicSortField
 import com.melox.player.data.library.buildAlbumGroups
+import com.melox.player.data.library.buildAlbumDiscSections
 import com.melox.player.data.library.buildArtistGroups
 import com.melox.player.data.library.buildFolderGroups
 import com.melox.player.data.library.createMusicSortKeys
@@ -1682,6 +1683,36 @@ class UiLogicTest {
         )
         assertEquals(2, artists.first { it.name == "Artist A" }.tracks.size)
         assertEquals(1, artists.first { it.name == "Artist A" }.albumCount)
+    }
+
+    @Test
+    fun albumDiscSectionsSortMissingMetadataBeforeNumberedTracks() {
+        val tracks = listOf(
+            musicTrack(7L, "Disc One Track Two", 7L, "7.mp3", 7L, 7_000L)
+                .copy(discNumber = 1, trackNumber = 2),
+            musicTrack(1L, "Unnumbered B", 1L, "1.mp3", 1L, 1_000L),
+            musicTrack(9L, "Disc Two Track Three", 9L, "9.mp3", 9L, 9_000L)
+                .copy(discNumber = 2, trackNumber = 3),
+            musicTrack(5L, "Disc One Missing B", 5L, "5.mp3", 5L, 5_000L)
+                .copy(discNumber = 1),
+            musicTrack(3L, "Numbered Two", 3L, "3.mp3", 3L, 3_000L)
+                .copy(trackNumber = 2),
+            musicTrack(8L, "Disc One Track One", 8L, "8.mp3", 8L, 8_000L)
+                .copy(discNumber = 1, trackNumber = 1),
+            musicTrack(2L, "Unnumbered A", 2L, "2.mp3", 2L, 2_000L),
+            musicTrack(6L, "Disc One Missing A", 6L, "6.mp3", 6L, 6_000L)
+                .copy(discNumber = 1),
+            musicTrack(4L, "Numbered One", 4L, "4.mp3", 4L, 4_000L)
+                .copy(trackNumber = 1),
+        )
+
+        val sections = buildAlbumDiscSections(tracks)
+
+        assertEquals(listOf(null, 1, 2), sections.map { it.discNumber })
+        assertEquals(listOf(2L, 1L, 4L, 3L), sections[0].tracks.map(MusicTrack::id))
+        assertEquals(listOf(6L, 5L, 8L, 7L), sections[1].tracks.map(MusicTrack::id))
+        assertEquals(listOf(9L), sections[2].tracks.map(MusicTrack::id))
+        assertEquals(listOf(10_000L, 26_000L, 9_000L), sections.map { it.totalDurationMs })
     }
 
     @Test
