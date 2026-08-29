@@ -73,7 +73,7 @@ internal fun BlurredBar(
                         gradient = ProgressiveBlur.Top.copy(
                             startFraction = 0f,
                             endFraction = 1f,
-                            curve = 3f,
+                            curve = 10f,
                         ),
                         blurRadius = 10f,
                         colors = barBlurColors(progressive = true),
