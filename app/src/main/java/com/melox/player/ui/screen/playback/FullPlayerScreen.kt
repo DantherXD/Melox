@@ -1398,7 +1398,7 @@ private fun PlayerHeader(
                                 PLAYER_HEADER_MARQUEE_SPACING_FRACTION,
                             ),
                         ),
-                    contentAlignment = Alignment.CenterStart,
+                    contentAlignment = if (leftAligned) Alignment.CenterStart else Alignment.Center,
                 ) {
                     Text(
                         text = target.title,
