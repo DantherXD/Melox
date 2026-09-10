@@ -10,6 +10,7 @@ import androidx.compose.animation.shrinkVertically
 import androidx.compose.animation.slideInVertically
 import androidx.compose.animation.slideOutVertically
 import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
@@ -17,20 +18,32 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.WindowInsetsSides
+import androidx.compose.foundation.layout.asPaddingValues
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.navigationBars
 import androidx.compose.foundation.layout.navigationBarsPadding
+import androidx.compose.foundation.layout.only
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.draw.drawWithContent
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalWindowInfo
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import com.melox.player.R
 import com.melox.player.model.BottomBarStyle
@@ -42,6 +55,7 @@ import top.yukonga.miuix.kmp.basic.NavigationBarItem
 import top.yukonga.miuix.kmp.basic.NavigationItem
 import top.yukonga.miuix.kmp.basic.NavigationRail
 import top.yukonga.miuix.kmp.basic.NavigationRailItem
+import top.yukonga.miuix.kmp.basic.NavigationRailValue
 import top.yukonga.miuix.kmp.basic.Scaffold
 import top.yukonga.miuix.kmp.basic.DividerDefaults
 import top.yukonga.miuix.kmp.basic.HorizontalDivider
@@ -53,6 +67,8 @@ import top.yukonga.miuix.kmp.icon.extended.Album
 import top.yukonga.miuix.kmp.icon.extended.Home
 import top.yukonga.miuix.kmp.icon.extended.Music
 import top.yukonga.miuix.kmp.icon.extended.Settings
+import top.yukonga.miuix.kmp.layout.BottomSheetDefaults
+import top.yukonga.miuix.kmp.basic.rememberNavigationRailState
 
 internal data class MiniPlayerChrome(
     val style: BottomBarStyle,
@@ -64,6 +80,10 @@ internal data class MiniPlayerChrome(
 )
 
 internal const val NORMAL_BAR_STROKE_ALPHA = 0.42f
+private const val NAVIGATION_ENTER_DURATION_MILLIS = 280
+private const val NAVIGATION_EXIT_DURATION_MILLIS = 240
+private const val NAVIGATION_FADE_IN_DURATION_MILLIS = 180
+private const val NAVIGATION_FADE_OUT_DURATION_MILLIS = 140
 
 /** Holds the persistent bottom navigation while pages render inside the shared Pager. */
 @Composable
@@ -71,6 +91,9 @@ internal fun PlayerScaffold(
     selectedTab: Int,
     onTabSelected: (Int) -> Unit,
     showNavigation: Boolean,
+    showNavigationRailOnSecondary: Boolean = false,
+    persistedNavigationRailExpanded: Boolean = true,
+    onNavigationRailExpandedChange: (Boolean) -> Unit = {},
     bottomBarStyle: BottomBarStyle,
     liquidGlassSupported: Boolean,
     isDark: Boolean,
@@ -78,7 +101,7 @@ internal fun PlayerScaffold(
     backdropRefreshKey: Any,
     backdropPagingSignal: () -> Float,
     miniPlayer: @Composable (MiniPlayerChrome) -> Unit,
-    content: @Composable (PaddingValues) -> Unit,
+    content: @Composable (PaddingValues, navigationRailExpanded: Boolean) -> Unit,
 ) {
     val homeLabel = stringResource(R.string.navigation_home)
     val songsLabel = stringResource(R.string.navigation_music)
@@ -98,26 +121,168 @@ internal fun PlayerScaffold(
         )
     }
     val effectiveStyle = resolveBottomBarStyle(bottomBarStyle, liquidGlassSupported)
-    val windowWidth = with(LocalDensity.current) {
-        LocalWindowInfo.current.containerSize.width.toDp()
-    }
-    val useNavigationRail = windowWidth >= 600.dp
+    val windowSize = LocalWindowInfo.current.containerSize
+    val density = LocalDensity.current
+    val windowWidth = with(density) { windowSize.width.toDp() }
+    val windowHeight = with(density) { windowSize.height.toDp() }
+    val useNavigationRail = shouldUseNavigationRail(
+        windowWidth = windowWidth,
+        windowHeight = windowHeight,
+        effectiveStyle = effectiveStyle,
+    )
+    val landscape = isMiuixWideLayout(windowWidth, windowHeight)
+    val expandNavigationRail = landscape && windowWidth >= 1200.dp
+    val navigationRailState = rememberNavigationRailState(
+        initialValue = if (expandNavigationRail && persistedNavigationRailExpanded) {
+            NavigationRailValue.Expanded
+        } else {
+            NavigationRailValue.Collapsed
+        },
+    )
     val routeBackdropRefresh = remember { Animatable(1f) }
     val currentBackdropPagingSignal by rememberUpdatedState(backdropPagingSignal)
     LaunchedEffect(backdropRefreshKey) {
         routeBackdropRefresh.snapTo(0f)
         routeBackdropRefresh.animateTo(1f, tween(650))
     }
+    LaunchedEffect(expandNavigationRail) {
+        if (!expandNavigationRail) {
+            navigationRailState.collapse()
+        } else if (persistedNavigationRailExpanded) {
+            navigationRailState.expand()
+        }
+    }
+    LaunchedEffect(
+        navigationRailState.currentValue,
+        useNavigationRail,
+        effectiveStyle,
+        windowWidth,
+        windowHeight,
+    ) {
+        if (useNavigationRail && effectiveStyle == BottomBarStyle.NORMAL &&
+            landscape
+        ) {
+            onNavigationRailExpandedChange(navigationRailState.isExpanded)
+        }
+    }
     val backdropRefreshSignal = {
         routeBackdropRefresh.value + currentBackdropPagingSignal()
     }
 
+    if (useNavigationRail && landscape) {
+        val miniPlayerBackdrop = rememberBlurBackdrop()
+        val navigationRailVisible = showNavigation || showNavigationRailOnSecondary
+        val navigationBarBottomInset = WindowInsets.navigationBars
+            .only(WindowInsetsSides.Bottom)
+            .asPaddingValues()
+            .calculateBottomPadding()
+        val miniPlayerBottomPadding = if (navigationBarBottomInset > 0.dp) {
+            (navigationBarBottomInset - PLAYER_NORMAL_MINI_PLAYER_INTERNAL_PADDING)
+                .coerceAtLeast(0.dp)
+        } else {
+            PLAYER_RAIL_MINI_PLAYER_BOTTOM_SPACING_WITHOUT_NAV -
+                PLAYER_NORMAL_MINI_PLAYER_INTERNAL_PADDING
+        }
+        Box(modifier = Modifier.fillMaxSize()) {
+            Row(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .drawWithContent {
+                        @Suppress("UNUSED_VARIABLE")
+                        val refreshFrame = backdropRefreshSignal()
+                        drawContent()
+                    }
+                    .then(
+                        miniPlayerBackdrop?.let { Modifier.layerBackdrop(it) } ?: Modifier,
+                    ),
+            ) {
+                AnimatedVisibility(
+                    visible = navigationRailVisible,
+                    enter = fadeIn(tween(NAVIGATION_FADE_IN_DURATION_MILLIS)) +
+                        expandHorizontally(tween(NAVIGATION_ENTER_DURATION_MILLIS)),
+                    exit = fadeOut(tween(NAVIGATION_FADE_OUT_DURATION_MILLIS)) +
+                        shrinkHorizontally(tween(NAVIGATION_EXIT_DURATION_MILLIS)),
+                ) {
+                    NavigationRail(
+                        state = navigationRailState,
+                        expandContentDescription = stringResource(R.string.navigation_expand),
+                        collapseContentDescription = stringResource(R.string.navigation_collapse),
+                    ) {
+                        navigationItems.forEachIndexed { index, item ->
+                            NavigationRailItem(
+                                selected = selectedTab == index,
+                                onClick = { onTabSelected(index) },
+                                icon = item.icon,
+                                label = item.label,
+                            )
+                        }
+                    }
+                }
+                Box(
+                    modifier = Modifier
+                        .weight(1f)
+                        .fillMaxHeight()
+                        .clipToBounds(),
+                ) {
+                    Scaffold(
+                        modifier = Modifier.fillMaxSize(),
+                        containerColor = Color.Transparent,
+                        bottomBar = {
+                            Spacer(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .height(PLAYER_NORMAL_MINI_PLAYER_HEIGHT + miniPlayerBottomPadding),
+                            )
+                        },
+                    ) { innerPadding ->
+                        Box(modifier = Modifier.fillMaxSize()) {
+                            content(
+                                innerPadding,
+                                navigationRailVisible && navigationRailState.isExpanded,
+                            )
+                        }
+                    }
+                }
+            }
+
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(bottom = miniPlayerBottomPadding),
+                contentAlignment = Alignment.BottomCenter,
+            ) {
+                Box(
+                    modifier = Modifier
+                        .widthIn(
+                            max = BottomSheetDefaults.maxWidth +
+                                PLAYER_NORMAL_MINI_PLAYER_INTERNAL_PADDING * 2,
+                        )
+                        .fillMaxWidth(),
+                ) {
+                    miniPlayer(
+                        MiniPlayerChrome(
+                            style = BottomBarStyle.NORMAL,
+                            backdrop = miniPlayerBackdrop,
+                            blurActive = miniPlayerBackdrop != null,
+                            liquidGlassActive = false,
+                            isDark = isDark,
+                        ),
+                    )
+                }
+            }
+        }
+        return
+    }
+
     if (useNavigationRail) {
+        val navigationRailVisible = showNavigation || showNavigationRailOnSecondary
         Row(modifier = Modifier.fillMaxSize()) {
             AnimatedVisibility(
-                visible = showNavigation,
-                enter = fadeIn(tween(180)) + expandHorizontally(tween(260)),
-                exit = fadeOut(tween(140)) + shrinkHorizontally(tween(220)),
+                visible = navigationRailVisible,
+                enter = fadeIn(tween(NAVIGATION_FADE_IN_DURATION_MILLIS)) +
+                    expandHorizontally(tween(NAVIGATION_ENTER_DURATION_MILLIS)),
+                exit = fadeOut(tween(NAVIGATION_FADE_OUT_DURATION_MILLIS)) +
+                    shrinkHorizontally(tween(NAVIGATION_EXIT_DURATION_MILLIS)),
             ) {
                 NavigationRail {
                     navigationItems.forEachIndexed { index, item ->
@@ -130,30 +295,37 @@ internal fun PlayerScaffold(
                     }
                 }
             }
-            Scaffold(
-                modifier = Modifier.weight(1f),
-                containerColor = Color.Transparent,
-                bottomBar = {
-                    Column {
-                        miniPlayer(
-                            MiniPlayerChrome(
-                                style = BottomBarStyle.NORMAL,
-                                backdrop = null,
-                                blurActive = false,
-                                liquidGlassActive = false,
-                                isDark = isDark,
-                            ),
-                        )
-                        Spacer(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .navigationBarsPadding(),
-                        )
+            Box(
+                modifier = Modifier
+                    .weight(1f)
+                    .fillMaxHeight()
+                    .clipToBounds(),
+            ) {
+                Scaffold(
+                    modifier = Modifier.fillMaxSize(),
+                    containerColor = Color.Transparent,
+                    bottomBar = {
+                        Column {
+                            miniPlayer(
+                                MiniPlayerChrome(
+                                    style = BottomBarStyle.NORMAL,
+                                    backdrop = null,
+                                    blurActive = false,
+                                    liquidGlassActive = false,
+                                    isDark = isDark,
+                                ),
+                            )
+                            Spacer(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .navigationBarsPadding(),
+                            )
+                        }
+                    },
+                ) { innerPadding ->
+                    Box(modifier = Modifier.fillMaxSize()) {
+                        content(innerPadding, false)
                     }
-                },
-            ) { innerPadding ->
-                Box(modifier = Modifier.fillMaxSize()) {
-                    content(innerPadding)
                 }
             }
         }
@@ -172,7 +344,7 @@ internal fun PlayerScaffold(
             showNavigation = showNavigation,
             miniPlayer = miniPlayer,
             backdropRefreshSignal = backdropRefreshSignal,
-            content = content,
+            content = { padding -> content(padding, false) },
         )
     } else {
         BasePlayerScaffold(
@@ -184,7 +356,7 @@ internal fun PlayerScaffold(
             showNavigation = showNavigation,
             miniPlayer = miniPlayer,
             backdropRefreshSignal = backdropRefreshSignal,
-            content = content,
+            content = { padding -> content(padding, false) },
         )
     }
 }
@@ -201,6 +373,45 @@ internal fun resolveBottomBarStyle(
     bottomBarStyle
 }
 
+internal fun shouldUseNavigationRail(
+    windowWidth: Dp,
+    windowHeight: Dp,
+    effectiveStyle: BottomBarStyle,
+): Boolean = isMiuixWideLayout(windowWidth, windowHeight) &&
+    effectiveStyle == BottomBarStyle.NORMAL
+
+internal fun isMiuixWideLayout(
+    windowWidth: Dp,
+    windowHeight: Dp,
+): Boolean {
+    if (windowWidth <= 0.dp) return false
+    val heightToWidthRatio = windowHeight.value / windowWidth.value
+    return windowWidth >= 840.dp ||
+        (windowWidth >= 600.dp && heightToWidthRatio < 1.2f)
+}
+
+internal fun usesNormalMiniPlayerChrome(
+    renderedBottomBarStyle: BottomBarStyle,
+    liquidGlassSupported: Boolean,
+): Boolean {
+    val resolvedStyle = resolveBottomBarStyle(renderedBottomBarStyle, liquidGlassSupported)
+    return resolvedStyle == BottomBarStyle.NORMAL
+}
+
+internal fun shouldShowNavigation(
+    currentRouteIsRoot: Boolean,
+    hideBottomBar: Boolean,
+    landscape: Boolean,
+    requestedBottomBarStyle: BottomBarStyle,
+    renderedBottomBarStyle: BottomBarStyle = requestedBottomBarStyle,
+): Boolean = currentRouteIsRoot && !hideBottomBar &&
+    (!landscape || requestedBottomBarStyle == BottomBarStyle.NORMAL ||
+        renderedBottomBarStyle != BottomBarStyle.NORMAL)
+
+private val PLAYER_RAIL_MINI_PLAYER_BOTTOM_SPACING_WITHOUT_NAV = 24.dp
+private val PLAYER_NORMAL_MINI_PLAYER_HEIGHT = 68.dp
+private val PLAYER_NORMAL_MINI_PLAYER_INTERNAL_PADDING = 6.dp
+
 @Composable
 private fun BasePlayerScaffold(
     selectedTab: Int,
@@ -215,30 +426,45 @@ private fun BasePlayerScaffold(
 ) {
     val bottomBarBackdrop = rememberBlurBackdrop()
     val normalBarColor = bottomBarBackdrop.miuixBarColor()
+    val navigationBarBottomInset = WindowInsets.navigationBars
+        .only(WindowInsetsSides.Bottom)
+        .asPaddingValues()
+        .calculateBottomPadding()
+    val miniPlayerNavigationGap by animateDpAsState(
+        targetValue = if (showNavigation) 0.dp else navigationBarBottomInset,
+        animationSpec = tween(
+            if (showNavigation) NAVIGATION_ENTER_DURATION_MILLIS else NAVIGATION_EXIT_DURATION_MILLIS,
+        ),
+        label = "normalMiniPlayerNavigationGap",
+    )
 
     Scaffold(
         containerColor = Color.Transparent,
         bottomBar = {
             Column {
-                miniPlayer(
-                    MiniPlayerChrome(
-                        style = BottomBarStyle.NORMAL,
-                        backdrop = bottomBarBackdrop,
-                        blurActive = bottomBarBackdrop != null,
-                        liquidGlassActive = false,
-                        isDark = isDark,
-                    ),
-                )
+                Box(modifier = Modifier.padding(bottom = miniPlayerNavigationGap)) {
+                    miniPlayer(
+                        MiniPlayerChrome(
+                            style = BottomBarStyle.NORMAL,
+                            backdrop = bottomBarBackdrop,
+                            blurActive = bottomBarBackdrop != null,
+                            liquidGlassActive = false,
+                            isDark = isDark,
+                        ),
+                    )
+                }
                 AnimatedVisibility(
                     visible = showNavigation,
                     enter = slideInVertically(
-                        animationSpec = tween(280),
+                        animationSpec = tween(NAVIGATION_ENTER_DURATION_MILLIS),
                         initialOffsetY = { it },
-                    ) + expandVertically(tween(280)) + fadeIn(tween(180)),
+                    ) + expandVertically(tween(NAVIGATION_ENTER_DURATION_MILLIS)) +
+                        fadeIn(tween(NAVIGATION_FADE_IN_DURATION_MILLIS)),
                     exit = slideOutVertically(
-                        animationSpec = tween(240),
+                        animationSpec = tween(NAVIGATION_EXIT_DURATION_MILLIS),
                         targetOffsetY = { it },
-                    ) + shrinkVertically(tween(240)) + fadeOut(tween(140)),
+                    ) + shrinkVertically(tween(NAVIGATION_EXIT_DURATION_MILLIS)) +
+                        fadeOut(tween(NAVIGATION_FADE_OUT_DURATION_MILLIS)),
                 ) {
                     Box(modifier = Modifier.background(normalBarColor)) {
                         GaussianBlurredBar(backdrop = bottomBarBackdrop) {
@@ -266,7 +492,6 @@ private fun BasePlayerScaffold(
                         }
                     }
                 }
-                AnimatedNavigationInset(visible = !showNavigation)
             }
         },
     ) { innerPadding ->
@@ -284,22 +509,5 @@ private fun BasePlayerScaffold(
         ) {
             content(innerPadding)
         }
-    }
-}
-
-@Composable
-internal fun AnimatedNavigationInset(
-    visible: Boolean,
-) {
-    AnimatedVisibility(
-        visible = visible,
-        enter = expandVertically(tween(240)),
-        exit = shrinkVertically(tween(280)),
-    ) {
-        Spacer(
-            modifier = Modifier
-                .fillMaxWidth()
-                .navigationBarsPadding(),
-        )
     }
 }

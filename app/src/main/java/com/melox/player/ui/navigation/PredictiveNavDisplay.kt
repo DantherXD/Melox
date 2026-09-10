@@ -5,11 +5,15 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.LocalWindowInfo
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.navigationevent.NavigationEventDispatcher
 import androidx.navigationevent.NavigationEventDispatcherOwner
 import androidx.navigationevent.compose.LocalNavigationEventDispatcherOwner
 import com.melox.player.model.NavigationTransitionStyle
+import com.melox.player.ui.isMiuixWideLayout
 import top.yukonga.miuix.kmp.nav.core.NavBackStack
 import top.yukonga.miuix.kmp.nav.core.NavCornerClipMode
 import top.yukonga.miuix.kmp.nav.core.NavDisplay
@@ -36,17 +40,22 @@ fun PredictiveNavDisplay(
     val dispatcherOwner = LocalNavigationEventDispatcherOwner.current
     val cornerRadius = rememberNavSystemCornerRadius()
     val useAospTransition = transitionStyle == NavigationTransitionStyle.AOSP
+    val windowSize = LocalWindowInfo.current.containerSize
+    val transitionCornerRadius = with(LocalDensity.current) {
+        navigationTransitionCornerRadius(
+            windowWidth = windowSize.width.toDp(),
+            windowHeight = windowSize.height.toDp(),
+            transitionStyle = transitionStyle,
+            systemCornerRadius = cornerRadius,
+        )
+    }
     val transition = if (useAospTransition) {
         AospNavigationTransition
     } else {
         NavTransitions.MiuixDefault
     }
     val effects = NavDisplayEffects(
-        cornerClipRadius = if (useAospTransition && cornerRadius <= 0.dp) {
-            32.dp
-        } else {
-            cornerRadius
-        },
+        cornerClipRadius = transitionCornerRadius,
         cornerClipMode = if (useAospTransition) {
             NavCornerClipMode.All
         } else {
@@ -65,8 +74,8 @@ fun PredictiveNavDisplay(
                 NavigationEventDispatcher().also { it.isEnabled = false }
         }
     }
-    val activeDispatcherOwner =
-        dispatcherOwner.takeIf { predictiveBackEnabled } ?: disabledDispatcherOwner
+    val activeDispatcherOwner = dispatcherOwner.takeIf { predictiveBackEnabled }
+        ?: disabledDispatcherOwner
     BackHandler(
         enabled = ordinaryBackHandlerEnabled(
             predictiveBackEnabled = predictiveBackEnabled,
@@ -86,6 +95,18 @@ fun PredictiveNavDisplay(
             content = content,
         )
     }
+}
+
+internal fun navigationTransitionCornerRadius(
+    windowWidth: Dp,
+    windowHeight: Dp,
+    transitionStyle: NavigationTransitionStyle,
+    systemCornerRadius: Dp,
+): Dp = when {
+    transitionStyle == NavigationTransitionStyle.MIUIX &&
+        isMiuixWideLayout(windowWidth, windowHeight) -> 0.dp
+    transitionStyle == NavigationTransitionStyle.AOSP && systemCornerRadius <= 0.dp -> 32.dp
+    else -> systemCornerRadius
 }
 
 internal fun predictiveBackHandlerEnabled(

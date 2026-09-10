@@ -92,7 +92,7 @@ class MeloxInstrumentedTest {
     }
 
     @Test
-    fun mainActivityHandlesLocaleChangesInPlace() {
+    fun mainActivityHandlesUiAndWindowChangesInPlace() {
         val context = InstrumentationRegistry.getInstrumentation().targetContext
         @Suppress("DEPRECATION")
         val activityInfo = context.packageManager.getActivityInfo(
@@ -107,6 +107,14 @@ class MeloxInstrumentedTest {
         assertEquals(
             ActivityInfo.CONFIG_LAYOUT_DIRECTION,
             activityInfo.configChanges and ActivityInfo.CONFIG_LAYOUT_DIRECTION,
+        )
+        assertEquals(
+            ActivityInfo.CONFIG_ORIENTATION,
+            activityInfo.configChanges and ActivityInfo.CONFIG_ORIENTATION,
+        )
+        assertEquals(
+            ActivityInfo.CONFIG_SCREEN_SIZE,
+            activityInfo.configChanges and ActivityInfo.CONFIG_SCREEN_SIZE,
         )
     }
 }

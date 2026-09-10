@@ -5,11 +5,8 @@ import android.content.Context
 import android.content.ContextWrapper
 import android.os.Build
 import androidx.compose.animation.core.Animatable
-import androidx.compose.animation.core.EaseOut
 import androidx.compose.animation.core.Spring
 import androidx.compose.animation.core.spring
-import androidx.compose.animation.core.tween
-import androidx.compose.foundation.border
 import androidx.compose.foundation.gestures.detectVerticalDragGestures
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.Image
@@ -17,7 +14,6 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.Stable
 import androidx.compose.runtime.getValue
@@ -27,7 +23,6 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
-import androidx.compose.runtime.withFrameNanos
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.drawWithContent
@@ -40,10 +35,12 @@ import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.layer.GraphicsLayer
 import androidx.compose.ui.graphics.layer.drawLayer
 import androidx.compose.ui.graphics.drawscope.withTransform
+import androidx.compose.ui.graphics.drawscope.clipRect
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
@@ -59,22 +56,36 @@ import com.melox.player.ui.component.library.playbackArtworkCornerRadius
 import com.melox.player.ui.component.library.rememberArtworkBitmap
 import com.melox.player.ui.component.liquid.miuixFloatingBarShadow
 import com.melox.player.ui.component.liquid.miniPlayerSurface
+import kotlin.math.abs
 import kotlin.math.roundToInt
-import kotlinx.coroutines.coroutineScope
-import kotlinx.coroutines.launch
 import androidx.compose.runtime.saveable.Saver
 import top.yukonga.miuix.kmp.squircle.squircleClip
+import top.yukonga.miuix.kmp.squircle.squircleBorder
 import top.yukonga.miuix.kmp.basic.DividerDefaults
 import top.yukonga.miuix.kmp.utils.getRoundedCorner
 
+// Duration of the artwork crossfade when the current track changes.
 internal const val PLAYER_TRACK_ARTWORK_CROSSFADE_DURATION_MILLIS = 320
-internal const val PLAYER_LAYER_HANDOFF_END_PROGRESS = 0.25f
-internal const val PLAYER_SCREEN_CORNER_EXPANSION_DURATION_MILLIS = 140
+// Keeps the playback-background transition aligned with the artwork crossfade.
+internal const val PLAYBACK_BACKGROUND_TRANSITION_DURATION_MILLIS =
+    PLAYER_TRACK_ARTWORK_CROSSFADE_DURATION_MILLIS
+// Progress at which the mini-player layers have fully handed off to the full player.
+internal const val PLAYER_LAYER_HANDOFF_END_PROGRESS = 0.2f
+// Progress at which the mini-player's recorded content finishes fading out.
+internal const val PLAYER_MINI_CONTENT_FADE_END_PROGRESS = 0.3f
+// Progress at which full-player content begins to appear.
+internal const val PLAYER_CONTENT_APPEAR_START_PROGRESS = 0.1f
+// Progress at which full-player content is fully visible.
+internal const val PLAYER_CONTENT_APPEAR_END_PROGRESS = 0.6f
+// Linear-motion share used to soften the artwork's vertical travel curve.
 private const val PLAYER_ARTWORK_VERTICAL_LINEAR_WEIGHT = 0.4f
 
+// Requested square size for the full-player artwork bitmap.
 internal val PLAYER_FULL_ARTWORK_REQUEST_SIZE = 420.dp
+// Corner radius of the full-player artwork frame.
 internal val PLAYER_FULL_ARTWORK_CORNER_RADIUS = 12.dp
-internal val MINI_PLAYER_RECTANGULAR_ARTWORK_CORNER_REDUCTION = 1.dp
+// Corner-radius reduction when the mini player uses rectangular artwork.
+internal val MINI_PLAYER_RECTANGULAR_ARTWORK_CORNER_REDUCTION = 2.dp
 internal val PLAYER_TRACK_ARTWORK_CROSSFADE_EASING = androidx.compose.animation.core.FastOutSlowInEasing
 
 /**
@@ -93,9 +104,6 @@ internal class PlayerSheetTransitionState(initialProgress: Float = 0f) {
     private var dragOriginOpen = false
     private var dragStartedFromMiniPlayer = false
     private var requestedInitialVelocity = 0f
-    private var cornerExpansionProgress by mutableFloatStateOf(
-        if (restoredProgress >= 1f) 1f else 0f,
-    )
 
     companion object {
         val Saver: Saver<PlayerSheetTransitionState, List<Any>> = Saver(
@@ -125,6 +133,12 @@ internal class PlayerSheetTransitionState(initialProgress: Float = 0f) {
     var miniPlayerBounds by mutableStateOf(Rect.Zero)
         private set
 
+    var miniPlayerContentBounds by mutableStateOf(Rect.Zero)
+        private set
+
+    var miniPlayerControlsBounds by mutableStateOf(Rect.Zero)
+        private set
+
     var fullPlayerBounds by mutableStateOf(Rect.Zero)
         private set
 
@@ -137,6 +151,105 @@ internal class PlayerSheetTransitionState(initialProgress: Float = 0f) {
     var fullPlayerArtworkPageSelected by mutableStateOf(true)
         private set
 
+    private var layoutWindowSize by mutableStateOf(IntSize.Zero)
+    private var miniFrameReady by mutableStateOf(false)
+    private var fullBackgroundFrameReady by mutableStateOf(false)
+    private var fullContentFrameReady by mutableStateOf(false)
+    private var frameRecordingGeneration by mutableIntStateOf(0)
+    private var frozenArtworkBounds: Pair<Rect, Rect>? = null
+
+    val currentFrameRecordingGeneration: Int
+        get() = frameRecordingGeneration
+
+    val overlayMiniArtworkBounds: Rect
+        get() = frozenArtworkBounds?.first ?: miniArtworkBounds
+    val overlayFullArtworkBounds: Rect
+        get() = frozenArtworkBounds?.second ?: fullArtworkBounds
+
+    fun updateWindowSize(size: IntSize) {
+        if (size == layoutWindowSize || size.width <= 0 || size.height <= 0) return
+        if (isTransitionActive) {
+            isDragging = false
+            requestedInitialVelocity = 0f
+            animationRequest += 1
+        }
+        layoutWindowSize = size
+        miniPlayerBounds = Rect.Zero
+        miniPlayerContentBounds = Rect.Zero
+        miniPlayerControlsBounds = Rect.Zero
+        fullPlayerBounds = Rect.Zero
+        miniArtworkBounds = Rect.Zero
+        fullArtworkBounds = Rect.Zero
+        miniFrameReady = false
+        fullBackgroundFrameReady = false
+        fullContentFrameReady = false
+        frameRecordingGeneration += 1
+        frozenArtworkBounds = null
+    }
+
+    fun invalidateCollapsedFullPlayerEndpoint() {
+        if (isTransitionActive) return
+        fullPlayerBounds = Rect.Zero
+        fullArtworkBounds = Rect.Zero
+        fullBackgroundFrameReady = false
+        fullContentFrameReady = false
+        frozenArtworkBounds = null
+    }
+
+    fun markMiniFrameRecorded(
+        windowSize: IntSize,
+        generation: Int,
+        size: IntSize,
+    ) {
+        if (acceptsRecordedFrame(windowSize, generation, size, miniPlayerBounds)) {
+            miniFrameReady = true
+        }
+    }
+
+    fun markFullBackgroundFrameRecorded(
+        windowSize: IntSize,
+        generation: Int,
+        size: IntSize,
+    ) {
+        if (acceptsRecordedFrame(windowSize, generation, size, fullPlayerBounds)) {
+            fullBackgroundFrameReady = true
+        }
+    }
+
+    fun markFullContentFrameRecorded(
+        windowSize: IntSize,
+        generation: Int,
+        size: IntSize,
+    ) {
+        if (acceptsRecordedFrame(windowSize, generation, size, fullPlayerBounds)) {
+            fullContentFrameReady = true
+        }
+    }
+
+    fun markFullFrameRecorded(windowSize: IntSize, generation: Int, size: IntSize) {
+        markFullBackgroundFrameRecorded(windowSize, generation, size)
+        markFullContentFrameRecorded(windowSize, generation, size)
+    }
+
+    private fun acceptsRecordedFrame(
+        windowSize: IntSize,
+        generation: Int,
+        size: IntSize,
+        bounds: Rect,
+    ): Boolean = windowSize == layoutWindowSize &&
+        generation == frameRecordingGeneration &&
+        size.matches(bounds)
+
+    private fun IntSize.matches(bounds: Rect): Boolean = bounds.isUsable() &&
+        abs(width - bounds.width.roundToInt()) <= 1 &&
+        abs(height - bounds.height.roundToInt()) <= 1
+
+    private fun freezeArtworkBounds() {
+        if (frozenArtworkBounds == null && isReady) {
+            frozenArtworkBounds = miniArtworkBounds to fullArtworkBounds
+        }
+    }
+
     val progress: Float
         get() = renderedProgress.coerceIn(0f, 1f)
 
@@ -147,7 +260,9 @@ internal class PlayerSheetTransitionState(initialProgress: Float = 0f) {
         get() = miniPlayerBounds.isUsable() && fullPlayerBounds.isUsable()
 
     val isReady: Boolean
-        get() = hasContainerBounds && hasArtworkBounds
+        get() = hasContainerBounds && hasArtworkBounds &&
+            (layoutWindowSize == IntSize.Zero ||
+                (miniFrameReady && fullBackgroundFrameReady && fullContentFrameReady))
 
     val isMounted: Boolean
         get() = isDragging || targetOpen || progress > 0f
@@ -156,14 +271,10 @@ internal class PlayerSheetTransitionState(initialProgress: Float = 0f) {
         get() = isDragging || progress > 0f && progress < 1f
 
     val isFullyExpanded: Boolean
-        get() = !isDragging && progress >= 1f && cornerExpansionProgress >= 1f
+        get() = !isDragging && progress >= 1f
 
     val isTransitionActive: Boolean
-        get() = isDragging || if (targetOpen) {
-            progress < 1f || cornerExpansionProgress < 1f
-        } else {
-            progress > 0f || cornerExpansionProgress > 0f
-        }
+        get() = isDragging || if (targetOpen) progress < 1f else progress > 0f
 
     val sharedArtworkEnabled: Boolean
         get() = fullPlayerArtworkPageSelected
@@ -176,11 +287,22 @@ internal class PlayerSheetTransitionState(initialProgress: Float = 0f) {
             progress = progress,
         )
 
-    val screenCornerExpansionProgress: Float
-        get() = cornerExpansionProgress
+    val fullPlayerHostMounted: Boolean
+        get() = isMounted && (isDragging || !isReady || !miniPlayerAcceptsInput)
+
+    val fullPlayerDrawsInPlace: Boolean
+        get() = if (isReady) {
+            targetOpen && !isTransitionActive
+        } else {
+            progress > 0f
+        }
+
+    val fullPlayerAcceptsInput: Boolean
+        get() = isReady && !miniPlayerAcceptsInput
 
     fun open() {
         releaseDragForProgrammaticSettle()
+        if (!isReady) requestFreshFrameRecording()
         requestSettle(open = true)
     }
 
@@ -199,6 +321,8 @@ internal class PlayerSheetTransitionState(initialProgress: Float = 0f) {
 
     private fun beginDrag(startedFromMiniPlayer: Boolean) {
         if (isDragging) return
+        if (!isTransitionActive) frozenArtworkBounds = null
+        freezeArtworkBounds()
         val currentProgress = progress
         dragStartProgress = currentProgress
         renderedProgress = dragStartProgress
@@ -219,7 +343,10 @@ internal class PlayerSheetTransitionState(initialProgress: Float = 0f) {
 
     fun endDrag(velocityY: Float) {
         if (!isDragging) return
-        val containerHeight = fullPlayerBounds.height.coerceAtLeast(1f)
+        val verticalTravel = playerSheetVerticalTravel(
+            source = miniPlayerBounds,
+            target = fullPlayerBounds,
+        )
         val open = playerSheetDragTarget(
             velocityY = velocityY,
             lastDragAmountY = lastDragAmountY,
@@ -228,7 +355,7 @@ internal class PlayerSheetTransitionState(initialProgress: Float = 0f) {
         isDragging = false
         requestSettle(
             open = open,
-            initialVelocity = -velocityY / containerHeight,
+            initialVelocity = -velocityY / verticalTravel,
         )
     }
 
@@ -238,22 +365,43 @@ internal class PlayerSheetTransitionState(initialProgress: Float = 0f) {
         requestSettle(open = dragOriginOpen)
     }
 
-    fun updateMiniPlayerBounds(bounds: Rect) {
-        if (bounds.isUsable()) miniPlayerBounds = bounds
+    fun updateMiniPlayerBounds(bounds: Rect, windowSize: IntSize = layoutWindowSize) {
+        if (windowSize != layoutWindowSize) return
+        if (bounds.isUsable()) {
+            if (miniPlayerBounds.size != bounds.size) miniFrameReady = false
+            miniPlayerBounds = bounds
+        }
     }
 
-    fun updateFullPlayerBounds(bounds: Rect) {
+    fun updateMiniPlayerContentBounds(bounds: Rect, windowSize: IntSize = layoutWindowSize) {
+        if (windowSize != layoutWindowSize) return
+        if (bounds.isUsable()) miniPlayerContentBounds = bounds
+    }
+
+    fun updateMiniPlayerControlsBounds(bounds: Rect, windowSize: IntSize = layoutWindowSize) {
+        if (windowSize != layoutWindowSize) return
+        if (bounds.isUsable()) miniPlayerControlsBounds = bounds
+    }
+
+    fun updateFullPlayerBounds(bounds: Rect, windowSize: IntSize = layoutWindowSize) {
+        if (windowSize != layoutWindowSize) return
         if (bounds.isUsable()) {
+            if (fullPlayerBounds.size != bounds.size) {
+                fullBackgroundFrameReady = false
+                fullContentFrameReady = false
+            }
             fullPlayerBounds = bounds
             updateDragProgress()
         }
     }
 
-    fun updateMiniArtworkBounds(bounds: Rect) {
+    fun updateMiniArtworkBounds(bounds: Rect, windowSize: IntSize = layoutWindowSize) {
+        if (windowSize != layoutWindowSize) return
         if (bounds.isUsable()) miniArtworkBounds = bounds
     }
 
-    fun updateFullArtworkBounds(bounds: Rect) {
+    fun updateFullArtworkBounds(bounds: Rect, windowSize: IntSize = layoutWindowSize) {
+        if (windowSize != layoutWindowSize) return
         if (bounds.isUsable()) fullArtworkBounds = bounds
     }
 
@@ -262,29 +410,19 @@ internal class PlayerSheetTransitionState(initialProgress: Float = 0f) {
     }
 
     internal suspend fun animateToTarget() {
+        freezeArtworkBounds()
         progressAnimation.snapTo(renderedProgress)
         val visibilityThreshold = 0.5f / fullPlayerBounds.height.coerceAtLeast(1f)
-        coroutineScope {
-            if (!targetOpen) {
-                launch {
-                    animateScreenCornersTo(0f)
-                }
-            }
-            progressAnimation.animateTo(
-                targetValue = if (targetOpen) 1f else 0f,
-                animationSpec = spring(
-                    dampingRatio = Spring.DampingRatioNoBouncy,
-                    stiffness = 500f,
-                    visibilityThreshold = visibilityThreshold,
-                ),
-                initialVelocity = requestedInitialVelocity,
-            ) {
-                if (!isDragging) renderedProgress = value
-            }
-        }
-        if (targetOpen) {
-            withFrameNanos { }
-            animateScreenCornersTo(1f)
+        progressAnimation.animateTo(
+            targetValue = if (targetOpen) 1f else 0f,
+            animationSpec = spring(
+                dampingRatio = Spring.DampingRatioNoBouncy,
+                stiffness = 500f,
+                visibilityThreshold = visibilityThreshold,
+            ),
+            initialVelocity = requestedInitialVelocity,
+        ) {
+            if (!isDragging) renderedProgress = value
         }
     }
 
@@ -293,7 +431,10 @@ internal class PlayerSheetTransitionState(initialProgress: Float = 0f) {
         renderedProgress = playerSheetDragProgress(
             startProgress = dragStartProgress,
             dragDistanceY = dragDistanceY,
-            containerHeight = fullPlayerBounds.height,
+            travelDistance = playerSheetVerticalTravel(
+                source = miniPlayerBounds,
+                target = fullPlayerBounds,
+            ),
         )
     }
 
@@ -303,25 +444,20 @@ internal class PlayerSheetTransitionState(initialProgress: Float = 0f) {
     }
 
     private fun requestSettle(open: Boolean, initialVelocity: Float = 0f) {
+        if (!isTransitionActive) frozenArtworkBounds = null
+        freezeArtworkBounds()
         targetOpen = open
         requestedInitialVelocity = initialVelocity
         animationRequest += 1
     }
 
-    private suspend fun animateScreenCornersTo(target: Float) {
-        if (cornerExpansionProgress == target) return
-        val animation = Animatable(cornerExpansionProgress)
-        animation.animateTo(
-            targetValue = target,
-            animationSpec = tween(
-                durationMillis = PLAYER_SCREEN_CORNER_EXPANSION_DURATION_MILLIS,
-                easing = EaseOut,
-            ),
-        ) {
-            cornerExpansionProgress = value
-        }
-        cornerExpansionProgress = target
+    private fun requestFreshFrameRecording() {
+        miniFrameReady = false
+        fullBackgroundFrameReady = false
+        fullContentFrameReady = false
+        frameRecordingGeneration += 1
     }
+
 }
 
 @Composable
@@ -372,10 +508,28 @@ internal fun playerSheetBarAlpha(progress: Float): Float {
     return 1f - easeOutCubic(handoff)
 }
 
+internal fun playerSheetMiniContentAlpha(progress: Float): Float {
+    val fade = (progress.coerceIn(0f, 1f) / PLAYER_MINI_CONTENT_FADE_END_PROGRESS)
+        .coerceIn(0f, 1f)
+    return 1f - easeOutCubic(fade)
+}
+
 internal fun playerSheetPageAlpha(progress: Float): Float {
+    return playerSheetContentAlpha(progress)
+}
+
+internal fun playerSheetBackgroundAlpha(progress: Float): Float {
     val handoff = (progress.coerceIn(0f, 1f) / PLAYER_LAYER_HANDOFF_END_PROGRESS)
         .coerceIn(0f, 1f)
     return easeInCubic(handoff)
+}
+
+internal fun playerSheetContentAlpha(progress: Float): Float {
+    val fraction = (
+        (progress.coerceIn(0f, 1f) - PLAYER_CONTENT_APPEAR_START_PROGRESS) /
+            (PLAYER_CONTENT_APPEAR_END_PROGRESS - PLAYER_CONTENT_APPEAR_START_PROGRESS)
+        ).coerceIn(0f, 1f)
+    return easeInCubic(fraction)
 }
 
 internal fun playerSheetGlassVisible(progress: Float): Boolean =
@@ -399,14 +553,26 @@ internal fun playerSheetMiniPlayerAcceptsInput(
 internal fun Modifier.recordPlayerLayer(
     layer: GraphicsLayer,
     drawInPlace: Boolean,
+    recordingGeneration: Int = 0,
+    onRecorded: (generation: Int, size: IntSize) -> Unit = { _, _ -> },
 ): Modifier = drawWithContent {
     layer.record {
         this@drawWithContent.drawContent()
     }
+    onRecorded(recordingGeneration, layer.size)
     if (drawInPlace) {
         layer.alpha = 1f
         drawLayer(layer)
     }
+}
+
+internal fun Modifier.recordPlayerContentLayer(
+    layer: GraphicsLayer,
+): Modifier = drawWithContent {
+    layer.record {
+        this@drawWithContent.drawContent()
+    }
+    this@drawWithContent.drawContent()
 }
 
 /**
@@ -417,8 +583,9 @@ internal fun Modifier.recordPlayerLayer(
 @Composable
 internal fun PlayerSheetContentOverlay(
     transition: PlayerSheetTransitionState,
-    miniPlayerLayer: GraphicsLayer,
-    fullPlayerLayer: GraphicsLayer,
+    miniPlayerContentLayer: GraphicsLayer,
+    fullPlayerBackgroundLayer: GraphicsLayer,
+    fullPlayerContentLayer: GraphicsLayer,
     miniPlayerChrome: MiniPlayerChrome?,
     collapsedCornerRadius: Dp,
     floatingMiniPlayer: Boolean,
@@ -445,22 +612,21 @@ internal fun PlayerSheetContentOverlay(
     } else {
         0.dp
     }
-    val cornerRadius = sharedContainerCornerRadius(
-        collapsedCornerRadius = collapsedCornerRadius.value,
-        expandedCornerRadius = expandedCornerRadius.value,
+    val cornerRadii = sharedContainerCornerRadii(
+        source = SharedContainerCornerRadii.uniform(collapsedCornerRadius.value),
+        target = SharedContainerCornerRadii.uniform(expandedCornerRadius.value),
         progress = progress,
-        screenCornerExpansionProgress = transition.screenCornerExpansionProgress,
-    ).dp
+    )
+    val cornerRadius = cornerRadii.topStart.dp
     val miniChromeAlpha = playerSheetBarAlpha(progress)
 
-    val surfaceShape = RoundedCornerShape(cornerRadius)
     val glassChrome = miniPlayerChrome?.takeIf {
         playerSheetGlassVisible(progress)
     }
     val glassSurfaceModifier = if (glassChrome != null) {
         Modifier
             .miniPlayerSurface(
-                shape = surfaceShape,
+                cornerRadius = cornerRadius,
                 backdrop = glassChrome.backdrop,
                 blurActive = glassChrome.blurActive,
                 liquidGlassActive = glassChrome.liquidGlassActive,
@@ -471,12 +637,12 @@ internal fun PlayerSheetContentOverlay(
             )
             .then(
                 if (glassChrome.style == BottomBarStyle.NORMAL) {
-                    Modifier.border(
+                    Modifier.squircleBorder(
                         width = DividerDefaults.Thickness,
                         color = DividerDefaults.DividerColor.copy(
                             alpha = NORMAL_BAR_STROKE_ALPHA,
                         ),
-                        shape = surfaceShape,
+                        cornerRadius = cornerRadius,
                     )
                 } else {
                     Modifier
@@ -500,7 +666,7 @@ internal fun PlayerSheetContentOverlay(
             .then(
                 if (floatingMiniPlayer) {
                     Modifier.miuixFloatingBarShadow(
-                        shape = surfaceShape,
+                        cornerRadius = cornerRadius,
                         isDark = isDark,
                         alpha = miniChromeAlpha,
                     )
@@ -508,30 +674,96 @@ internal fun PlayerSheetContentOverlay(
                     Modifier
                 },
             )
-            .then(glassSurfaceModifier)
-            .squircleClip(cornerRadius),
+            .squircleClip(
+                topStart = cornerRadii.topStart.dp,
+                topEnd = cornerRadii.topEnd.dp,
+                bottomEnd = cornerRadii.bottomEnd.dp,
+                bottomStart = cornerRadii.bottomStart.dp,
+            )
+            .then(glassSurfaceModifier),
     ) {
         Canvas(modifier = Modifier.fillMaxSize()) {
-            if (miniPlayerLayer.size.width > 0 && progress < PLAYER_LAYER_HANDOFF_END_PROGRESS) {
-                miniPlayerLayer.alpha = playerSheetBarAlpha(progress)
-                // Keep the recorded mini-player geometry at its original local
-                // coordinates. The expanding container moves underneath it;
-                // cover, metadata, and buttons therefore retain their offsets
-                // from the mini-player's top edge throughout the handoff.
-                drawLayer(miniPlayerLayer)
+            if (
+                miniPlayerContentLayer.size.width > 0 &&
+                    progress < PLAYER_MINI_CONTENT_FADE_END_PROGRESS
+            ) {
+                    miniPlayerContentLayer.alpha = playerSheetMiniContentAlpha(progress)
+                    val sourceBounds = transition.miniPlayerBounds
+                    val contentLayerBounds = transition.miniPlayerContentBounds
+                    val contentOffset = if (contentLayerBounds.isUsable()) {
+                        sharedMiniPlayerContentOffset(
+                            sourcePlayerBounds = sourceBounds,
+                            animatedPlayerBounds = contentBounds,
+                            contentBounds = contentLayerBounds,
+                        )
+                    } else {
+                        Offset.Zero
+                    }
+                    val controlsBounds = transition.miniPlayerControlsBounds
+                    if (sourceBounds.isUsable() && controlsBounds.isUsable()) {
+                        val controlsLeft = controlsBounds.left - sourceBounds.left
+                        val controlsTranslationX = sharedMiniPlayerControlsTranslationX(
+                            sourcePlayerBounds = sourceBounds,
+                            animatedPlayerBounds = contentBounds,
+                            controlsBounds = controlsBounds,
+                        )
+                        clipRect(right = controlsLeft) {
+                            withTransform({
+                                translate(
+                                    left = contentOffset.x,
+                                    top = contentOffset.y,
+                                )
+                            }) {
+                                drawLayer(miniPlayerContentLayer)
+                            }
+                        }
+                        clipRect(left = controlsLeft + controlsTranslationX) {
+                            withTransform({
+                                translate(
+                                    left = contentOffset.x + controlsTranslationX,
+                                    top = contentOffset.y,
+                                )
+                            }) {
+                                drawLayer(miniPlayerContentLayer)
+                            }
+                        }
+                    } else {
+                        withTransform({
+                            translate(
+                                left = contentOffset.x,
+                                top = contentOffset.y,
+                            )
+                        }) {
+                            drawLayer(miniPlayerContentLayer)
+                        }
+                    }
             }
-            if (fullPlayerLayer.size.width > 0 && progress > 0f) {
+            if (fullPlayerBackgroundLayer.size.width > 0 && progress > 0f) {
                 val contentOffset = sharedContainerContentOffset(
                     renderBounds = bounds,
                     contentBounds = contentBounds,
                 )
-                val scale = contentBounds.width / fullPlayerLayer.size.width
-                fullPlayerLayer.alpha = playerSheetPageAlpha(progress)
+                val scale = contentBounds.width / fullPlayerBackgroundLayer.size.width
+                fullPlayerBackgroundLayer.alpha = playerSheetBackgroundAlpha(progress)
                 withTransform({
                     translate(left = contentOffset.x, top = contentOffset.y)
                     scale(scaleX = scale, scaleY = scale, pivot = Offset.Zero)
                 }) {
-                    drawLayer(fullPlayerLayer)
+                    drawLayer(fullPlayerBackgroundLayer)
+                }
+            }
+            if (fullPlayerContentLayer.size.width > 0 && progress > PLAYER_CONTENT_APPEAR_START_PROGRESS) {
+                val contentOffset = sharedContainerContentOffset(
+                    renderBounds = bounds,
+                    contentBounds = contentBounds,
+                )
+                val scale = contentBounds.width / fullPlayerContentLayer.size.width
+                fullPlayerContentLayer.alpha = playerSheetContentAlpha(progress)
+                withTransform({
+                    translate(left = contentOffset.x, top = contentOffset.y)
+                    scale(scaleX = scale, scaleY = scale, pivot = Offset.Zero)
+                }) {
+                    drawLayer(fullPlayerContentLayer)
                 }
             }
         }
@@ -539,10 +771,9 @@ internal fun PlayerSheetContentOverlay(
 }
 
 /**
- * Shared cover overlay. The layout is anchored at the mini-player bounds and
- * uses uniform scale plus translation to reach the full-player bounds. The
- * center path front-loads horizontal travel while the cover rises throughout
- * and vertical travel dominates after halfway.
+ * Shared cover overlay. Landscape uses direct edge interpolation so horizontal
+ * and vertical movement follow their measured start-to-end distances; portrait
+ * keeps the established eased center path.
  */
 @Composable
 internal fun PlayerSheetArtworkOverlay(
@@ -554,8 +785,6 @@ internal fun PlayerSheetArtworkOverlay(
 ) {
     val item = playback.currentItem ?: return
     val progress = transition.progress
-    if (!enabled || !transition.isReady || !transition.isTransitionActive) return
-
     val bitmap = rememberArtworkBitmap(
         contentUri = item.contentUri,
         dateModifiedEpochSeconds = item.dateModifiedEpochSeconds,
@@ -563,8 +792,9 @@ internal fun PlayerSheetArtworkOverlay(
         size = PLAYER_FULL_ARTWORK_REQUEST_SIZE,
     )
     val density = LocalDensity.current
-    val source = transition.miniArtworkBounds
-    val target = transition.fullArtworkBounds
+    if (!enabled || !transition.isReady || !transition.isTransitionActive) return
+    val source = transition.overlayMiniArtworkBounds
+    val target = transition.overlayFullArtworkBounds
     val sourceArtworkBounds = bitmap?.let {
         fittedArtworkRect(source, it.width, it.height)
     }
@@ -683,15 +913,11 @@ internal fun sharedContainerRect(
     progress: Float,
 ): Rect {
     val fraction = progress.coerceIn(0f, 1f)
-    val centerX = lerp(source.center.x, target.center.x, fraction)
-    val centerY = lerp(source.center.y, target.center.y, fraction)
-    val width = lerp(source.width, target.width, easeInCubic(fraction))
-    val height = lerp(source.height, target.height, fraction)
     return Rect(
-        left = centerX - width / 2f,
-        top = centerY - height / 2f,
-        right = centerX + width / 2f,
-        bottom = centerY + height / 2f,
+        left = lerp(source.left, target.left, fraction),
+        top = lerp(source.top, target.top, fraction),
+        right = lerp(source.right, target.right, fraction),
+        bottom = lerp(source.bottom, target.bottom, fraction),
     )
 }
 
@@ -721,21 +947,51 @@ internal fun sharedContainerContentOffset(
     y = contentBounds.top - renderBounds.top,
 )
 
+internal data class SharedContainerCornerRadii(
+    val topStart: Float,
+    val topEnd: Float,
+    val bottomEnd: Float,
+    val bottomStart: Float,
+) {
+    companion object {
+        fun uniform(cornerRadius: Float): SharedContainerCornerRadii =
+            SharedContainerCornerRadii(
+                topStart = cornerRadius,
+                topEnd = cornerRadius,
+                bottomEnd = cornerRadius,
+                bottomStart = cornerRadius,
+            )
+    }
+}
+
+internal fun sharedContainerCornerRadii(
+    source: SharedContainerCornerRadii,
+    target: SharedContainerCornerRadii,
+    progress: Float,
+): SharedContainerCornerRadii {
+    val fraction = progress.coerceIn(0f, 1f)
+    fun interpolate(sourceRadius: Float, targetRadius: Float): Float = if (fraction < 1f) {
+        lerp(sourceRadius, targetRadius, fraction)
+    } else {
+        0f
+    }
+    return SharedContainerCornerRadii(
+        topStart = interpolate(source.topStart, target.topStart),
+        topEnd = interpolate(source.topEnd, target.topEnd),
+        bottomEnd = interpolate(source.bottomEnd, target.bottomEnd),
+        bottomStart = interpolate(source.bottomStart, target.bottomStart),
+    )
+}
+
 internal fun sharedContainerCornerRadius(
     collapsedCornerRadius: Float,
     expandedCornerRadius: Float,
     progress: Float,
-    screenCornerExpansionProgress: Float,
-): Float {
-    val fraction = progress.coerceIn(0f, 1f)
-    val screenRoundedCorner = lerp(collapsedCornerRadius, expandedCornerRadius, fraction)
-    val cornerExpansionFraction = if (fraction < 1f) {
-        0f
-    } else {
-        screenCornerExpansionProgress
-    }
-    return lerp(screenRoundedCorner, 0f, cornerExpansionFraction)
-}
+): Float = sharedContainerCornerRadii(
+    source = SharedContainerCornerRadii.uniform(collapsedCornerRadius),
+    target = SharedContainerCornerRadii.uniform(expandedCornerRadius),
+    progress = progress,
+).topStart
 
 internal fun playerWindowUsesPhysicalScreenCorners(
     currentWidth: Int,
@@ -817,11 +1073,19 @@ internal fun artworkInsetRect(
 internal fun playerSheetDragProgress(
     startProgress: Float,
     dragDistanceY: Float,
-    containerHeight: Float,
+    travelDistance: Float,
 ): Float {
-    if (containerHeight <= 0f) return startProgress.coerceIn(0f, 1f)
-    return (startProgress - dragDistanceY / containerHeight).coerceIn(0f, 1f)
+    if (travelDistance <= 0f) return startProgress.coerceIn(0f, 1f)
+    return (startProgress - dragDistanceY / travelDistance).coerceIn(0f, 1f)
 }
+
+internal fun playerSheetVerticalTravel(
+    source: Rect,
+    target: Rect,
+): Float = maxOf(
+    abs(target.top - source.top),
+    abs(target.bottom - source.bottom),
+).coerceAtLeast(1f)
 
 internal fun playerSheetDragTarget(
     velocityY: Float,
@@ -834,6 +1098,25 @@ internal fun playerSheetDragTarget(
     lastDragAmountY > 0f -> false
     else -> originOpen
 }
+
+internal fun sharedMiniPlayerControlsTranslationX(
+    sourcePlayerBounds: Rect,
+    animatedPlayerBounds: Rect,
+    controlsBounds: Rect,
+): Float {
+    val sourceRightInset = sourcePlayerBounds.right - controlsBounds.right
+    val targetControlsLeft = animatedPlayerBounds.right - sourceRightInset - controlsBounds.width
+    return targetControlsLeft - controlsBounds.left
+}
+
+internal fun sharedMiniPlayerContentOffset(
+    sourcePlayerBounds: Rect,
+    animatedPlayerBounds: Rect,
+    contentBounds: Rect,
+): Offset = Offset(
+    x = contentBounds.left - animatedPlayerBounds.left,
+    y = contentBounds.top - sourcePlayerBounds.top,
+)
 
 private fun Rect.isUsable(): Boolean = width > 0f && height > 0f
 

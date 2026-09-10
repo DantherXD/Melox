@@ -17,7 +17,6 @@ import androidx.compose.foundation.Image
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -308,10 +307,7 @@ internal fun PlaybackArtworkFrame(
                         .graphicsLayer { alpha = artworkAlpha.coerceIn(0f, 1f) }
                         .squircleClip(resolvedCornerRadius)
                 } else {
-                    baseModifier.graphicsLayer {
-                        shape = RoundedCornerShape(resolvedCornerRadius)
-                        clip = true
-                    }
+                    baseModifier.squircleClip(resolvedCornerRadius)
                 }
             }
         Box(
@@ -434,7 +430,7 @@ private const val PLAYBACK_ARTWORK_SHADOW_ALPHA = 0.2f
 private const val PLAYBACK_ARTWORK_SHADOW_SIZE_FRACTION = 0.9f
 private const val PLAYBACK_ARTWORK_SHADOW_HORIZONTAL_OFFSET_FRACTION = 0f
 private const val PLAYBACK_ARTWORK_SHADOW_VERTICAL_OFFSET_FRACTION = 0.1f
-private val PLAYBACK_ARTWORK_SHADOW_BLUR_RADIUS = 16.dp
+internal val PLAYBACK_ARTWORK_SHADOW_BLUR_RADIUS = 16.dp
 
 /** Loads a cached artwork bitmap for surfaces that need their own rendering treatment. */
 @Composable

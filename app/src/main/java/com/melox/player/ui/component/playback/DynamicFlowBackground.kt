@@ -7,7 +7,9 @@ import android.graphics.ColorMatrix
 import android.graphics.ColorMatrixColorFilter
 import android.graphics.Matrix
 import android.graphics.Paint
-import androidx.compose.foundation.Image
+import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.tween
+import androidx.compose.foundation.Canvas as ComposeCanvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
@@ -15,45 +17,59 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.snapshotFlow
 import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.blur
 import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.toArgb
-import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.IntSize
-import androidx.compose.ui.unit.dp
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.withContext
 import kotlin.math.abs
+import kotlin.math.PI
+import kotlin.math.cos
+import kotlin.math.floor
 import kotlin.math.max
 import kotlin.math.min
+import kotlin.math.round
 import kotlin.math.roundToInt
+import kotlin.math.sin
+import kotlin.math.sqrt
 
 private const val DYNAMIC_FLOW_FRAME_INTERVAL_MILLIS = 42L
 private const val DYNAMIC_FLOW_DEFAULT_SPEED_TENTHS = 10
 private const val DYNAMIC_FLOW_DEFAULT_BLUR = 60f
+private const val DYNAMIC_FLOW_FRAME_BUFFER_COUNT = 3
+private const val DYNAMIC_FLOW_MESH_COLUMNS = 5
+private const val DYNAMIC_FLOW_MESH_ROWS = 5
+private const val DYNAMIC_FLOW_MESH_TEMPLATE_COUNT = 6
+private const val DYNAMIC_FLOW_MESH_INTERIOR_OFFSET = 0.11f
+private const val DYNAMIC_FLOW_MESH_EDGE_OFFSET = 0.06f
+private const val DYNAMIC_FLOW_MESH_CORNER_OFFSET = 0.04f
+private const val DYNAMIC_FLOW_MESH_DRIFT = 0.18f
+private const val DYNAMIC_FLOW_PREVIOUS_FRAME_ALPHA = 64
+private const val DYNAMIC_FLOW_HIGH_PRECISION_CHANNEL_SHIFT = 8
+private const val DYNAMIC_FLOW_HIGH_PRECISION_CHANNEL_MASK = 0xffffL
 internal const val DYNAMIC_FLOW_ARTWORK_SATURATION = 2f
 internal const val DYNAMIC_FLOW_BACKGROUND_DARKEN_AMOUNT = 0.25f
 private val DynamicFlowFallbackColor = Color(0xFF242424)
 
-/**
- * Halcyon Apple Music-style multi-layer cover background.
- * Adapted from https://github.com/Kifranei/Halcyon under Apache-2.0.
- */
+/** Multi-layer cover background. */
 @Composable
 internal fun DynamicFlowBackground(
     artwork: Bitmap?,
@@ -63,62 +79,125 @@ internal fun DynamicFlowBackground(
 ) {
     val densityDpi = LocalContext.current.resources.displayMetrics.densityDpi
     val lifecycleState by LocalLifecycleOwner.current.lifecycle.currentStateFlow.collectAsState()
-    val animationEnabled = animate && lifecycleState.isAtLeast(Lifecycle.State.RESUMED)
-    val backgroundColor by produceState(
-        initialValue = if (artwork == null) {
-            DynamicFlowFallbackColor
-        } else {
-            defaultDynamicFlowBackgroundColor()
-        },
-        artwork,
-    ) {
-        value = withContext(Dispatchers.Default) {
+    val animationEnabled by rememberUpdatedState(
+        animate && lifecycleState.isAtLeast(Lifecycle.State.RESUMED),
+    )
+    var viewportSize by remember { mutableStateOf(IntSize.Zero) }
+    var displayedFrame by remember { mutableStateOf<Bitmap?>(null) }
+    var elapsedMillis by remember { mutableLongStateOf(0L) }
+    var frameRevision by remember { mutableIntStateOf(0) }
+    val currentDensityDpi by rememberUpdatedState(densityDpi)
+    val frameBufferPool = remember { DynamicFlowFrameBufferPool() }
+
+    LaunchedEffect(artwork) {
+        frameBufferPool.resetHistory()
+        snapshotFlow { viewportSize }.first { it.width > 0 && it.height > 0 }
+        val cover = withContext(Dispatchers.Default) { artwork?.scaledForDynamicFlowSource() }
+        val meshSeed = withContext(Dispatchers.Default) { cover?.dynamicFlowMeshSeed() ?: 0 }
+        val backgroundColor = withContext(Dispatchers.Default) {
             dynamicFlowBackgroundColor(artwork)
         }
-    }
-    val sourceBitmap = remember(artwork) { artwork?.scaledForDynamicFlowSource() }
-    var viewportSize by remember { mutableStateOf(IntSize.Zero) }
-    val sharedClockMillis = rememberDynamicFlowTimeMillis(animationEnabled)
-    val scaledTimeMillis = scaledDynamicFlowTimeMs(
-        elapsedMillis = sharedClockMillis,
-        speedTenths = DYNAMIC_FLOW_DEFAULT_SPEED_TENTHS,
-    )
-    val frameTimeMillis =
-        (scaledTimeMillis / DYNAMIC_FLOW_FRAME_INTERVAL_MILLIS) *
-            DYNAMIC_FLOW_FRAME_INTERVAL_MILLIS
-    val normalizedBlur = DYNAMIC_FLOW_DEFAULT_BLUR.coerceIn(30f, 100f)
-    val washPrimary = remember(backgroundColor) {
-        blendDynamicFlowColors(backgroundColor, Color.Black, 0.28f).copy(alpha = 0.34f)
-    }.toArgb()
-    val washSecondary = Color.Black.copy(alpha = 0.18f).toArgb()
-    val frameBitmap by produceState<Bitmap?>(
-        initialValue = null,
-        sourceBitmap,
-        viewportSize,
-        frameTimeMillis,
-        normalizedBlur,
-        densityDpi,
-        washPrimary,
-        washSecondary,
-    ) {
-        val cover = sourceBitmap
-        val width = viewportSize.width
-        val height = viewportSize.height
-        if (cover == null || width <= 0 || height <= 0) {
-            value = null
-            return@produceState
+        var renderedSize = IntSize.Zero
+        var renderedDensity = 0
+        suspend fun renderFrame(): Bitmap {
+            val size = viewportSize
+            val density = currentDensityDpi
+            val visibleFrame = displayedFrame
+            val frame = withContext(Dispatchers.Default) {
+                if (cover == null) {
+                    Bitmap.createBitmap(1, 1, Bitmap.Config.ARGB_8888).apply {
+                        eraseColor(backgroundColor.toArgb())
+                    }
+                } else {
+                    createDynamicFlowFrameBitmap(
+                        frameBufferPool = frameBufferPool,
+                        displayedFrame = visibleFrame,
+                        cover = cover,
+                        meshSeed = meshSeed,
+                        viewportWidth = size.width,
+                        viewportHeight = size.height,
+                        timeMillis = scaledDynamicFlowTimeMs(
+                            elapsedMillis, DYNAMIC_FLOW_DEFAULT_SPEED_TENTHS,
+                        ),
+                        densityDpi = density,
+                        blur = DYNAMIC_FLOW_DEFAULT_BLUR,
+                        washPrimaryArgb = blendDynamicFlowColors(
+                            backgroundColor, Color.Black, 0.28f,
+                        ).copy(alpha = 0.34f).toArgb(),
+                        washSecondaryArgb = Color(0xFF121316).copy(alpha = 0.16f).toArgb(),
+                        backgroundArgb = backgroundColor.toArgb(),
+                    )
+                }
+            }
+            renderedSize = size
+            renderedDensity = density
+            return frame
         }
-        value = withContext(Dispatchers.Default) {
-            createDynamicFlowFrameBitmap(
-                cover = cover,
-                viewportWidth = width,
-                viewportHeight = height,
-                timeMillis = frameTimeMillis,
-                densityDpi = densityDpi,
-                blur = normalizedBlur,
-                washPrimaryArgb = washPrimary,
-                washSecondaryArgb = washSecondary,
-            )
+
+        // Keep the exact visible mixture when a newer artwork cancels this handoff.
+        val target = renderFrame()
+        val previous = displayedFrame
+        if (previous != null) {
+            val width = max(previous.width, target.width)
+            val height = max(previous.height, target.height)
+            val (fromPixels, toPixels) = withContext(Dispatchers.Default) {
+                fun pixels(bitmap: Bitmap): IntArray = IntArray(width * height).also { output ->
+                    when {
+                        bitmap.width == width && bitmap.height == height ->
+                            bitmap.getPixels(output, 0, width, 0, 0, width, height)
+                        bitmap.width == 1 && bitmap.height == 1 ->
+                            output.fill(bitmap.getPixel(0, 0))
+                        else -> Bitmap.createScaledBitmap(bitmap, width, height, true)
+                            .getPixels(output, 0, width, 0, 0, width, height)
+                    }
+                }
+                pixels(previous) to pixels(target)
+            }
+            val pixels = IntArray(fromPixels.size)
+            val transitionFrame = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888)
+            Animatable(0f).animateTo(
+                targetValue = 1f,
+                animationSpec = tween(
+                    durationMillis = PLAYER_TRACK_ARTWORK_CROSSFADE_DURATION_MILLIS,
+                    easing = PLAYER_TRACK_ARTWORK_CROSSFADE_EASING,
+                ),
+            ) {
+                interpolateDynamicFlowPixels(fromPixels, toPixels, pixels, value)
+                transitionFrame.setPixels(pixels, 0, width, 0, 0, width, height)
+                displayedFrame = transitionFrame
+                frameRevision += 1
+            }
+        }
+        displayedFrame = if (renderedSize != viewportSize || renderedDensity != currentDensityDpi) {
+            renderFrame()
+        } else {
+            target
+        }
+        if (cover == null) return@LaunchedEffect
+
+        var previousFrameNanos: Long? = null
+        while (true) {
+            if (animationEnabled) {
+                val frameNanos = withFrameNanos { it }
+                elapsedMillis = advanceDynamicFlowClockMillis(
+                    elapsedMillis, previousFrameNanos, frameNanos,
+                )
+                previousFrameNanos = frameNanos
+                displayedFrame = renderFrame()
+            } else {
+                previousFrameNanos = null
+                if (viewportSize.width > 0 && viewportSize.height > 0 &&
+                    (renderedSize != viewportSize || renderedDensity != currentDensityDpi)
+                ) {
+                    displayedFrame = renderFrame()
+                }
+                snapshotFlow { Triple(animationEnabled, viewportSize, currentDensityDpi) }
+                    .first { (enabled, size, density) ->
+                        enabled || (size.width > 0 && size.height > 0 &&
+                            (size != renderedSize || density != renderedDensity))
+                    }
+            }
+            delay(DYNAMIC_FLOW_FRAME_INTERVAL_MILLIS)
         }
     }
 
@@ -126,31 +205,20 @@ internal fun DynamicFlowBackground(
         onStatusBarBackgroundDarkChanged(true)
     }
 
-    Box(modifier = modifier.background(backgroundColor)) {
-        Box(
-            modifier = Modifier
-                .fillMaxSize()
-                .clipToBounds()
-                .onSizeChanged { viewportSize = it },
-        ) {
-            val ready = frameBitmap
-            val source = sourceBitmap
-            when {
-                ready != null -> Image(
-                    bitmap = ready.asImageBitmap(),
-                    contentDescription = null,
-                    modifier = Modifier.fillMaxSize(),
-                    contentScale = ContentScale.FillBounds,
-                )
-
-                source != null -> Image(
-                    bitmap = source.asImageBitmap(),
-                    contentDescription = null,
-                    modifier = Modifier
-                        .fillMaxSize()
-                        .blur((normalizedBlur * 0.45f).dp),
-                    contentScale = ContentScale.Crop,
-                    alpha = 0.72f,
+    Box(
+        modifier = modifier
+            .background(DynamicFlowFallbackColor)
+            .clipToBounds()
+            .onSizeChanged { viewportSize = it },
+    ) {
+        displayedFrame?.let { frame ->
+            val image = remember(frame) { frame.asImageBitmap() }
+            ComposeCanvas(modifier = Modifier.fillMaxSize()) {
+                // A reused Bitmap keeps its identity; observe writes to invalidate drawing.
+                frameRevision
+                drawImage(
+                    image = image,
+                    dstSize = IntSize(size.width.roundToInt(), size.height.roundToInt()),
                 )
             }
         }
@@ -170,28 +238,29 @@ internal fun DynamicFlowBackground(
     }
 }
 
+internal fun interpolateDynamicFlowPixels(
+    from: IntArray,
+    to: IntArray,
+    output: IntArray,
+    progress: Float,
+) {
+    for (index in output.indices) {
+        output[index] = interpolateDynamicFlowPixel(from[index], to[index], progress)
+    }
+}
+
+internal fun interpolateDynamicFlowPixel(from: Int, to: Int, progress: Float): Int {
+    val fraction = progress.coerceIn(0f, 1f)
+    fun channel(shift: Int): Int {
+        val start = (from ushr shift) and 0xff
+        val end = (to ushr shift) and 0xff
+        return (start + (end - start) * fraction).roundToInt()
+    }
+    return (0xff shl 24) or (channel(16) shl 16) or (channel(8) shl 8) or channel(0)
+}
+
 internal fun scaledDynamicFlowTimeMs(elapsedMillis: Long, speedTenths: Int): Long =
     elapsedMillis.coerceAtLeast(0L) * speedTenths.coerceIn(5, 60) / 10L
-
-@Composable
-private fun rememberDynamicFlowTimeMillis(animate: Boolean): Long {
-    var sharedClockMillis by remember { mutableLongStateOf(0L) }
-    LaunchedEffect(animate) {
-        if (!animate) return@LaunchedEffect
-        var previousFrameNanos: Long? = null
-        while (true) {
-            val frameNanos = withFrameNanos { it }
-            sharedClockMillis = advanceDynamicFlowClockMillis(
-                elapsedMillis = sharedClockMillis,
-                previousFrameNanos = previousFrameNanos,
-                frameNanos = frameNanos,
-            )
-            previousFrameNanos = frameNanos
-            delay(DYNAMIC_FLOW_FRAME_INTERVAL_MILLIS)
-        }
-    }
-    return sharedClockMillis
-}
 
 internal fun advanceDynamicFlowClockMillis(
     elapsedMillis: Long,
@@ -216,10 +285,26 @@ private fun Bitmap.scaledForDynamicFlowSource(maxDimension: Int = 256): Bitmap {
 }
 
 internal fun dynamicFlowDownsampleFactor(densityDpi: Int): Float =
-    if (densityDpi >= 420) 24f else 16f
+    if (densityDpi >= 420) 20f else 16f
+
+internal fun dynamicFlowBlurRadius(blur: Float, densityDpi: Int): Int {
+    val baseRadius = (
+        ((blur.coerceIn(30f, 100f) - 30f) / 70f) * 17f + 8f
+    ).roundToInt().coerceIn(8, 25)
+    return if (densityDpi >= 420) {
+        (baseRadius * 24f / dynamicFlowDownsampleFactor(densityDpi))
+            .roundToInt()
+            .coerceIn(8, 25)
+    } else {
+        baseRadius
+    }
+}
 
 private fun createDynamicFlowFrameBitmap(
+    frameBufferPool: DynamicFlowFrameBufferPool,
+    displayedFrame: Bitmap?,
     cover: Bitmap,
+    meshSeed: Int,
     viewportWidth: Int,
     viewportHeight: Int,
     timeMillis: Long,
@@ -227,96 +312,244 @@ private fun createDynamicFlowFrameBitmap(
     blur: Float,
     washPrimaryArgb: Int,
     washSecondaryArgb: Int,
+    backgroundArgb: Int,
 ): Bitmap {
     val downsample = dynamicFlowDownsampleFactor(densityDpi)
     val width = ((viewportWidth * 1.3f) / downsample).roundToInt().coerceAtLeast(1)
     val height = ((viewportHeight * 1.3f) / downsample).roundToInt().coerceAtLeast(1)
-    val frame = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888)
-    val canvas = Canvas(frame)
-    val diagonal = (max(width, height) * 1.3f).roundToInt().coerceAtLeast(1).toFloat()
-    val coverScale = diagonal / max(cover.height, 1)
-    val translateX = -(diagonal - width) / 2f
-    val translateY = -(diagonal - height) / 2f
-    val rotatePivot = diagonal / 2f
-    val centerX = width / 2f
-    val centerY = height / 2f
-    val paint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+    return frameBufferPool.render(
+        displayedFrame = displayedFrame,
+        cover = cover,
+        meshSeed = meshSeed,
+        width = width,
+        height = height,
+        timeMillis = timeMillis,
+        blurRadius = dynamicFlowBlurRadius(blur, densityDpi),
+        washPrimaryArgb = washPrimaryArgb,
+        washSecondaryArgb = washSecondaryArgb,
+        backgroundArgb = backgroundArgb,
+    )
+}
+
+private class DynamicFlowFrameBufferPool {
+    private val buffers = List(DYNAMIC_FLOW_FRAME_BUFFER_COUNT) { DynamicFlowFrameBuffer() }
+    private var nextBufferIndex = 0
+    private var previousCompleteFrame: Bitmap? = null
+
+    fun resetHistory() {
+        previousCompleteFrame = null
+    }
+
+    fun render(
+        displayedFrame: Bitmap?,
+        cover: Bitmap,
+        meshSeed: Int,
+        width: Int,
+        height: Int,
+        timeMillis: Long,
+        blurRadius: Int,
+        washPrimaryArgb: Int,
+        washSecondaryArgb: Int,
+        backgroundArgb: Int,
+    ): Bitmap {
+        var bufferIndex = nextBufferIndex
+        for (offset in buffers.indices) {
+            val candidateIndex = (nextBufferIndex + offset) % buffers.size
+            val candidate = buffers[candidateIndex].outputBitmap
+            if (candidate !== displayedFrame && candidate !== previousCompleteFrame) {
+                bufferIndex = candidateIndex
+                break
+            }
+        }
+        nextBufferIndex = (bufferIndex + 1) % buffers.size
+        val previousFrame = previousCompleteFrame
+            ?.takeIf { it !== buffers[bufferIndex].outputBitmap }
+        return buffers[bufferIndex].render(
+            cover = cover,
+            meshSeed = meshSeed,
+            previousFrame = previousFrame,
+            width = width,
+            height = height,
+            timeMillis = timeMillis,
+            blurRadius = blurRadius,
+            washPrimaryArgb = washPrimaryArgb,
+            washSecondaryArgb = washSecondaryArgb,
+            backgroundArgb = backgroundArgb,
+        ).also { previousCompleteFrame = it }
+    }
+}
+
+private class DynamicFlowFrameBuffer {
+    private var sourceBitmap: Bitmap? = null
+    private var warpedBitmap: Bitmap? = null
+    private var blurredBitmap: Bitmap? = null
+    var outputBitmap: Bitmap? = null
+        private set
+    private var pixels = IntArray(0)
+    private var highPrecisionPixels = LongArray(0)
+    private var highPrecisionTemporaryPixels = LongArray(0)
+    private var meshVertices = FloatArray(0)
+    private var blurBoxRadius = -1
+    private var blurBoxSizes = IntArray(0)
+    private val sourceCanvas = Canvas()
+    private val warpedCanvas = Canvas()
+    private val outputCanvas = Canvas()
+    private val artworkPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
         isFilterBitmap = true
         colorFilter = ColorMatrixColorFilter(
             ColorMatrix().apply { setSaturation(DYNAMIC_FLOW_ARTWORK_SATURATION) },
         )
     }
+    private val meshPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { isFilterBitmap = true }
+    private val previousFramePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        alpha = DYNAMIC_FLOW_PREVIOUS_FRAME_ALPHA
+        isFilterBitmap = true
+    }
+    private val firstLayerMatrix = Matrix()
+    private val secondLayerMatrix = Matrix()
+    private val thirdLayerMatrix = Matrix()
 
-    val rotation70 = (timeMillis % 70_000L) / 70_000f * 360f
-    drawDynamicFlowLayer(
-        canvas = canvas,
-        cover = cover,
-        paint = paint,
-        scale = coverScale,
-        rotatePivot = rotatePivot,
-        translateX = translateX,
-        translateY = translateY,
-        viewWidth = width.toFloat(),
-        viewHeight = height.toFloat(),
-        centerX = centerX,
-        centerY = centerY,
-        rotation = (timeMillis % 120_000L) / 120_000f * -360f,
-    )
-    drawDynamicFlowLayer(
-        canvas = canvas,
-        cover = cover,
-        paint = paint,
-        scale = coverScale,
-        rotatePivot = rotatePivot,
-        translateX = translateX,
-        translateY = translateY,
-        viewWidth = width.toFloat(),
-        viewHeight = height.toFloat(),
-        centerX = centerX,
-        centerY = centerY,
-        rotation = (timeMillis % 90_000L) / 90_000f * 360f,
-        offsetXFactor = -0.95f,
-        offsetYFactor = -0.7f,
-    )
-    drawDynamicFlowLayer(
-        canvas = canvas,
-        cover = cover,
-        paint = paint,
-        scale = coverScale,
-        rotatePivot = rotatePivot,
-        translateX = translateX,
-        translateY = translateY,
-        viewWidth = width.toFloat(),
-        viewHeight = height.toFloat(),
-        centerX = centerX,
-        centerY = centerY,
-        rotation = rotation70,
-        offsetXFactor = -0.5f,
-        offsetYFactor = 0.7f,
-        extraRotation = rotation70,
-    )
+    fun render(
+        cover: Bitmap,
+        meshSeed: Int,
+        previousFrame: Bitmap?,
+        width: Int,
+        height: Int,
+        timeMillis: Long,
+        blurRadius: Int,
+        washPrimaryArgb: Int,
+        washSecondaryArgb: Int,
+        backgroundArgb: Int,
+    ): Bitmap {
+        ensureCapacity(width, height)
+        val source = requireNotNull(sourceBitmap)
+        val warped = requireNotNull(warpedBitmap)
+        val blurred = requireNotNull(blurredBitmap)
+        val output = requireNotNull(outputBitmap)
+        sourceCanvas.drawColor(backgroundArgb)
 
-    canvas.drawColor(washPrimaryArgb)
-    canvas.drawColor(washSecondaryArgb)
-    val blurRadius = (
-        ((blur.coerceIn(30f, 100f) - 30f) / 70f) * 17f + 8f
-        ).roundToInt().coerceIn(8, 25)
-    val blurred = blurDynamicFlowBitmap(frame, blurRadius)
-    val cropWidth = (blurred.width / 1.3f).roundToInt().coerceIn(1, blurred.width)
-    val cropHeight = (blurred.height / 1.3f).roundToInt().coerceIn(1, blurred.height)
-    return Bitmap.createBitmap(
-        blurred,
-        ((blurred.width - cropWidth) / 2).coerceAtLeast(0),
-        ((blurred.height - cropHeight) / 2).coerceAtLeast(0),
-        cropWidth,
-        cropHeight,
-    )
+        val diagonal = (max(width, height) * 1.3f).roundToInt().coerceAtLeast(1).toFloat()
+        val coverScale = diagonal / max(cover.height, 1)
+        val translateX = -(diagonal - width) / 2f
+        val translateY = -(diagonal - height) / 2f
+        val rotatePivot = diagonal / 2f
+        val centerX = width / 2f
+        val centerY = height / 2f
+        val rotation70 = (timeMillis % 70_000L) / 70_000f * 360f
+        drawDynamicFlowLayer(
+            canvas = sourceCanvas,
+            cover = cover,
+            paint = artworkPaint,
+            matrix = firstLayerMatrix,
+            scale = coverScale,
+            rotatePivot = rotatePivot,
+            translateX = translateX,
+            translateY = translateY,
+            viewWidth = width.toFloat(),
+            viewHeight = height.toFloat(),
+            centerX = centerX,
+            centerY = centerY,
+            rotation = (timeMillis % 120_000L) / 120_000f * -360f,
+        )
+        drawDynamicFlowLayer(
+            canvas = sourceCanvas,
+            cover = cover,
+            paint = artworkPaint,
+            matrix = secondLayerMatrix,
+            scale = coverScale,
+            rotatePivot = rotatePivot,
+            translateX = translateX,
+            translateY = translateY,
+            viewWidth = width.toFloat(),
+            viewHeight = height.toFloat(),
+            centerX = centerX,
+            centerY = centerY,
+            rotation = (timeMillis % 90_000L) / 90_000f * 360f,
+            offsetXFactor = -0.95f,
+            offsetYFactor = -0.7f,
+        )
+        drawDynamicFlowLayer(
+            canvas = sourceCanvas,
+            cover = cover,
+            paint = artworkPaint,
+            matrix = thirdLayerMatrix,
+            scale = coverScale,
+            rotatePivot = rotatePivot,
+            translateX = translateX,
+            translateY = translateY,
+            viewWidth = width.toFloat(),
+            viewHeight = height.toFloat(),
+            centerX = centerX,
+            centerY = centerY,
+            rotation = rotation70,
+            offsetXFactor = -0.5f,
+            offsetYFactor = 0.7f,
+            extraRotation = rotation70,
+        )
+
+        fillDynamicFlowMeshVertices(meshVertices, width, height, timeMillis, meshSeed)
+        warped.eraseColor(AndroidColor.TRANSPARENT)
+        warpedCanvas.drawBitmapMesh(
+            source,
+            DYNAMIC_FLOW_MESH_COLUMNS,
+            DYNAMIC_FLOW_MESH_ROWS,
+            meshVertices,
+            0,
+            null,
+            0,
+            meshPaint,
+        )
+        warpedCanvas.drawColor(washPrimaryArgb)
+        warpedCanvas.drawColor(washSecondaryArgb)
+        if (blurBoxRadius != blurRadius) {
+            blurBoxRadius = blurRadius
+            blurBoxSizes = dynamicFlowGaussianBoxSizes(blurRadius)
+        }
+        blurDynamicFlowBitmap(
+            source = warped,
+            target = blurred,
+            pixels = pixels,
+            highPrecisionPixels = highPrecisionPixels,
+            highPrecisionTemporaryPixels = highPrecisionTemporaryPixels,
+            boxSizes = blurBoxSizes,
+        )
+        outputCanvas.drawBitmap(
+            blurred,
+            -((blurred.width - output.width) / 2).toFloat(),
+            -((blurred.height - output.height) / 2).toFloat(),
+            null,
+        )
+        if (previousFrame?.width == output.width && previousFrame.height == output.height) {
+            outputCanvas.drawBitmap(previousFrame, 0f, 0f, previousFramePaint)
+        }
+        return output
+    }
+
+    private fun ensureCapacity(width: Int, height: Int) {
+        val cropWidth = (width / 1.3f).roundToInt().coerceIn(1, width)
+        val cropHeight = (height / 1.3f).roundToInt().coerceIn(1, height)
+        if (sourceBitmap?.width == width && sourceBitmap?.height == height &&
+            outputBitmap?.width == cropWidth && outputBitmap?.height == cropHeight
+        ) return
+        sourceBitmap = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888)
+        warpedBitmap = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888)
+        blurredBitmap = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888)
+        outputBitmap = Bitmap.createBitmap(cropWidth, cropHeight, Bitmap.Config.ARGB_8888)
+        pixels = IntArray(width * height)
+        highPrecisionPixels = LongArray(width * height)
+        highPrecisionTemporaryPixels = LongArray(width * height)
+        meshVertices = FloatArray((DYNAMIC_FLOW_MESH_COLUMNS + 1) * (DYNAMIC_FLOW_MESH_ROWS + 1) * 2)
+        sourceCanvas.setBitmap(sourceBitmap)
+        warpedCanvas.setBitmap(warpedBitmap)
+        outputCanvas.setBitmap(outputBitmap)
+    }
 }
 
 private fun drawDynamicFlowLayer(
     canvas: Canvas,
     cover: Bitmap,
     paint: Paint,
+    matrix: Matrix,
     scale: Float,
     rotatePivot: Float,
     translateX: Float,
@@ -330,7 +563,6 @@ private fun drawDynamicFlowLayer(
     offsetYFactor: Float = 0f,
     extraRotation: Float? = null,
 ) {
-    val matrix = Matrix()
     matrix.setScale(scale, scale)
     matrix.postRotate(rotation, rotatePivot, rotatePivot)
     matrix.postTranslate(translateX, translateY)
@@ -343,75 +575,316 @@ private fun drawDynamicFlowLayer(
     canvas.drawBitmap(cover, matrix, paint)
 }
 
-private fun blurDynamicFlowBitmap(bitmap: Bitmap, radius: Int): Bitmap {
-    if (radius <= 0) return bitmap
-    val blurRadius = radius.coerceIn(1, 25)
-    val width = bitmap.width
-    val height = bitmap.height
-    if (width <= 1 || height <= 1) return bitmap
+internal fun fillDynamicFlowMeshVertices(
+    output: FloatArray,
+    width: Int,
+    height: Int,
+    timeMillis: Long,
+    seed: Int,
+) {
+    require(output.size == (DYNAMIC_FLOW_MESH_COLUMNS + 1) * (DYNAMIC_FLOW_MESH_ROWS + 1) * 2)
+    // Keep the cover-specific shape stable; only the slow drift changes with time.
+    val phase = (timeMillis % 60_000L).toFloat() / 60_000f * (PI * 2f).toFloat()
+    val templateIndex =
+        ((seed.toLong() and 0x7fffffffL) % DYNAMIC_FLOW_MESH_TEMPLATE_COUNT).toInt()
+    val templateSalt = DYNAMIC_FLOW_MESH_TEMPLATE_SALTS[templateIndex]
+    var index = 0
+    for (row in 0..DYNAMIC_FLOW_MESH_ROWS) {
+        for (column in 0..DYNAMIC_FLOW_MESH_COLUMNS) {
+            val x = width * column.toFloat() / DYNAMIC_FLOW_MESH_COLUMNS
+            val y = height * row.toFloat() / DYNAMIC_FLOW_MESH_ROWS
+            val isEdge = column == 0 || column == DYNAMIC_FLOW_MESH_COLUMNS ||
+                row == 0 || row == DYNAMIC_FLOW_MESH_ROWS
+            val isCorner = isEdge &&
+                (column == 0 || column == DYNAMIC_FLOW_MESH_COLUMNS) &&
+                (row == 0 || row == DYNAMIC_FLOW_MESH_ROWS)
+            val maxOffset = when {
+                isCorner -> DYNAMIC_FLOW_MESH_CORNER_OFFSET
+                isEdge -> DYNAMIC_FLOW_MESH_EDGE_OFFSET
+                else -> DYNAMIC_FLOW_MESH_INTERIOR_OFFSET
+            }
 
-    val pixels = IntArray(width * height)
-    bitmap.getPixels(pixels, 0, width, 0, 0, width, height)
-    val window = blurRadius * 2 + 1
-    val temporary = IntArray(width * height)
+            val localHorizontal = dynamicFlowMeshUnitNoise(
+                seed, templateSalt, column, row, axis = 0,
+            )
+            val coarseHorizontal = dynamicFlowMeshUnitNoise(
+                seed, templateSalt, column / 2, row / 2, axis = 2,
+            )
+            val localVertical = dynamicFlowMeshUnitNoise(
+                seed, templateSalt, column, row, axis = 1,
+            )
+            val coarseVertical = dynamicFlowMeshUnitNoise(
+                seed, templateSalt, column / 2, row / 2, axis = 3,
+            )
+            val staticHorizontal = localHorizontal * 0.68f + coarseHorizontal * 0.32f
+            val staticVertical = localVertical * 0.68f + coarseVertical * 0.32f
+
+            val horizontalPhase = dynamicFlowMeshPhase(seed, templateSalt, column, row, axis = 4)
+            val verticalPhase = dynamicFlowMeshPhase(seed, templateSalt, column, row, axis = 5)
+            val horizontalSpeed = dynamicFlowMeshSpeed(seed, templateSalt, column, row, axis = 6)
+            val verticalSpeed = dynamicFlowMeshSpeed(seed, templateSalt, column, row, axis = 7)
+            val horizontalDrift = sin((phase * horizontalSpeed + horizontalPhase).toDouble()).toFloat()
+            val verticalDrift = cos((phase * verticalSpeed + verticalPhase).toDouble()).toFloat()
+
+            output[index++] = x +
+                (staticHorizontal + horizontalDrift * DYNAMIC_FLOW_MESH_DRIFT) * width * maxOffset
+            output[index++] = y +
+                (staticVertical + verticalDrift * DYNAMIC_FLOW_MESH_DRIFT) * height * maxOffset
+        }
+    }
+}
+
+private val DYNAMIC_FLOW_MESH_TEMPLATE_SALTS = intArrayOf(
+    0x13579BDF,
+    0x2468ACE1,
+    0x5A17C0DE,
+    0x6D2B79F5,
+    0x1B873593,
+    0x9E3779B9.toInt(),
+)
+
+private fun dynamicFlowMeshHash(
+    seed: Int,
+    templateSalt: Int,
+    column: Int,
+    row: Int,
+    axis: Int,
+): Int {
+    var value = seed xor templateSalt
+    value = value xor (column + 1) * 0x45D9F3B
+    value = value xor (row + 1) * 0x119DE1F3
+    value = value xor (axis + 1) * 0x27D4EB2D
+    value = (value xor (value ushr 16)) * 0x7FEB352D
+    value = (value xor (value ushr 15)) * 0x846CA68B.toInt()
+    return value xor (value ushr 16)
+}
+
+private fun dynamicFlowMeshUnitNoise(
+    seed: Int,
+    templateSalt: Int,
+    column: Int,
+    row: Int,
+    axis: Int,
+): Float {
+    val value = dynamicFlowMeshHash(seed, templateSalt, column, row, axis)
+    return ((value ushr 8) and 0xffff) / 32_767.5f - 1f
+}
+
+private fun dynamicFlowMeshPhase(
+    seed: Int,
+    templateSalt: Int,
+    column: Int,
+    row: Int,
+    axis: Int,
+): Float {
+    val value = dynamicFlowMeshHash(seed, templateSalt, column, row, axis)
+    return ((value ushr 8) and 0xffff) / 65_535f * (PI * 2f).toFloat()
+}
+
+private fun dynamicFlowMeshSpeed(
+    seed: Int,
+    templateSalt: Int,
+    column: Int,
+    row: Int,
+    axis: Int,
+): Float {
+    val value = dynamicFlowMeshHash(seed, templateSalt, column, row, axis)
+    return 0.42f + ((value ushr 8) and 0xffff) / 65_535f * 0.34f
+}
+
+private fun Bitmap.dynamicFlowMeshSeed(): Int {
+    val positions = intArrayOf(
+        0, 0,
+        width / 2, height / 2,
+        width - 1, height - 1,
+    )
+    var hash = 17
+    for (index in positions.indices step 2) {
+        hash = hash * 31 + getPixel(positions[index], positions[index + 1])
+    }
+    return hash
+}
+
+private fun blurDynamicFlowBitmap(
+    source: Bitmap,
+    target: Bitmap,
+    pixels: IntArray,
+    highPrecisionPixels: LongArray,
+    highPrecisionTemporaryPixels: LongArray,
+    boxSizes: IntArray,
+) {
+    if (boxSizes.isEmpty()) {
+        Canvas(target).drawBitmap(source, 0f, 0f, null)
+        return
+    }
+    val width = source.width
+    val height = source.height
+    if (width <= 1 || height <= 1) {
+        Canvas(target).drawBitmap(source, 0f, 0f, null)
+        return
+    }
+
+    source.getPixels(pixels, 0, width, 0, 0, width, height)
+    for (index in pixels.indices) {
+        highPrecisionPixels[index] = highPrecisionDynamicFlowPixel(pixels[index])
+    }
+    for (boxSize in boxSizes) {
+        val radius = boxSize / 2
+        blurDynamicFlowHorizontal(
+            source = highPrecisionPixels,
+            target = highPrecisionTemporaryPixels,
+            width = width,
+            height = height,
+            radius = radius,
+        )
+        blurDynamicFlowVertical(
+            source = highPrecisionTemporaryPixels,
+            target = highPrecisionPixels,
+            width = width,
+            height = height,
+            radius = radius,
+        )
+    }
+    for (index in pixels.indices) {
+        pixels[index] = dynamicFlowArgbPixel(highPrecisionPixels[index])
+    }
+    target.setPixels(pixels, 0, width, 0, 0, width, height)
+}
+
+internal fun dynamicFlowGaussianBoxSizes(radius: Int): IntArray {
+    val boundedRadius = radius.coerceIn(1, 25)
+    val sourceWidth = boundedRadius * 2 + 1
+    val targetVariance = (sourceWidth * sourceWidth - 1) / 12f
+    val passCount = 3
+    val idealWidth = sqrt((12f * targetVariance / passCount) + 1f)
+    var lowerWidth = floor(idealWidth).toInt()
+    if (lowerWidth % 2 == 0) lowerWidth -= 1
+    val upperWidth = lowerWidth + 2
+    val lowerPassCount = round(
+        (12f * targetVariance -
+            passCount * lowerWidth * lowerWidth -
+            4f * passCount * lowerWidth -
+            3f * passCount) /
+            (-4f * lowerWidth - 4f),
+    ).toInt().coerceIn(0, passCount)
+    return IntArray(passCount) { index ->
+        if (index < lowerPassCount) lowerWidth else upperWidth
+    }
+}
+
+private fun blurDynamicFlowHorizontal(
+    source: LongArray,
+    target: LongArray,
+    width: Int,
+    height: Int,
+    radius: Int,
+) {
+    val window = radius * 2 + 1
     for (y in 0 until height) {
         val rowStart = y * width
         var alpha = 0
         var red = 0
         var green = 0
         var blue = 0
-        for (offset in -blurRadius..blurRadius) {
-            val pixel = pixels[rowStart + offset.coerceIn(0, width - 1)]
-            alpha += pixel ushr 24 and 0xff
-            red += pixel ushr 16 and 0xff
-            green += pixel ushr 8 and 0xff
-            blue += pixel and 0xff
+        for (offset in -radius..radius) {
+            val pixel = source[rowStart + offset.coerceIn(0, width - 1)]
+            alpha += dynamicFlowHighPrecisionChannel(pixel, 48)
+            red += dynamicFlowHighPrecisionChannel(pixel, 32)
+            green += dynamicFlowHighPrecisionChannel(pixel, 16)
+            blue += dynamicFlowHighPrecisionChannel(pixel, 0)
         }
         for (x in 0 until width) {
-            temporary[rowStart + x] =
-                (alpha / window shl 24) or
-                    (red / window shl 16) or
-                    (green / window shl 8) or
-                    (blue / window)
-            val outgoing = pixels[rowStart + (x - blurRadius).coerceIn(0, width - 1)]
-            val incoming = pixels[rowStart + (x + blurRadius + 1).coerceIn(0, width - 1)]
-            alpha += (incoming ushr 24 and 0xff) - (outgoing ushr 24 and 0xff)
-            red += (incoming ushr 16 and 0xff) - (outgoing ushr 16 and 0xff)
-            green += (incoming ushr 8 and 0xff) - (outgoing ushr 8 and 0xff)
-            blue += (incoming and 0xff) - (outgoing and 0xff)
+            target[rowStart + x] = packDynamicFlowHighPrecisionPixel(
+                alpha = (alpha + window / 2) / window,
+                red = (red + window / 2) / window,
+                green = (green + window / 2) / window,
+                blue = (blue + window / 2) / window,
+            )
+            val outgoing = source[rowStart + (x - radius).coerceIn(0, width - 1)]
+            val incoming = source[rowStart + (x + radius + 1).coerceIn(0, width - 1)]
+            alpha += dynamicFlowHighPrecisionChannel(incoming, 48) -
+                dynamicFlowHighPrecisionChannel(outgoing, 48)
+            red += dynamicFlowHighPrecisionChannel(incoming, 32) -
+                dynamicFlowHighPrecisionChannel(outgoing, 32)
+            green += dynamicFlowHighPrecisionChannel(incoming, 16) -
+                dynamicFlowHighPrecisionChannel(outgoing, 16)
+            blue += dynamicFlowHighPrecisionChannel(incoming, 0) -
+                dynamicFlowHighPrecisionChannel(outgoing, 0)
         }
     }
+}
 
+private fun blurDynamicFlowVertical(
+    source: LongArray,
+    target: LongArray,
+    width: Int,
+    height: Int,
+    radius: Int,
+) {
+    val window = radius * 2 + 1
     for (x in 0 until width) {
         var alpha = 0
         var red = 0
         var green = 0
         var blue = 0
-        for (offset in -blurRadius..blurRadius) {
-            val pixel = temporary[offset.coerceIn(0, height - 1) * width + x]
-            alpha += pixel ushr 24 and 0xff
-            red += pixel ushr 16 and 0xff
-            green += pixel ushr 8 and 0xff
-            blue += pixel and 0xff
+        for (offset in -radius..radius) {
+            val pixel = source[offset.coerceIn(0, height - 1) * width + x]
+            alpha += dynamicFlowHighPrecisionChannel(pixel, 48)
+            red += dynamicFlowHighPrecisionChannel(pixel, 32)
+            green += dynamicFlowHighPrecisionChannel(pixel, 16)
+            blue += dynamicFlowHighPrecisionChannel(pixel, 0)
         }
         for (y in 0 until height) {
-            pixels[y * width + x] =
-                (alpha / window shl 24) or
-                    (red / window shl 16) or
-                    (green / window shl 8) or
-                    (blue / window)
-            val outgoing = temporary[(y - blurRadius).coerceIn(0, height - 1) * width + x]
-            val incoming = temporary[(y + blurRadius + 1).coerceIn(0, height - 1) * width + x]
-            alpha += (incoming ushr 24 and 0xff) - (outgoing ushr 24 and 0xff)
-            red += (incoming ushr 16 and 0xff) - (outgoing ushr 16 and 0xff)
-            green += (incoming ushr 8 and 0xff) - (outgoing ushr 8 and 0xff)
-            blue += (incoming and 0xff) - (outgoing and 0xff)
+            target[y * width + x] = packDynamicFlowHighPrecisionPixel(
+                alpha = (alpha + window / 2) / window,
+                red = (red + window / 2) / window,
+                green = (green + window / 2) / window,
+                blue = (blue + window / 2) / window,
+            )
+            val outgoing = source[(y - radius).coerceIn(0, height - 1) * width + x]
+            val incoming = source[(y + radius + 1).coerceIn(0, height - 1) * width + x]
+            alpha += dynamicFlowHighPrecisionChannel(incoming, 48) -
+                dynamicFlowHighPrecisionChannel(outgoing, 48)
+            red += dynamicFlowHighPrecisionChannel(incoming, 32) -
+                dynamicFlowHighPrecisionChannel(outgoing, 32)
+            green += dynamicFlowHighPrecisionChannel(incoming, 16) -
+                dynamicFlowHighPrecisionChannel(outgoing, 16)
+            blue += dynamicFlowHighPrecisionChannel(incoming, 0) -
+                dynamicFlowHighPrecisionChannel(outgoing, 0)
         }
     }
+}
 
-    return Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888).apply {
-        setPixels(pixels, 0, width, 0, 0, width, height)
-    }
+private fun highPrecisionDynamicFlowPixel(pixel: Int): Long = packDynamicFlowHighPrecisionPixel(
+    alpha = (pixel ushr 24 and 0xff) shl DYNAMIC_FLOW_HIGH_PRECISION_CHANNEL_SHIFT,
+    red = (pixel ushr 16 and 0xff) shl DYNAMIC_FLOW_HIGH_PRECISION_CHANNEL_SHIFT,
+    green = (pixel ushr 8 and 0xff) shl DYNAMIC_FLOW_HIGH_PRECISION_CHANNEL_SHIFT,
+    blue = (pixel and 0xff) shl DYNAMIC_FLOW_HIGH_PRECISION_CHANNEL_SHIFT,
+)
+
+private fun packDynamicFlowHighPrecisionPixel(
+    alpha: Int,
+    red: Int,
+    green: Int,
+    blue: Int,
+): Long =
+    (alpha.coerceIn(0, DYNAMIC_FLOW_HIGH_PRECISION_CHANNEL_MASK.toInt()).toLong() shl 48) or
+        (red.coerceIn(0, DYNAMIC_FLOW_HIGH_PRECISION_CHANNEL_MASK.toInt()).toLong() shl 32) or
+        (green.coerceIn(0, DYNAMIC_FLOW_HIGH_PRECISION_CHANNEL_MASK.toInt()).toLong() shl 16) or
+        blue.coerceIn(0, DYNAMIC_FLOW_HIGH_PRECISION_CHANNEL_MASK.toInt()).toLong()
+
+private fun dynamicFlowHighPrecisionChannel(pixel: Long, shift: Int): Int =
+    ((pixel ushr shift) and DYNAMIC_FLOW_HIGH_PRECISION_CHANNEL_MASK).toInt()
+
+private fun dynamicFlowArgbPixel(pixel: Long): Int {
+    fun channel(shift: Int): Int = (
+        dynamicFlowHighPrecisionChannel(pixel, shift) +
+            (1 shl (DYNAMIC_FLOW_HIGH_PRECISION_CHANNEL_SHIFT - 1))
+        ) ushr DYNAMIC_FLOW_HIGH_PRECISION_CHANNEL_SHIFT
+    return (channel(48) shl 24) or
+        (channel(32) shl 16) or
+        (channel(16) shl 8) or
+        channel(0)
 }
 
 private fun defaultDynamicFlowBackgroundColor(): Color = Color(0xFF0B0B0D)
