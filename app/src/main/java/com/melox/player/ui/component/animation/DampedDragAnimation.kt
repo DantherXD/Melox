@@ -3,7 +3,6 @@
 
 package com.melox.player.ui.component.animation
 
-// Adapted from Kyant0/AndroidLiquidGlass — https://github.com/Kyant0/AndroidLiquidGlass (Apache 2.0).
 
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.spring
