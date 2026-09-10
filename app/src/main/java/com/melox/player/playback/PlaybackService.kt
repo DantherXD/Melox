@@ -19,6 +19,7 @@ import androidx.media3.session.SessionCommand
 import androidx.media3.session.SessionError
 import androidx.media3.session.SessionResult
 import com.melox.player.MainActivity
+import com.melox.player.MeloxApplication
 import com.melox.player.R
 import com.melox.player.data.playback.PlaybackSnapshotStore
 import com.melox.player.data.playback.MiniPlaybackSnapshotStore
@@ -52,7 +53,8 @@ class PlaybackService : MediaSessionService() {
     private var snapshotRestoreSeed: PlaybackSnapshot? = null
     private val snapshotWriteMutex = Mutex()
     private val snapshotWriteSequence = AtomicLong()
-    private val lastPersistedSnapshotSequence = AtomicLong()
+    private val lastSnapshotWriteSequence = AtomicLong()
+    private var lastSnapshotWriteSucceeded = false
     private var artworkLoadJob: Job? = null
     private var requestedArtworkKey: PlaybackArtworkKey? = null
     private var isClosing = false
@@ -170,6 +172,7 @@ class PlaybackService : MediaSessionService() {
             .setMediaButtonPreferences(mediaButtonPreferences(player.currentPlaybackMode()))
             .build()
         scheduleArtworkUpdate(player)
+        (application as MeloxApplication).fairMemoryManager.savePlayback = ::saveMemoryCheckpoint
         serviceScope.launch {
             while (isActive) {
                 delay(SNAPSHOT_INTERVAL_MS)
@@ -201,6 +204,7 @@ class PlaybackService : MediaSessionService() {
         }
         serviceScope.cancel()
         mediaSession = null
+        (application as MeloxApplication).fairMemoryManager.savePlayback = null
         super.onDestroy()
     }
 
@@ -369,11 +373,30 @@ class PlaybackService : MediaSessionService() {
         sequence: Long,
     ) = withContext(Dispatchers.IO) {
         snapshotWriteMutex.withLock {
-            if (sequence <= lastPersistedSnapshotSequence.get()) return@withLock
-            runCatching { snapshotStore.save(snapshot) }
-            runCatching { miniSnapshotStore.save(snapshot) }
-            lastPersistedSnapshotSequence.set(sequence)
+            if (sequence <= lastSnapshotWriteSequence.get()) {
+                return@withLock lastSnapshotWriteSucceeded
+            }
+            val fullSaved = runCatching { snapshotStore.save(snapshot) }.isSuccess
+            val miniSaved = runCatching { miniSnapshotStore.save(snapshot) }.isSuccess
+            (fullSaved && miniSaved).also { saved ->
+                // Even a partial write must not let an older queued snapshot replace it.
+                lastSnapshotWriteSequence.set(sequence)
+                lastSnapshotWriteSucceeded = saved
+            }
         }
+    }
+
+    private suspend fun saveMemoryCheckpoint(): Boolean = withContext(Dispatchers.Main.immediate) {
+        // Never replace the full disk queue with the bounded startup preview, or
+        // race the restore path's mini-snapshot write. The receiver owns the timeout.
+        while (snapshotRestorePending && !isClosing && mediaSession != null) delay(25L)
+        val player = mediaSession?.player ?: return@withContext false
+        if (isClosing) return@withContext false
+        val snapshot = player.toSnapshot()
+        val sequence = snapshotWriteSequence.incrementAndGet()
+        snapshotDebounceJob?.cancel()
+        snapshotDebounceJob = null
+        persistSnapshot(snapshot, sequence)
     }
 
     private fun persistSnapshotBlocking(player: Player) {

@@ -37,6 +37,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import com.melox.player.ui.component.library.createArtworkCacheKey
+import com.melox.player.ui.component.library.canRetainArtworkInMemory
 import com.melox.player.ui.component.library.loadArtworkBitmap
 import com.melox.player.ui.component.library.loadCachedArtworkDerivative
 import java.util.LinkedHashMap
@@ -69,6 +70,11 @@ private data class BlurredArtworkLayer(
     val key: String,
     val blurredArtwork: Bitmap,
 )
+
+internal fun trimBlurredArtworkMemoryCache() {
+    synchronized(blurredArtworkMemoryCache) { blurredArtworkMemoryCache.clear() }
+    synchronized(blurredArtworkLayerMemoryCache) { blurredArtworkLayerMemoryCache.clear() }
+}
 
 private data class BlurredArtworkLayerBlend(
     val previousLayer: BlurredArtworkLayer?,
@@ -323,7 +329,7 @@ private fun getCachedBlurredArtworkLayer(key: String): BlurredArtworkLayer? =
 
 private fun cacheBlurredArtworkLayer(layer: BlurredArtworkLayer) {
     synchronized(blurredArtworkLayerMemoryCache) {
-        blurredArtworkLayerMemoryCache[layer.key] = layer
+        if (canRetainArtworkInMemory()) blurredArtworkLayerMemoryCache[layer.key] = layer
     }
 }
 
@@ -416,7 +422,7 @@ private fun createBlurredArtwork(source: Bitmap): Bitmap {
     )
     sampled.recycle()
     synchronized(blurredArtworkMemoryCache) {
-        blurredArtworkMemoryCache[source] = blurred
+        if (canRetainArtworkInMemory()) blurredArtworkMemoryCache[source] = blurred
     }
     return blurred
 }

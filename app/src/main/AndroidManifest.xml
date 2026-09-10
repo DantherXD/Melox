@@ -25,6 +25,7 @@
     </queries>
 
     <application
+        android:name=".MeloxApplication"
         android:allowBackup="false"
         android:dataExtractionRules="@xml/data_extraction_rules"
         android:enableOnBackInvokedCallback="true"

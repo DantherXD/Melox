@@ -6,6 +6,7 @@ import android.graphics.BitmapFactory
 import android.graphics.BlurMaskFilter
 import android.media.MediaMetadataRetriever
 import android.os.Build
+import android.os.SystemClock
 import android.util.AtomicFile
 import android.util.LruCache
 import android.util.Size
@@ -719,6 +720,17 @@ internal fun artworkCacheFileStem(cacheKey: String): String {
     }
 }
 
+@Volatile
+private var artworkCacheResumeTimeMillis = 0L
+
+internal fun canRetainArtworkInMemory(): Boolean =
+    SystemClock.uptimeMillis() >= artworkCacheResumeTimeMillis
+
+internal fun trimArtworkMemoryCache() {
+    artworkCacheResumeTimeMillis = SystemClock.uptimeMillis() + 30_000L
+    ArtworkCache.trim()
+}
+
 private object ArtworkCache {
     private val maxSizeKilobytes = (Runtime.getRuntime().maxMemory() / 1024L / 4L)
         .coerceIn(
@@ -733,6 +745,13 @@ private object ArtworkCache {
     private val missingKeys = LruCache<String, Boolean>(MAX_MEMORY_MISSING_ENTRIES)
     private val inFlight = ConcurrentHashMap<String, Deferred<ArtworkResult>>()
     private val loaderScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+
+    @Synchronized
+    fun trim() {
+        // Visible consumers may still own these bitmaps; never recycle them here.
+        cache.evictAll()
+        missingKeys.evictAll()
+    }
 
     fun get(key: String): ArtworkResult? =
         cache.get(key)?.let(ArtworkResult::Loaded)
@@ -793,7 +812,9 @@ private object ArtworkCache {
         return request.await()
     }
 
+    @Synchronized
     private fun remember(key: String, result: ArtworkResult) {
+        if (!canRetainArtworkInMemory()) return
         when (result) {
             is ArtworkResult.Loaded -> cache.put(key, result.bitmap)
             ArtworkResult.Missing -> missingKeys.put(key, true)
