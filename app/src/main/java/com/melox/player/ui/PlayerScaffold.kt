@@ -21,6 +21,8 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.WindowInsetsSides
 import androidx.compose.foundation.layout.asPaddingValues
+import androidx.compose.foundation.layout.consumeWindowInsets
+import androidx.compose.foundation.layout.displayCutout
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -29,6 +31,7 @@ import androidx.compose.foundation.layout.navigationBars
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.only
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.union
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -222,7 +225,8 @@ internal fun PlayerScaffold(
                     modifier = Modifier
                         .weight(1f)
                         .fillMaxHeight()
-                        .clipToBounds(),
+                        .clipToBounds()
+                        .consumeNavigationRailStartInsets(navigationRailVisible),
                 ) {
                     Scaffold(
                         modifier = Modifier.fillMaxSize(),
@@ -299,7 +303,8 @@ internal fun PlayerScaffold(
                 modifier = Modifier
                     .weight(1f)
                     .fillMaxHeight()
-                    .clipToBounds(),
+                    .clipToBounds()
+                    .consumeNavigationRailStartInsets(navigationRailVisible),
             ) {
                 Scaffold(
                     modifier = Modifier.fillMaxSize(),
@@ -390,6 +395,16 @@ internal fun isMiuixWideLayout(
         (windowWidth >= 600.dp && heightToWidthRatio < 1.2f)
 }
 
+@Composable
+internal fun usesMiuixSmallTopAppBar(): Boolean {
+    val windowSize = LocalWindowInfo.current.containerSize
+    val density = LocalDensity.current
+    return isMiuixWideLayout(
+        windowWidth = with(density) { windowSize.width.toDp() },
+        windowHeight = with(density) { windowSize.height.toDp() },
+    )
+}
+
 internal fun usesNormalMiniPlayerChrome(
     renderedBottomBarStyle: BottomBarStyle,
     liquidGlassSupported: Boolean,
@@ -411,6 +426,18 @@ internal fun shouldShowNavigation(
 private val PLAYER_RAIL_MINI_PLAYER_BOTTOM_SPACING_WITHOUT_NAV = 24.dp
 private val PLAYER_NORMAL_MINI_PLAYER_HEIGHT = 68.dp
 private val PLAYER_NORMAL_MINI_PLAYER_INTERNAL_PADDING = 6.dp
+
+@Composable
+private fun Modifier.consumeNavigationRailStartInsets(
+    navigationRailVisible: Boolean,
+): Modifier = if (navigationRailVisible) {
+    consumeWindowInsets(
+        WindowInsets.displayCutout.only(WindowInsetsSides.Start)
+            .union(WindowInsets.navigationBars.only(WindowInsetsSides.Start)),
+    )
+} else {
+    this
+}
 
 @Composable
 private fun BasePlayerScaffold(

@@ -558,10 +558,13 @@ fun MeloxApp(
         selectedSongUris = emptySet()
         songsSelectionMode = false
     }
-    LaunchedEffect(playerTransition.animationRequest, playerTransition.isReady) {
-        if (!playerTransition.isReady || playerTransition.isDragging) return@LaunchedEffect
+    BackHandler(enabled = playerTransition.isMounted) {
+        closePlayer()
+    }
+    LaunchedEffect(playerTransition.animationRequest, playerTransition.canSettle) {
+        if (!playerTransition.canSettle || playerTransition.isDragging) return@LaunchedEffect
         withFrameNanos { }
-        if (!playerTransition.isReady || playerTransition.isDragging) return@LaunchedEffect
+        if (!playerTransition.canSettle || playerTransition.isDragging) return@LaunchedEffect
         playerTransition.animateToTarget()
     }
     LaunchedEffect(
@@ -1520,11 +1523,13 @@ fun MeloxApp(
                                     playerLayer = miniPlayerLayer,
                                     playerContentLayer = miniPlayerContentLayer,
                                     frameRecordingGeneration = frameRecordingGeneration,
-                                    drawInPlace = !playerTransition.isMounted || !playerTransition.isReady,
+                                    drawInPlace =
+                                        !playerTransition.isMounted || !playerTransition.sharedLayersReady,
                                     surfaceVisible =
-                                        !playerTransition.isMounted || !playerTransition.isReady,
+                                        !playerTransition.isMounted ||
+                                            !playerTransition.sharedLayersReady,
                                     sharedArtworkVisible =
-                                        !playerTransition.isReady ||
+                                        !playerTransition.separateArtworkOverlayReady ||
                                             !playerTransition.isTransitionActive ||
                                             !sharedPlayerArtworkEnabled ||
                                             playerSheetArtworkIsOffscreen(playerTransition),
@@ -1949,11 +1954,12 @@ fun MeloxApp(
                             backgroundLayer = fullPlayerBackgroundLayer,
                             contentLayer = fullPlayerContentLayer,
                             frameRecordingGeneration = frameRecordingGeneration,
-                            interactionEnabled = playerTransition.fullPlayerAcceptsInput,
+                            interactionEnabled = playerTransition.fullPlayerAcceptsInput &&
+                                playerTransition.progress > 0f,
                             lyricsPagingEnabled = playerTransition.isFullyExpanded,
                             drawInPlace = playerTransition.fullPlayerDrawsInPlace,
                             sharedArtworkVisible =
-                                !playerTransition.isReady ||
+                                !playerTransition.separateArtworkOverlayReady ||
                                     !playerTransition.isTransitionActive ||
                                     !sharedPlayerArtworkEnabled,
                             initialArtworkPageSelected =
@@ -1984,7 +1990,7 @@ fun MeloxApp(
                                 playerStatusBarBackgroundIsDark = it
                             },
                             modifier = Modifier.zIndex(
-                                if (playerTransition.fullPlayerHostMounted) 1f else -1f,
+                                if (playerTransition.fullPlayerDrawsAboveRoot) 1f else -1f,
                             ),
                         )
                     }
@@ -2017,8 +2023,10 @@ fun MeloxApp(
                         playlistPickerTracks = null
                         playlistPickerOnAdded = null
                     },
-                    onCreatePlaylist = { tracks ->
+                    onCreateRequestDismiss = {
                         playlistPickerTracks = null
+                    },
+                    onCreatePlaylist = { tracks ->
                         playlistCreateRequest = PlaylistCreateRequest(
                             tracks = tracks,
                             openAfterCreate = false,
@@ -2241,7 +2249,7 @@ private fun MiniPlayerHost(
 
 private fun playerSheetArtworkIsOffscreen(
     transition: com.melox.player.ui.component.playback.PlayerSheetTransitionState,
-): Boolean = transition.isReady &&
+): Boolean = transition.separateArtworkOverlayReady &&
     !sharedArtworkTargetIsOnscreen(
         artworkBounds = transition.fullArtworkBounds,
         viewportBounds = transition.fullPlayerBounds,

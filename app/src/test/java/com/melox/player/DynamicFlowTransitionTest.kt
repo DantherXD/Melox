@@ -17,7 +17,7 @@ import org.junit.Test
 class DynamicFlowTransitionTest {
     @Test
     fun blurredAndDynamicBackgroundsUseTheArtworkCrossfadeDuration() {
-        assertEquals(320, PLAYER_TRACK_ARTWORK_CROSSFADE_DURATION_MILLIS)
+        assertEquals(500, PLAYER_TRACK_ARTWORK_CROSSFADE_DURATION_MILLIS)
         assertEquals(
             PLAYER_TRACK_ARTWORK_CROSSFADE_DURATION_MILLIS,
             PLAYBACK_BACKGROUND_TRANSITION_DURATION_MILLIS,

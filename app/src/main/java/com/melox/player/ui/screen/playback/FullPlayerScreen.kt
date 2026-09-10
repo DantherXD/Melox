@@ -120,6 +120,8 @@ import com.melox.player.ui.component.playback.PLAYER_TRACK_ARTWORK_CROSSFADE_DUR
 import com.melox.player.ui.component.playback.PLAYER_TRACK_ARTWORK_CROSSFADE_EASING
 import com.melox.player.ui.component.playback.playerControlIconTransition
 import com.melox.player.ui.component.playback.recordPlayerLayer
+import com.melox.player.ui.component.playback.WeightedCrossfadeFrame
+import com.melox.player.ui.component.playback.weightedCrossfadeFrames
 import com.melox.player.ui.component.playback.rememberPlayerSheetVerticalDragModifier
 import com.melox.player.ui.component.playback.artworkInsetRect
 import com.melox.player.ui.component.playback.fittedArtworkRect
@@ -204,17 +206,19 @@ internal fun FullPlayerScreen(
     val item = playback.currentItem?.let { queueItem ->
         currentTrack?.let(queueItem::withTrackMetadata) ?: queueItem
     }
+    var artworkLoadCompleted by remember(item?.contentUri) { mutableStateOf(item == null) }
     val loadedArtworkBitmap = item?.let {
         rememberArtworkBitmap(
             contentUri = it.contentUri,
             dateModifiedEpochSeconds = it.dateModifiedEpochSeconds,
             fileSizeBytes = it.fileSizeBytes,
             size = PLAYER_FULL_ARTWORK_REQUEST_SIZE,
+            onLoadCompleted = { artworkLoadCompleted = it },
         )
     }
     val artworkBlend = rememberArtworkBlend(
         targetBitmap = loadedArtworkBitmap,
-        animate = drawInPlace,
+        animate = true,
     )
     val emphasisControlColor = Color.White
     val controlColor = emphasisControlColor.copy(alpha = 0.6f)
@@ -243,6 +247,7 @@ internal fun FullPlayerScreen(
     var lyricsFollowRequestKey by remember { mutableIntStateOf(0) }
     var lyricsSeekRequestKey by remember { mutableIntStateOf(0) }
     var lyricsSeekPositionMs by remember { mutableLongStateOf(playback.positionMs) }
+    var lyricsSeekPositionUpdateAnchorMs by remember { mutableLongStateOf(0L) }
     var lyricsPreviewPositionMs by remember { mutableStateOf<Long?>(null) }
     val artworkPadding by animateDpAsState(
         targetValue = if (playback.playWhenReady) {
@@ -278,6 +283,7 @@ internal fun FullPlayerScreen(
     }
     val onSeekFromPlayer: (Long) -> Unit = { targetPositionMs ->
         lyricsSeekPositionMs = targetPositionMs
+        lyricsSeekPositionUpdateAnchorMs = playback.positionUpdateElapsedRealtimeMs
         lyricsSeekRequestKey += 1
         lyricsPreviewPositionMs = null
         onSeek(targetPositionMs)
@@ -289,6 +295,26 @@ internal fun FullPlayerScreen(
         lyricsPreviewPositionMs = null
         lyricsSeekRequestKey = 0
         lyricsSeekPositionMs = playback.positionMs
+        lyricsSeekPositionUpdateAnchorMs = 0L
+    }
+    LaunchedEffect(
+        lyricsSeekRequestKey,
+        lyricsSeekPositionMs,
+        lyricsSeekPositionUpdateAnchorMs,
+        playback.positionMs,
+        playback.positionUpdateElapsedRealtimeMs,
+    ) {
+        if (
+            lyricSeekRequestIsAcknowledged(
+                requestKey = lyricsSeekRequestKey,
+                positionUpdateAnchorElapsedRealtimeMs = lyricsSeekPositionUpdateAnchorMs,
+                positionUpdateElapsedRealtimeMs = playback.positionUpdateElapsedRealtimeMs,
+                currentPositionMs = playback.positionMs,
+                seekPositionMs = lyricsSeekPositionMs,
+            )
+        ) {
+            lyricsSeekRequestKey = 0
+        }
     }
     val pagerState = rememberPagerState(
         initialPage = if (initialArtworkPageSelected) 0 else 1,
@@ -333,6 +359,15 @@ internal fun FullPlayerScreen(
     Scaffold(
         modifier = modifier
             .fillMaxSize()
+            .pointerInput(interactionEnabled) {
+                if (interactionEnabled) return@pointerInput
+                awaitPointerEventScope {
+                    while (true) {
+                        awaitPointerEvent(androidx.compose.ui.input.pointer.PointerEventPass.Initial)
+                            .changes.forEach { it.consume() }
+                    }
+                }
+            }
             .onGloballyPositioned { coordinates ->
                 onPlayerBoundsChanged(coordinates.boundsInRoot())
             },
@@ -366,6 +401,7 @@ internal fun FullPlayerScreen(
 
                     PlaybackBackgroundStyle.DYNAMIC_FLOW -> DynamicFlowBackground(
                         artwork = artworkBlend.currentBitmap,
+                        artworkLoading = !artworkLoadCompleted,
                         animate = drawInPlace && playback.isPlaying,
                         onStatusBarBackgroundDarkChanged = onStatusBarBackgroundDarkChanged,
                         modifier = Modifier.fillMaxSize(),
@@ -418,6 +454,7 @@ internal fun FullPlayerScreen(
                             headerTopPadding,
                         preferredArtworkSize = portraitArtworkSize,
                     ).headerToArtwork
+                    val pageHeight = maxHeight
                     Column(
                         modifier = Modifier
                             .fillMaxSize()
@@ -428,11 +465,12 @@ internal fun FullPlayerScreen(
                         horizontalAlignment = Alignment.CenterHorizontally,
                     ) {
                     val lyricsCenterOffsetY = if (displayedHideControlsOnLyrics) {
-                        (-(
-                            PLAYER_HEADER_TOP_PADDING.value +
-                                playerHeaderContentHeight.value +
-                                headerSpacing.value
-                            ) / 2f).dp
+                        hiddenLyricsCenterOffsetY(
+                            pageHeight = pageHeight,
+                            headerTopPadding = headerTopPadding,
+                            headerContentHeight = playerHeaderContentHeight,
+                            headerSpacing = headerSpacing,
+                        )
                     } else {
                         0.dp
                     }
@@ -901,10 +939,8 @@ internal fun FullPlayerScreen(
 }
 
 private data class ArtworkBlend(
-    val previousBitmap: Bitmap?,
+    val frames: List<WeightedCrossfadeFrame<Bitmap>>,
     val currentBitmap: Bitmap?,
-    val progress: Float,
-    val hasPreviousFrame: Boolean,
 )
 
 @Composable
@@ -912,29 +948,29 @@ private fun rememberArtworkBlend(
     targetBitmap: Bitmap?,
     animate: Boolean,
 ): ArtworkBlend {
-    var previousBitmap by remember { mutableStateOf<Bitmap?>(null) }
+    var startingFrames by remember {
+        mutableStateOf<List<WeightedCrossfadeFrame<Bitmap>>>(emptyList())
+    }
     var currentBitmap by remember { mutableStateOf(targetBitmap) }
-    var hasPreviousFrame by remember { mutableStateOf(false) }
     val progress = remember { Animatable(1f) }
 
     LaunchedEffect(targetBitmap, animate) {
         if (!animate) {
-            previousBitmap = null
+            startingFrames = emptyList()
             currentBitmap = targetBitmap
-            hasPreviousFrame = false
             progress.snapTo(1f)
             return@LaunchedEffect
         }
-        if (targetBitmap === currentBitmap && !hasPreviousFrame) {
+        if (targetBitmap === currentBitmap && progress.value >= 1f) {
             return@LaunchedEffect
         }
-        previousBitmap = if (progress.value < 0.5f && hasPreviousFrame) {
-            previousBitmap
-        } else {
-            currentBitmap
-        }
+        startingFrames = weightedCrossfadeFrames(
+            startingFrames = startingFrames,
+            currentValue = currentBitmap,
+            progress = progress.value,
+            sameValue = { first, second -> first === second },
+        )
         currentBitmap = targetBitmap
-        hasPreviousFrame = true
         progress.snapTo(0f)
         progress.animateTo(
             targetValue = 1f,
@@ -943,15 +979,17 @@ private fun rememberArtworkBlend(
                 easing = PLAYER_TRACK_ARTWORK_CROSSFADE_EASING,
             ),
         )
-        hasPreviousFrame = false
-        previousBitmap = null
+        startingFrames = emptyList()
     }
 
     return ArtworkBlend(
-        previousBitmap = previousBitmap,
+        frames = weightedCrossfadeFrames(
+            startingFrames = startingFrames,
+            currentValue = currentBitmap,
+            progress = progress.value,
+            sameValue = { first, second -> first === second },
+        ),
         currentBitmap = currentBitmap,
-        progress = progress.value,
-        hasPreviousFrame = hasPreviousFrame,
     )
 }
 
@@ -1144,6 +1182,16 @@ internal fun playerHeaderTopPadding(layout: PlayerLayout, safeTop: Dp): Dp =
         PlayerLayout.COMPACT_LANDSCAPE -> 0.dp
         PlayerLayout.WIDE_TWO_PANE -> PLAYER_LANDSCAPE_VERTICAL_PADDING
     }
+
+internal fun hiddenLyricsCenterOffsetY(
+    pageHeight: Dp,
+    headerTopPadding: Dp,
+    headerContentHeight: Dp,
+    headerSpacing: Dp,
+): Dp {
+    val headerHeight = headerTopPadding + headerContentHeight + headerSpacing
+    return pageHeight * 0.4f - (pageHeight + headerHeight).div(2f)
+}
 
 internal fun landscapePlayerDesignContentWidth(availableWidth: Dp): Dp =
     (availableWidth - PLAYER_WIDE_FIXED_START_INSET).coerceAtLeast(0.dp)
@@ -1740,28 +1788,18 @@ private fun PlayerArtwork(
             },
         contentAlignment = Alignment.Center,
     ) {
-        if (artworkBlend.hasPreviousFrame && artworkBlend.progress < 1f) {
+        artworkBlend.frames.forEach { frame ->
             PlaybackArtworkFrame(
-                bitmap = artworkBlend.previousBitmap,
+                bitmap = frame.value,
                 size = artworkContentSize,
                 cornerRadius = cornerRadius,
                 modifier = Modifier,
                 contentScale = ContentScale.Fit,
                 useSquircleClip = true,
                 drawArtworkShadow = true,
-                artworkAlpha = 1f - artworkBlend.progress,
+                artworkAlpha = frame.alpha,
             )
         }
-        PlaybackArtworkFrame(
-            bitmap = artworkBlend.currentBitmap,
-            size = artworkContentSize,
-            cornerRadius = cornerRadius,
-            modifier = Modifier,
-            contentScale = ContentScale.Fit,
-            useSquircleClip = true,
-            drawArtworkShadow = true,
-            artworkAlpha = artworkBlend.progress,
-        )
     }
 }
 
@@ -2283,7 +2321,7 @@ private val PLAYER_WIDE_PLAYBACK_PANE_MAX_WIDTH = 500.dp
 // 宽屏播放页：歌词列相对播放列的固定宽度增量。
 private val PLAYER_WIDE_LYRICS_PANE_WIDTH_EXPANSION = 96.dp
 // 宽屏播放页：播放栏与歌词栏之间的可调间距范围。
-private val PLAYER_WIDE_PANE_SPACING_MAX = 32.dp
+private val PLAYER_WIDE_PANE_SPACING_MAX = 24.dp
 private val PLAYER_WIDE_PANE_SPACING_MIN = 12.dp
 // 宽屏播放页：双栏组触及左边缘后，间距压缩到最小值的终止宽度。
 private val PLAYER_WIDE_PANE_SPACING_COMPRESSION_END_WIDTH = 600.dp

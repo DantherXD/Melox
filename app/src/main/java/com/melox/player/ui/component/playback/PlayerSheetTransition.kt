@@ -65,7 +65,7 @@ import top.yukonga.miuix.kmp.basic.DividerDefaults
 import top.yukonga.miuix.kmp.utils.getRoundedCorner
 
 // Duration of the artwork crossfade when the current track changes.
-internal const val PLAYER_TRACK_ARTWORK_CROSSFADE_DURATION_MILLIS = 320
+internal const val PLAYER_TRACK_ARTWORK_CROSSFADE_DURATION_MILLIS = 500
 // Keeps the playback-background transition aligned with the artwork crossfade.
 internal const val PLAYBACK_BACKGROUND_TRANSITION_DURATION_MILLIS =
     PLAYER_TRACK_ARTWORK_CROSSFADE_DURATION_MILLIS
@@ -245,7 +245,7 @@ internal class PlayerSheetTransitionState(initialProgress: Float = 0f) {
         abs(height - bounds.height.roundToInt()) <= 1
 
     private fun freezeArtworkBounds() {
-        if (frozenArtworkBounds == null && isReady) {
+        if (frozenArtworkBounds == null && hasArtworkBounds) {
             frozenArtworkBounds = miniArtworkBounds to fullArtworkBounds
         }
     }
@@ -259,10 +259,16 @@ internal class PlayerSheetTransitionState(initialProgress: Float = 0f) {
     val hasContainerBounds: Boolean
         get() = miniPlayerBounds.isUsable() && fullPlayerBounds.isUsable()
 
-    val isReady: Boolean
-        get() = hasContainerBounds && hasArtworkBounds &&
+    val sharedLayersReady: Boolean
+        get() = hasContainerBounds &&
             (layoutWindowSize == IntSize.Zero ||
                 (miniFrameReady && fullBackgroundFrameReady && fullContentFrameReady))
+
+    val separateArtworkOverlayReady: Boolean
+        get() = sharedLayersReady && sharedArtworkEnabled && hasArtworkBounds
+
+    val canSettle: Boolean
+        get() = hasContainerBounds
 
     val isMounted: Boolean
         get() = isDragging || targetOpen || progress > 0f
@@ -288,27 +294,35 @@ internal class PlayerSheetTransitionState(initialProgress: Float = 0f) {
         )
 
     val fullPlayerHostMounted: Boolean
-        get() = isMounted && (isDragging || !isReady || !miniPlayerAcceptsInput)
+        get() = isMounted && (isDragging || !sharedLayersReady || !miniPlayerAcceptsInput)
 
     val fullPlayerDrawsInPlace: Boolean
-        get() = if (isReady) {
+        get() = if (sharedLayersReady) {
             targetOpen && !isTransitionActive
         } else {
-            progress > 0f
+            progress > PLAYER_LAYER_HANDOFF_END_PROGRESS
         }
 
     val fullPlayerAcceptsInput: Boolean
-        get() = isReady && !miniPlayerAcceptsInput
+        get() = !miniPlayerAcceptsInput &&
+            (sharedLayersReady || (!isDragging && targetOpen && progress >= 1f))
+
+    val fullPlayerDrawsAboveRoot: Boolean
+        get() = sharedLayersReady || progress > PLAYER_LAYER_HANDOFF_END_PROGRESS
 
     fun open() {
         releaseDragForProgrammaticSettle()
-        if (!isReady) requestFreshFrameRecording()
+        if (!sharedLayersReady) requestFreshFrameRecording()
         requestSettle(open = true)
     }
 
     fun close() {
         releaseDragForProgrammaticSettle()
         requestSettle(open = false)
+        if (!sharedLayersReady && progress <= 0f) {
+            renderedProgress = 0f
+            frozenArtworkBounds = null
+        }
     }
 
     fun beginMiniPlayerDrag() {
@@ -370,6 +384,7 @@ internal class PlayerSheetTransitionState(initialProgress: Float = 0f) {
         if (bounds.isUsable()) {
             if (miniPlayerBounds.size != bounds.size) miniFrameReady = false
             miniPlayerBounds = bounds
+            updateDragProgress()
         }
     }
 
@@ -397,12 +412,22 @@ internal class PlayerSheetTransitionState(initialProgress: Float = 0f) {
 
     fun updateMiniArtworkBounds(bounds: Rect, windowSize: IntSize = layoutWindowSize) {
         if (windowSize != layoutWindowSize) return
-        if (bounds.isUsable()) miniArtworkBounds = bounds
+        if (bounds.isUsable()) {
+            miniArtworkBounds = bounds
+            frozenArtworkBounds = frozenArtworkBounds?.let { (_, target) ->
+                bounds to target
+            }
+        }
     }
 
     fun updateFullArtworkBounds(bounds: Rect, windowSize: IntSize = layoutWindowSize) {
         if (windowSize != layoutWindowSize) return
-        if (bounds.isUsable()) fullArtworkBounds = bounds
+        if (bounds.isUsable()) {
+            fullArtworkBounds = bounds
+            frozenArtworkBounds = frozenArtworkBounds?.let { (source, _) ->
+                source to bounds
+            }
+        }
     }
 
     fun updateFullPlayerArtworkPageSelected(selected: Boolean) {
@@ -561,8 +586,7 @@ internal fun Modifier.recordPlayerLayer(
     }
     onRecorded(recordingGeneration, layer.size)
     if (drawInPlace) {
-        layer.alpha = 1f
-        drawLayer(layer)
+        this@drawWithContent.drawContent()
     }
 }
 
@@ -592,7 +616,7 @@ internal fun PlayerSheetContentOverlay(
     isDark: Boolean,
     modifier: Modifier = Modifier,
 ) {
-    if (!transition.isReady || !transition.isTransitionActive) return
+    if (!transition.sharedLayersReady || !transition.isTransitionActive) return
 
     val progress = transition.progress
     val density = LocalDensity.current
@@ -792,7 +816,7 @@ internal fun PlayerSheetArtworkOverlay(
         size = PLAYER_FULL_ARTWORK_REQUEST_SIZE,
     )
     val density = LocalDensity.current
-    if (!enabled || !transition.isReady || !transition.isTransitionActive) return
+    if (!enabled || !transition.separateArtworkOverlayReady || !transition.isTransitionActive) return
     val source = transition.overlayMiniArtworkBounds
     val target = transition.overlayFullArtworkBounds
     val sourceArtworkBounds = bitmap?.let {

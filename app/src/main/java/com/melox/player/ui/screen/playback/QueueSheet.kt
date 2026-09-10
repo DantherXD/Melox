@@ -72,6 +72,7 @@ import top.yukonga.miuix.kmp.basic.TextButton
 import top.yukonga.miuix.kmp.icon.MiuixIcons
 import top.yukonga.miuix.kmp.icon.extended.Close
 import top.yukonga.miuix.kmp.icon.extended.Delete
+import top.yukonga.miuix.kmp.icon.extended.Show
 import top.yukonga.miuix.kmp.layout.BottomSheetDefaults
 import top.yukonga.miuix.kmp.overlay.OverlayBottomSheet
 import top.yukonga.miuix.kmp.overlay.OverlayDialog
@@ -404,7 +405,7 @@ fun QueueSheet(
                     enabled = displayedCurrentIndex in draftQueue.indices,
                 ) {
                     Icon(
-                        painter = painterResource(R.drawable.ic_queue_locate),
+                        imageVector = MiuixIcons.Show,
                         contentDescription = stringResource(R.string.locate_current_track),
                         modifier = Modifier.size(24.dp),
                     )

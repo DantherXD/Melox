@@ -77,10 +77,8 @@ internal fun trimBlurredArtworkMemoryCache() {
 }
 
 private data class BlurredArtworkLayerBlend(
-    val previousLayer: BlurredArtworkLayer?,
+    val frames: List<WeightedCrossfadeFrame<BlurredArtworkLayer>>,
     val currentLayer: BlurredArtworkLayer?,
-    val progress: Float,
-    val hasPreviousLayer: Boolean,
 )
 
 internal data class KenBurnsFrame(
@@ -135,7 +133,7 @@ private fun MovingBlurredArtworkLayer(
     animate: Boolean,
     modifier: Modifier = Modifier,
 ) {
-    val animationKey = layerBlend.currentLayer?.key ?: layerBlend.previousLayer?.key
+    val animationKey = layerBlend.currentLayer?.key ?: layerBlend.frames.lastOrNull()?.value?.key
     val lifecycleState by LocalLifecycleOwner.current.lifecycle.currentStateFlow.collectAsState()
     val animationEnabled = animate &&
         animationKey != null &&
@@ -175,21 +173,11 @@ private fun MovingBlurredArtworkLayer(
     )
 
     Box(modifier = modifier) {
-        if (layerBlend.hasPreviousLayer) {
-            layerBlend.previousLayer?.let { layer ->
-                MovingArtworkImage(
-                    bitmap = layer.blurredArtwork,
-                    frame = frame,
-                    alpha = 1f - layerBlend.progress,
-                    modifier = Modifier.fillMaxSize(),
-                )
-            }
-        }
-        layerBlend.currentLayer?.let { layer ->
+        layerBlend.frames.forEach { blendFrame ->
             MovingArtworkImage(
-                bitmap = layer.blurredArtwork,
+                bitmap = blendFrame.value.blurredArtwork,
                 frame = frame,
-                alpha = layerBlend.progress,
+                alpha = blendFrame.alpha,
                 modifier = Modifier.fillMaxSize(),
             )
         }
@@ -338,29 +326,29 @@ private fun rememberBlurredArtworkLayerBlend(
     targetLayer: BlurredArtworkLayer?,
     animateTransition: Boolean,
 ): BlurredArtworkLayerBlend {
-    var previousLayer by remember { mutableStateOf<BlurredArtworkLayer?>(null) }
+    var startingFrames by remember {
+        mutableStateOf<List<WeightedCrossfadeFrame<BlurredArtworkLayer>>>(emptyList())
+    }
     var currentLayer by remember { mutableStateOf(targetLayer) }
-    var hasPreviousLayer by remember { mutableStateOf(false) }
     val progress = remember { Animatable(1f) }
 
     LaunchedEffect(targetLayer?.key, animateTransition) {
-        if (targetLayer?.key == currentLayer?.key && !hasPreviousLayer) {
+        if (targetLayer?.key == currentLayer?.key && progress.value >= 1f) {
             return@LaunchedEffect
         }
-        if (!animateTransition || currentLayer == null && !hasPreviousLayer) {
-            previousLayer = null
+        if (!animateTransition || currentLayer == null && startingFrames.isEmpty()) {
+            startingFrames = emptyList()
             currentLayer = targetLayer
-            hasPreviousLayer = false
             progress.snapTo(1f)
             return@LaunchedEffect
         }
-        previousLayer = if (progress.value < 0.5f && hasPreviousLayer) {
-            previousLayer
-        } else {
-            currentLayer
-        }
+        startingFrames = weightedCrossfadeFrames(
+            startingFrames = startingFrames,
+            currentValue = currentLayer,
+            progress = progress.value,
+            sameValue = { first, second -> first.key == second.key },
+        )
         currentLayer = targetLayer
-        hasPreviousLayer = true
         progress.snapTo(0f)
         progress.animateTo(
             targetValue = 1f,
@@ -369,15 +357,17 @@ private fun rememberBlurredArtworkLayerBlend(
                 easing = PLAYER_TRACK_ARTWORK_CROSSFADE_EASING,
             ),
         )
-        hasPreviousLayer = false
-        previousLayer = null
+        startingFrames = emptyList()
     }
 
     return BlurredArtworkLayerBlend(
-        previousLayer = previousLayer,
+        frames = weightedCrossfadeFrames(
+            startingFrames = startingFrames,
+            currentValue = currentLayer,
+            progress = progress.value,
+            sameValue = { first, second -> first.key == second.key },
+        ),
         currentLayer = currentLayer,
-        progress = progress.value,
-        hasPreviousLayer = hasPreviousLayer,
     )
 }
 

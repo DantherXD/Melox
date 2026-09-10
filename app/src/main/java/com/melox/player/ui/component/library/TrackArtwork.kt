@@ -440,6 +440,7 @@ internal fun rememberArtworkBitmap(
     dateModifiedEpochSeconds: Long,
     fileSizeBytes: Long,
     size: Dp,
+    onLoadCompleted: (Boolean) -> Unit = {},
 ): Bitmap? {
     val targetSizePx = normalizeArtworkTargetSize(
         with(LocalDensity.current) { size.roundToPx() },
@@ -449,6 +450,7 @@ internal fun rememberArtworkBitmap(
         dateModifiedEpochSeconds = dateModifiedEpochSeconds,
         fileSizeBytes = fileSizeBytes,
         targetSizePx = targetSizePx,
+        onLoadCompleted = onLoadCompleted,
     )
 }
 
@@ -472,6 +474,7 @@ private fun rememberArtworkBitmapForTargetSize(
     dateModifiedEpochSeconds: Long,
     fileSizeBytes: Long,
     targetSizePx: Int,
+    onLoadCompleted: (Boolean) -> Unit = {},
 ): Bitmap? {
     val context = LocalContext.current.applicationContext
     val cacheKey = createArtworkCacheKey(
@@ -508,6 +511,7 @@ private fun rememberArtworkBitmapForTargetSize(
             }
         }.value
     LaunchedEffect(result, contentUri) {
+        onLoadCompleted(result != null)
         retainedBitmap = when {
             contentUri.isBlank() -> null
             result is ArtworkResult.Loaded -> result.bitmap

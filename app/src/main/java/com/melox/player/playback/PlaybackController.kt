@@ -33,10 +33,14 @@ import kotlin.random.Random
 
 /** UI-facing controller for the service-owned Media3 session. */
 class PlaybackController(context: Context) {
+    private companion object {
+        const val TRACK_SKIP_DEBOUNCE_MILLIS = 200L
+    }
     private val applicationContext = context.applicationContext
     private val mainExecutor = ContextCompat.getMainExecutor(applicationContext)
     private val released = AtomicBoolean(false)
     private val playbackModeChangeInFlight = AtomicBoolean(false)
+    private val lastTrackSkipElapsedRealtimeMs = java.util.concurrent.atomic.AtomicLong(Long.MIN_VALUE)
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
     private val initialSnapshot = MiniPlaybackSnapshotStore(applicationContext).load()
     private val mutableState = MutableStateFlow(
@@ -184,12 +188,28 @@ class PlaybackController(context: Context) {
 
     fun seekTo(positionMs: Long) = withController { it.seekTo(positionMs.coerceAtLeast(0L)) }
 
-    fun previous() = withController { controller ->
+    fun previous() {
+        if (!acceptTrackSkip(SystemClock.elapsedRealtime())) return
+        withController { controller ->
         controller.seekToAdjacentMediaItem(offset = -1)
+        }
     }
 
-    fun next() = withController { controller ->
+    fun next() {
+        if (!acceptTrackSkip(SystemClock.elapsedRealtime())) return
+        withController { controller ->
         controller.seekToAdjacentMediaItem(offset = 1)
+        }
+    }
+
+    internal fun acceptTrackSkip(nowElapsedRealtimeMs: Long): Boolean {
+        while (true) {
+            val previous = lastTrackSkipElapsedRealtimeMs.get()
+            if (!shouldAcceptTrackSkip(previous, nowElapsedRealtimeMs)) return false
+            if (lastTrackSkipElapsedRealtimeMs.compareAndSet(previous, nowElapsedRealtimeMs)) {
+                return true
+            }
+        }
     }
 
     fun cyclePlaybackMode() {
@@ -385,6 +405,13 @@ class PlaybackController(context: Context) {
         )
     }
 }
+
+internal fun shouldAcceptTrackSkip(
+    previousElapsedRealtimeMs: Long,
+    nowElapsedRealtimeMs: Long,
+    intervalMillis: Long = 200L,
+): Boolean = previousElapsedRealtimeMs == Long.MIN_VALUE ||
+    nowElapsedRealtimeMs - previousElapsedRealtimeMs >= intervalMillis
 
 internal fun PlaybackSnapshot?.toInitialPlaybackState(): PlaybackUiState {
     val snapshot = this ?: return PlaybackUiState()
