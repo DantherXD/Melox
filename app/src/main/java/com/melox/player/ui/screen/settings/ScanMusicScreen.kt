@@ -80,6 +80,7 @@ fun ScanMusicScreen(
     onRemoveCustomFolder: (String) -> Unit,
     onOpenBlockedFolders: () -> Unit,
     onStartScan: () -> Unit,
+    onClearMusicLibrary: () -> Unit,
 ) {
     val context = LocalContext.current
     val isScanning = scanStatus is ScanStatus.Scanning
@@ -95,6 +96,7 @@ fun ScanMusicScreen(
         mutableStateOf(settings.customFolderUris)
     }
     var pendingRemoval by remember { mutableStateOf<CustomFolderPresentation?>(null) }
+    var showClearMusicLibraryConfirm by remember { mutableStateOf(false) }
     val customFolders = remember(displayedCustomFolderUris) {
         displayedCustomFolderUris.map(::customFolderPresentation)
     }
@@ -131,6 +133,18 @@ fun ScanMusicScreen(
                             Icon(
                                 imageVector = MiuixIcons.Back,
                                 contentDescription = stringResource(R.string.back),
+                            )
+                        }
+                    },
+                    actions = {
+                        IconButton(
+                            onClick = { showClearMusicLibraryConfirm = true },
+                            enabled = !isScanning,
+                        ) {
+                            Icon(
+                                painter = painterResource(R.drawable.ic_clear_music_library),
+                                contentDescription = stringResource(R.string.scan_clear_library),
+                                modifier = Modifier.size(24.dp),
                             )
                         }
                     },
@@ -208,6 +222,7 @@ fun ScanMusicScreen(
                     Button(
                         onClick = onStartScan,
                         enabled = !isScanning,
+                        minHeight = 46.dp,
                         modifier = Modifier
                             .fillMaxWidth()
                             .padding(horizontal = 12.dp)
@@ -271,6 +286,38 @@ fun ScanMusicScreen(
                 },
                 modifier = Modifier.weight(1f),
                 colors = ButtonDefaults.textButtonColorsPrimary(),
+            )
+        }
+    }
+
+    OverlayDialog(
+        show = showClearMusicLibraryConfirm,
+        title = stringResource(R.string.scan_clear_library_confirm_title),
+        summary = stringResource(R.string.scan_clear_library_confirm_message),
+        enableWindowDim = true,
+        onDismissRequest = { showClearMusicLibraryConfirm = false },
+    ) {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+        ) {
+            TextButton(
+                text = stringResource(R.string.clear_queue_confirm_cancel),
+                onClick = { showClearMusicLibraryConfirm = false },
+                modifier = Modifier.weight(1f),
+            )
+            Spacer(modifier = Modifier.width(20.dp))
+            TextButton(
+                text = stringResource(R.string.clear_queue_confirm_confirm),
+                onClick = {
+                    showClearMusicLibraryConfirm = false
+                    onClearMusicLibrary()
+                },
+                modifier = Modifier.weight(1f),
+                colors = ButtonDefaults.textButtonColorsPrimary(
+                    color = MiuixTheme.colorScheme.error,
+                    textColor = MiuixTheme.colorScheme.onError,
+                ),
             )
         }
     }

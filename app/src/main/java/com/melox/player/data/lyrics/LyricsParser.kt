@@ -29,6 +29,11 @@ internal object LyricsParser {
         val translation: String?,
     )
 
+    private data class TtmlTimingContext(
+        val frameRate: Double,
+        val tickRate: Double,
+    )
+
     private val lrcTimestamp = Regex(
         """\[(\d{1,3}):([0-5]?\d)(?:[.:](\d{1,3}))?]""",
     )
@@ -65,17 +70,19 @@ internal object LyricsParser {
         source: LyricsSource,
         durationMs: Long,
     ): LyricsDocument? {
-        var offsetMs = 0L
+        val offsetMs = raw.lineSequence()
+            .mapNotNull { line ->
+                lrcOffset.matchEntire(line)?.groupValues?.get(1)?.toLongOrNull()
+                    ?.coerceIn(-MAX_OFFSET_MS, MAX_OFFSET_MS)
+                    ?: lrcOffset.matchEntire(line)?.let { 0L }
+            }
+            .lastOrNull()
+            ?: 0L
         val entries = mutableListOf<RawLine>()
         raw.lineSequence()
             .take(MAX_LYRIC_LINES)
             .forEach { line ->
-                lrcOffset.matchEntire(line)?.let { match ->
-                    offsetMs = match.groupValues[1].toLongOrNull()
-                        ?.coerceIn(-MAX_OFFSET_MS, MAX_OFFSET_MS)
-                        ?: 0L
-                    return@forEach
-                }
+                if (lrcOffset.matches(line)) return@forEach
                 val timestamps = lrcTimestamp.findAll(line).toList()
                 if (timestamps.isEmpty()) return@forEach
                 val payload = line.substring(timestamps.last().range.last + 1)
@@ -162,22 +169,29 @@ internal object LyricsParser {
         val document = runCatching {
             factory.newDocumentBuilder().parse(InputSource(StringReader(raw)))
         }.getOrNull() ?: return null
+        val timingContext = document.documentElement.toTtmlTimingContext()
         val paragraphs = document.getElementsByTagNameNS("*", "p")
         val entries = buildList {
             for (index in 0 until minOf(paragraphs.length, MAX_LYRIC_LINES)) {
                 val paragraph = paragraphs.item(index) as? Element ?: continue
-                parseTtmlParagraph(paragraph)?.let(::add)
+                parseTtmlParagraph(paragraph, timingContext)?.let(::add)
             }
         }.sortedBy(RawLine::startTimeMs)
         return buildDocument(entries, LyricsFormat.TTML, source, durationMs)
     }
 
-    private fun parseTtmlParagraph(paragraph: Element): RawLine? {
+    private fun parseTtmlParagraph(
+        paragraph: Element,
+        timingContext: TtmlTimingContext,
+    ): RawLine? {
         val startTimeMs = paragraph.attributeValue("begin")
-            ?.let(::parseTtmlTimeMs)
+            ?.let { parseTtmlTimeMs(it, timingContext) }
             ?: return null
-        val endTimeMs = paragraph.attributeValue("end")?.let(::parseTtmlTimeMs)
-            ?: paragraph.attributeValue("dur")?.let(::parseTtmlTimeMs)?.let(startTimeMs::plus)
+        val endTimeMs = paragraph.attributeValue("end")
+            ?.let { parseTtmlTimeMs(it, timingContext) }
+            ?: paragraph.attributeValue("dur")
+                ?.let { parseTtmlTimeMs(it, timingContext) }
+                ?.let(startTimeMs::plus)
         val agent = paragraph.attributeValue("agent")
             ?.takeIf(String::isNotBlank)
             ?: DEFAULT_AGENT
@@ -195,12 +209,12 @@ internal object LyricsParser {
                     "x-bg", "x-roman" -> Unit
                     else -> {
                         val wordStart = span.attributeValue("begin")
-                            ?.let(::parseTtmlTimeMs)
+                            ?.let { parseTtmlTimeMs(it, timingContext) }
                             ?: continue
                         val wordEnd = span.attributeValue("end")
-                            ?.let(::parseTtmlTimeMs)
+                            ?.let { parseTtmlTimeMs(it, timingContext) }
                             ?: span.attributeValue("dur")
-                                ?.let(::parseTtmlTimeMs)
+                                ?.let { parseTtmlTimeMs(it, timingContext) }
                                 ?.let(wordStart::plus)
                         val visible = span.textContent.normalizeVisibleText()
                         if (visible.isNotEmpty()) {
@@ -321,9 +335,12 @@ internal object LyricsParser {
         else -> value.take(3).toLongOrNull() ?: 0L
     }
 
-    private fun parseTtmlTimeMs(raw: String): Long? {
+    private fun parseTtmlTimeMs(
+        raw: String,
+        timingContext: TtmlTimingContext,
+    ): Long? {
         val value = raw.trim().lowercase(Locale.ROOT)
-        Regex("""^(\d+(?:\.\d+)?)(ms|s|m|h)$""")
+        Regex("""^(\d+(?:\.\d+)?)(ms|s|m|h|f|t)$""")
             .matchEntire(value)
             ?.let { match ->
                 val amount = match.groupValues[1].toDoubleOrNull() ?: return null
@@ -332,6 +349,8 @@ internal object LyricsParser {
                     "s" -> 1_000.0
                     "m" -> 60_000.0
                     "h" -> 3_600_000.0
+                    "f" -> 1_000.0 / timingContext.frameRate
+                    "t" -> 1_000.0 / timingContext.tickRate
                     else -> return null
                 }
                 return (amount * multiplier).toLong().coerceAtLeast(0L)
@@ -349,8 +368,42 @@ internal object LyricsParser {
             hours * 3_600_000L +
                 minutes * 60_000L +
                 seconds * 1_000.0 +
-                frames * (1_000.0 / DEFAULT_FRAME_RATE)
+                frames * (1_000.0 / timingContext.frameRate)
             ).toLong().coerceAtLeast(0L)
+    }
+
+    private fun Element.toTtmlTimingContext(): TtmlTimingContext {
+        val frameRate = attributeValue("frameRate")
+            ?.toDoubleOrNull()
+            ?.takeIf { it.isFinite() && it > 0.0 }
+            ?: DEFAULT_FRAME_RATE
+        val frameRateMultiplier = attributeValue("frameRateMultiplier")
+            ?.trim()
+            ?.split(Regex("""\s+"""))
+            ?.takeIf { it.size == 2 }
+            ?.let { values ->
+                val numerator = values[0].toDoubleOrNull()
+                val denominator = values[1].toDoubleOrNull()
+                if (
+                    numerator != null && denominator != null &&
+                    numerator.isFinite() && denominator.isFinite() &&
+                    denominator > 0.0
+                ) {
+                    numerator / denominator
+                } else {
+                    null
+                }
+            }
+            ?.takeIf { it.isFinite() && it > 0.0 }
+            ?: 1.0
+        val tickRate = attributeValue("tickRate")
+            ?.toDoubleOrNull()
+            ?.takeIf { it.isFinite() && it > 0.0 }
+            ?: DEFAULT_TICK_RATE
+        return TtmlTimingContext(
+            frameRate = frameRate * frameRateMultiplier,
+            tickRate = tickRate,
+        )
     }
 
     private fun Element.attributeValue(localName: String): String? {
@@ -381,4 +434,5 @@ internal object LyricsParser {
     private const val DEFAULT_WORD_DURATION_MS = 500L
     private const val MIN_WORD_DURATION_MS = 50L
     private const val DEFAULT_FRAME_RATE = 30.0
+    private const val DEFAULT_TICK_RATE = 1.0
 }

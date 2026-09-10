@@ -766,21 +766,54 @@ private fun calculateCylinderGeometry(
 }
 
 private fun qualityColor(quality: AudioQuality?, darkSurface: Boolean): Color = when (quality) {
-    AudioQuality.RAW -> Color(0xFFF46055)
-    AudioQuality.HI_RES -> Color(0xFFFAD657)
-    AudioQuality.SQ -> Color(0xFFD05BEA)
-    AudioQuality.HQ -> Color(0xFF639BF0)
-    null -> if (darkSurface) Color(0xFF7A829C) else Color(0xFF9AA2B8)
+    AudioQuality.RAW -> STATISTICS_COLUMN_RED
+    AudioQuality.HI_RES -> STATISTICS_COLUMN_YELLOW
+    AudioQuality.SQ -> STATISTICS_COLUMN_PURPLE
+    AudioQuality.HQ -> STATISTICS_COLUMN_BLUE
+    null -> statisticsColumnOtherColor(darkSurface)
 }
 
-private fun formatColor(index: Int, darkSurface: Boolean): Color = listOf(
-    Color(0xFFFAD657),
-    Color(0xFFF5A24A),
-    Color(0xFFF46055),
-    Color(0xFFD05BEA),
-    Color(0xFF639BF0),
-    if (darkSurface) Color(0xFF7A829C) else Color(0xFF9AA2B8),
-)[index % 6]
+private fun formatColor(index: Int, darkSurface: Boolean): Color = when (
+    index.mod(STATISTICS_FORMAT_COLUMN_COLOR_COUNT)
+) {
+    7 -> statisticsColumnOtherColor(darkSurface)
+    8 -> statisticsColumnLightGrayColor(darkSurface)
+    else -> STATISTICS_FORMAT_COLUMN_COLORS[index.mod(STATISTICS_FORMAT_COLUMN_COLORS.size)]
+}
+
+private fun statisticsColumnOtherColor(darkSurface: Boolean): Color = if (darkSurface) {
+    STATISTICS_COLUMN_DARK_OTHER
+} else {
+    STATISTICS_COLUMN_OTHER
+}
+
+private fun statisticsColumnLightGrayColor(darkSurface: Boolean): Color = if (darkSurface) {
+    STATISTICS_COLUMN_DARK_LIGHT_GRAY
+} else {
+    STATISTICS_COLUMN_LIGHT_GRAY
+}
+
+private val STATISTICS_COLUMN_LIGHT_GRAY = Color(0xFFC4CBE1)
+private val STATISTICS_COLUMN_OTHER = Color(0xFF9DA2BC)
+private val STATISTICS_COLUMN_GREEN = Color(0xFF38E191)
+private val STATISTICS_COLUMN_BLUE = Color(0xFF3193FB)
+private val STATISTICS_COLUMN_PURPLE = Color(0xFFD13FEE)
+private val STATISTICS_COLUMN_RED = Color(0xFFFB4D46)
+private val STATISTICS_COLUMN_ORANGE = Color(0xFFFF963A)
+private val STATISTICS_COLUMN_YELLOW = Color(0xFFFCD231)
+private val STATISTICS_COLUMN_CYAN = Color(0xFF14CBCB)
+private val STATISTICS_COLUMN_DARK_LIGHT_GRAY = Color(0xFF9FA4BE)
+private val STATISTICS_COLUMN_DARK_OTHER = Color(0xFF666F8E)
+private val STATISTICS_FORMAT_COLUMN_COLORS = listOf(
+    STATISTICS_COLUMN_YELLOW,
+    STATISTICS_COLUMN_ORANGE,
+    STATISTICS_COLUMN_RED,
+    STATISTICS_COLUMN_PURPLE,
+    STATISTICS_COLUMN_BLUE,
+    STATISTICS_COLUMN_GREEN,
+    STATISTICS_COLUMN_CYAN,
+)
+private const val STATISTICS_FORMAT_COLUMN_COLOR_COUNT = 9
 
 private fun formatStatisticsSize(bytes: Long): String {
     val safeBytes = bytes.coerceAtLeast(0L)

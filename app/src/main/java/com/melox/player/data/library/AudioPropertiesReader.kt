@@ -26,7 +26,7 @@ internal data class LocalAudioProperties(
 )
 
 /**
- * Reads stream properties through a duplicated descriptor, following Lyrico's TagLib scan path.
+ * Reads stream properties through a duplicated descriptor so metadata scanning keeps ownership local.
  */
 internal class AudioPropertiesReader(
     private val contentResolver: ContentResolver,

@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
-// Rendering and placement behavior adapted from accompanist-lyrics-ui.
 package com.melox.player.ui.screen.playback
 
+import android.os.SystemClock
 import androidx.compose.animation.core.EaseInOut
 import androidx.compose.animation.core.LinearOutSlowInEasing
 import androidx.compose.animation.core.Animatable
@@ -129,30 +129,25 @@ internal fun lyricBlurRadiusTarget(
     0f
 }
 
-internal fun shouldAcceptPublishedLyricPosition(
-    publishedPositionMs: Long,
-    seekPositionMs: Long,
-    positionAtSeekRequestMs: Long,
-): Boolean = abs(publishedPositionMs - seekPositionMs) <=
-    abs(publishedPositionMs - positionAtSeekRequestMs)
-
 internal fun lyricSeekPositionIsApplied(
     currentPositionMs: Long,
     seekPositionMs: Long,
 ): Boolean = abs(currentPositionMs - seekPositionMs) <= 250L
 
-internal fun lyricClockStartPosition(
-    currentSmoothPositionMs: Long,
-    publishedPositionMs: Long,
-    seekPositionMs: Long,
-    seekRequestKey: Int,
-    seekRequestChanged: Boolean,
+internal fun lyricPlaybackPositionMs(
+    positionMs: Long,
+    positionUpdateElapsedRealtimeMs: Long,
+    nowElapsedRealtimeMs: Long,
     isPlaying: Boolean,
-): Long = when {
-    seekRequestChanged && seekRequestKey > 0 -> seekPositionMs.coerceAtLeast(0L)
-    seekRequestChanged -> publishedPositionMs.coerceAtLeast(0L)
-    !isPlaying -> currentSmoothPositionMs.coerceAtLeast(0L)
-    else -> publishedPositionMs.coerceAtLeast(0L)
+    playbackSpeed: Float,
+): Long {
+    val basePositionMs = positionMs.coerceAtLeast(0L)
+    if (!isPlaying || positionUpdateElapsedRealtimeMs <= 0L) return basePositionMs
+    val elapsedMs = (nowElapsedRealtimeMs - positionUpdateElapsedRealtimeMs).coerceAtLeast(0L)
+    val validSpeed = playbackSpeed.takeIf { it.isFinite() && it > 0f } ?: 1f
+    return (basePositionMs + elapsedMs * validSpeed)
+        .roundToLong()
+        .coerceAtLeast(0L)
 }
 
 internal fun lyricSeekUsesAnimatedCentering(
@@ -225,95 +220,55 @@ internal fun lyricCenteringSpringStiffness(nextTimestampGapMs: Long?): Float {
     ).coerceAtMost(LYRIC_CENTERING_MAX_STIFFNESS)
 }
 
+@Suppress("UNUSED_PARAMETER")
 internal fun lyricLineVerticalPaddingDp(
     hasTimedWords: Boolean,
     hasTranslation: Boolean,
     showLyricsTranslation: Boolean,
 ): Float {
-    val basePadding = if (hasTimedWords) 6f else 10f
     val translationVisible = hasTranslation && showLyricsTranslation
-    return if (translationVisible) basePadding else basePadding + 4f
-}
-
-internal fun correctedLyricClockMs(
-    predictedPositionMs: Double,
-    publishedPositionMs: Long,
-): Double {
-    val correctionMs = publishedPositionMs - predictedPositionMs
-    return if (abs(correctionMs) >= 80.0) {
-        publishedPositionMs.toDouble()
-    } else {
-        predictedPositionMs + correctionMs * 0.75
-    }
+    return if (translationVisible) 12f else 16f
 }
 
 @Composable
 private fun rememberSmoothLyricTimeProvider(
     document: LyricsDocument,
     positionMs: Long,
+    positionUpdateElapsedRealtimeMs: Long,
+    playbackSpeed: Float,
     isPlaying: Boolean,
-    seekRequestKey: Int,
-    seekPositionMs: Long,
 ): () -> Long {
     val latestPositionMs by rememberUpdatedState(positionMs)
-    val latestSeekPositionMs by rememberUpdatedState(seekPositionMs)
+    val latestPositionUpdateElapsedRealtimeMs by rememberUpdatedState(
+        positionUpdateElapsedRealtimeMs,
+    )
+    val latestPlaybackSpeed by rememberUpdatedState(playbackSpeed)
     val smoothPositionMs = remember(document) { mutableLongStateOf(positionMs) }
-    var handledSeekRequestKey by remember(document) {
-        mutableIntStateOf(seekRequestKey)
-    }
 
-    LaunchedEffect(document, isPlaying, seekRequestKey, seekPositionMs) {
-        val seekRequestChanged = seekRequestKey != handledSeekRequestKey
-        val initialPositionMs = lyricClockStartPosition(
-            currentSmoothPositionMs = smoothPositionMs.longValue,
-            publishedPositionMs = latestPositionMs,
-            seekPositionMs = latestSeekPositionMs,
-            seekRequestKey = seekRequestKey,
-            seekRequestChanged = seekRequestChanged,
-            isPlaying = isPlaying,
-        )
-        handledSeekRequestKey = seekRequestKey
-        val publishedPositionAtStartMs = latestPositionMs.coerceAtLeast(0L)
+    fun currentPlaybackPositionMs(): Long = lyricPlaybackPositionMs(
+        positionMs = latestPositionMs,
+        positionUpdateElapsedRealtimeMs = latestPositionUpdateElapsedRealtimeMs,
+        nowElapsedRealtimeMs = SystemClock.elapsedRealtime(),
+        isPlaying = isPlaying,
+        playbackSpeed = latestPlaybackSpeed,
+    )
+
+    LaunchedEffect(
+        document,
+        isPlaying,
+        positionMs,
+        positionUpdateElapsedRealtimeMs,
+        playbackSpeed,
+    ) {
         if (!isPlaying) {
-            smoothPositionMs.longValue = initialPositionMs
-            return@LaunchedEffect
+            smoothPositionMs.longValue = currentPlaybackPositionMs()
         }
-        var precisePositionMs = initialPositionMs.toDouble()
-        var lastPublishedPositionMs = publishedPositionAtStartMs
-        var awaitingSeekConfirmation = isPlaying &&
-            seekRequestChanged &&
-            seekRequestKey > 0 &&
-            initialPositionMs != publishedPositionAtStartMs
-        var previousFrameNanos = withFrameNanos { it }
-        smoothPositionMs.longValue = initialPositionMs
+    }
+    LaunchedEffect(document, isPlaying) {
+        if (!isPlaying) return@LaunchedEffect
         while (isActive) {
-            val frameNanos = withFrameNanos { it }
-            val frameDeltaMs = ((frameNanos - previousFrameNanos) / 1_000_000.0)
-                .coerceIn(0.0, 100.0)
-            precisePositionMs += frameDeltaMs
-            previousFrameNanos = frameNanos
-
-            val publishedPositionMs = latestPositionMs
-            if (publishedPositionMs != lastPublishedPositionMs) {
-                val acceptsPublishedPosition = !awaitingSeekConfirmation ||
-                    shouldAcceptPublishedLyricPosition(
-                        publishedPositionMs = publishedPositionMs,
-                        seekPositionMs = initialPositionMs,
-                        positionAtSeekRequestMs = publishedPositionAtStartMs,
-                    )
-                if (acceptsPublishedPosition) {
-                    awaitingSeekConfirmation = false
-                    // The controller publishes a position every 500 ms. A slow correction
-                    // leaves the lyric clock permanently behind the playing audio, so large
-                    // publication gaps must be adopted immediately.
-                    precisePositionMs = correctedLyricClockMs(
-                        predictedPositionMs = precisePositionMs,
-                        publishedPositionMs = publishedPositionMs,
-                    )
-                }
-                lastPublishedPositionMs = publishedPositionMs
-            }
-            smoothPositionMs.longValue = precisePositionMs.roundToLong().coerceAtLeast(0L)
+            withFrameNanos { }
+            smoothPositionMs.longValue = currentPlaybackPositionMs()
         }
     }
 
@@ -324,6 +279,8 @@ private fun rememberSmoothLyricTimeProvider(
 internal fun LyricsView(
     document: LyricsDocument,
     positionMs: Long,
+    positionUpdateElapsedRealtimeMs: Long,
+    playbackSpeed: Float,
     previewPositionMs: Long?,
     isPlaying: Boolean,
     onSeek: (Long) -> Unit,
@@ -346,9 +303,9 @@ internal fun LyricsView(
     val currentTimeProvider = rememberSmoothLyricTimeProvider(
         document = document,
         positionMs = positionMs,
+        positionUpdateElapsedRealtimeMs = positionUpdateElapsedRealtimeMs,
+        playbackSpeed = playbackSpeed,
         isPlaying = isPlaying,
-        seekRequestKey = seekRequestKey,
-        seekPositionMs = seekPositionMs,
     )
     var appliedSeekRequestKey by remember(document) {
         mutableIntStateOf(seekRequestKey)
@@ -716,6 +673,7 @@ internal fun LyricsView(
                             if (line.words.isNotEmpty()) {
                                 TimedLyricLine(
                                     line = line,
+                                    isFocused = isFocused,
                                     currentTimeProvider = lyricTimeProvider,
                                     normalTextStyle = normalTextStyle,
                                     translationTextStyle = translationTextStyle,
@@ -805,6 +763,7 @@ private fun LyricsLineItem(
 @Composable
 private fun TimedLyricLine(
     line: LyricLine,
+    isFocused: Boolean,
     currentTimeProvider: () -> Long,
     normalTextStyle: TextStyle,
     translationTextStyle: TextStyle,
@@ -895,11 +854,18 @@ private fun TimedLyricLine(
                     height = with(density) { totalHeight.toDp() },
                 ),
             ) {
-                drawLyricsLine(
-                    rows = rowRenderData,
-                    positionMs = currentTimeProvider(),
-                    color = emphasisColor,
-                )
+                if (isFocused) {
+                    drawLyricsLine(
+                        rows = rowRenderData,
+                        positionMs = currentTimeProvider(),
+                        color = emphasisColor,
+                    )
+                } else {
+                    drawStaticLyricsLine(
+                        rows = rowRenderData,
+                        color = emphasisColor,
+                    )
+                }
             }
         }
         if (showLyricsTranslation) {
@@ -1155,6 +1121,22 @@ private data class RowRenderData(
     val lastEndTimeMs: Long,
     val layerBounds: Rect,
 )
+
+internal enum class LyricRowRenderMode {
+    BEFORE,
+    ACTIVE,
+    COMPLETE,
+}
+
+internal fun lyricRowRenderMode(
+    positionMs: Long,
+    firstStartTimeMs: Long,
+    lastEndTimeMs: Long,
+): LyricRowRenderMode = when {
+    positionMs < firstStartTimeMs -> LyricRowRenderMode.BEFORE
+    positionMs >= lastEndTimeMs -> LyricRowRenderMode.COMPLETE
+    else -> LyricRowRenderMode.ACTIVE
+}
 
 private fun measureSyllables(
     syllables: List<Syllable>,
@@ -1509,21 +1491,54 @@ private fun DrawScope.drawLyricsLine(
     color: Color,
 ) {
     rows.forEach { row ->
-        if (positionMs >= row.lastEndTimeMs) {
-            drawRowText(row.layouts, color, positionMs)
-            return@forEach
-        }
-        drawIntoCanvas { canvas ->
-            canvas.saveLayer(row.layerBounds, Paint())
-            drawRowText(row.layouts, color, positionMs)
-            drawRect(
-                brush = createLineGradient(row, positionMs),
-                topLeft = row.layerBounds.topLeft,
-                size = row.layerBounds.size,
-                blendMode = BlendMode.DstIn,
+        when (
+            lyricRowRenderMode(
+                positionMs = positionMs,
+                firstStartTimeMs = row.firstStartTimeMs,
+                lastEndTimeMs = row.lastEndTimeMs,
             )
-            canvas.restore()
+        ) {
+            LyricRowRenderMode.BEFORE -> {
+                drawStaticRowText(
+                    layouts = row.layouts,
+                    color = color.copy(alpha = color.alpha * LYRIC_INACTIVE_TEXT_ALPHA),
+                )
+            }
+
+            LyricRowRenderMode.COMPLETE -> drawStaticRowText(row.layouts, color)
+
+            LyricRowRenderMode.ACTIVE -> drawIntoCanvas { canvas ->
+                canvas.saveLayer(row.layerBounds, Paint())
+                drawRowText(row.layouts, color, positionMs)
+                drawRect(
+                    brush = createLineGradient(row, positionMs),
+                    topLeft = row.layerBounds.topLeft,
+                    size = row.layerBounds.size,
+                    blendMode = BlendMode.DstIn,
+                )
+                canvas.restore()
+            }
         }
+    }
+}
+
+private fun DrawScope.drawStaticLyricsLine(
+    rows: List<RowRenderData>,
+    color: Color,
+) {
+    rows.forEach { row -> drawStaticRowText(row.layouts, color) }
+}
+
+private fun DrawScope.drawStaticRowText(
+    layouts: List<SyllableLayout>,
+    color: Color,
+) {
+    layouts.forEach { layout ->
+        drawText(
+            textLayoutResult = layout.textLayoutResult,
+            color = color,
+            topLeft = layout.position,
+        )
     }
 }
 

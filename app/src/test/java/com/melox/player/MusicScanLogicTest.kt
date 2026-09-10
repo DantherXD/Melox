@@ -9,7 +9,6 @@ import com.melox.player.data.repository.isSupportedAudioDocument
 import com.melox.player.data.repository.stableDocumentTrackId
 import com.melox.player.data.repository.stableMediaStoreTrackId
 import com.melox.player.model.LyricsFormat
-import com.melox.player.ui.screen.playback.correctedLyricClockMs
 import com.melox.player.ui.viewmodel.shouldEmitScanCompletion
 import com.melox.player.ui.viewmodel.shouldEmitScanNoChanges
 import org.junit.Assert.assertEquals
@@ -121,12 +120,6 @@ class MusicScanLogicTest {
         assertFalse(secondary == 42L)
         assertEquals(secondary, stableMediaStoreTrackId("1234-5678", 42L))
         assertFalse(secondary == stableMediaStoreTrackId("8765-4321", 42L))
-    }
-
-    @Test
-    fun lyricClockAdoptsControllerUpdatesWithoutKeepingAVisibleLag() {
-        assertEquals(10_500.0, correctedLyricClockMs(10_000.0, 10_500L), 0.0)
-        assertEquals(10_037.5, correctedLyricClockMs(10_000.0, 10_050L), 0.0)
     }
 
     @Test

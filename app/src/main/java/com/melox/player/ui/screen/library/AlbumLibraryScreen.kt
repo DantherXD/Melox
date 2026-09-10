@@ -28,6 +28,7 @@ import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.platform.LocalLayoutDirection
 import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.Dp
@@ -41,10 +42,13 @@ import com.melox.player.model.ScanStatus
 import com.melox.player.ui.component.library.AlphabetSections
 import com.melox.player.ui.component.library.AlphabetSideBar
 import com.melox.player.ui.component.library.PlaybackArtwork
+import com.melox.player.ui.component.library.responsiveGridColumnCount
 import top.yukonga.miuix.kmp.basic.Card
 import top.yukonga.miuix.kmp.basic.CardDefaults
 import top.yukonga.miuix.kmp.basic.ScrollBehavior
 import top.yukonga.miuix.kmp.basic.Text
+import top.yukonga.miuix.kmp.icon.MiuixIcons
+import top.yukonga.miuix.kmp.icon.extended.Album
 import top.yukonga.miuix.kmp.theme.MiuixTheme
 import top.yukonga.miuix.kmp.utils.PressFeedbackType
 import top.yukonga.miuix.kmp.utils.overScrollVertical
@@ -65,6 +69,8 @@ fun AlbumLibraryScreen(
     contentPadding: PaddingValues = PaddingValues(),
     showIndex: Boolean = true,
     indexBottomSpacing: Dp = 12.dp,
+    landscape: Boolean = false,
+    navigationRailExpanded: Boolean = false,
 ) {
     val layoutDirection = LocalLayoutDirection.current
     val supportsIndex = sortConfig.field == AlbumSortField.ALBUM ||
@@ -84,7 +90,14 @@ fun AlbumLibraryScreen(
             bottom = contentPadding.calculateBottomPadding() + 12.dp,
         )
         LazyVerticalGrid(
-            columns = GridCells.Fixed(sortConfig.gridStyle.columns),
+            columns = GridCells.Fixed(
+                albumGridColumnCount(
+                    gridStyle = sortConfig.gridStyle,
+                    landscape = landscape,
+                    navigationRailExpanded = navigationRailExpanded,
+                    availableWidth = maxWidth,
+                ),
+            ),
             modifier = Modifier
                 .fillMaxSize()
                 .scrollEndHaptic()
@@ -118,6 +131,7 @@ fun AlbumLibraryScreen(
                             query = query,
                             emptyMessageRes = R.string.album_empty,
                             noSearchResultsRes = R.string.album_no_search_results,
+                            icon = MiuixIcons.Album,
                         )
                     }
                 }
@@ -169,6 +183,31 @@ fun AlbumLibraryScreen(
             )
         }
     }
+}
+
+internal fun albumGridColumnCount(
+    gridStyle: AlbumGridStyle,
+    landscape: Boolean,
+    navigationRailExpanded: Boolean,
+    availableWidth: Dp,
+): Int {
+    if (!landscape) return gridStyle.columns
+
+    val maximumColumns = when {
+        gridStyle == AlbumGridStyle.THREE -> 6
+        else -> 5
+    }
+    val minimumCellWidth = when (gridStyle) {
+        AlbumGridStyle.TWO_SMALL -> 140.dp
+        AlbumGridStyle.THREE -> 120.dp
+    }
+    return responsiveGridColumnCount(
+        availableWidth = availableWidth,
+        horizontalPadding = 40.dp,
+        minimumCellWidth = minimumCellWidth,
+        minimumColumns = gridStyle.columns,
+        maximumColumns = maximumColumns,
+    )
 }
 
 @Composable
@@ -258,6 +297,7 @@ private fun AlbumGridLabels(
                 Modifier
             },
             style = MiuixTheme.textStyles.body2,
+            fontWeight = FontWeight.Medium,
             maxLines = 1,
             overflow = TextOverflow.Ellipsis,
         )

@@ -97,6 +97,7 @@ class SettingsRepository(context: Context) {
                 floatingBottomBar = preferences[Keys.FloatingBottomBar]
                     ?: (preferences[Keys.BottomBarStyle] != null &&
                         preferences[Keys.BottomBarStyle] != BottomBarStyle.NORMAL.name),
+                navigationRailExpanded = preferences[Keys.NavigationRailExpanded] ?: true,
                 liquidGlass = preferences[Keys.LiquidGlass]
                     ?: (preferences[Keys.BottomBarStyle] == BottomBarStyle.LIQUID_GLASS.name),
                 predictiveBackEnabled = preferences[Keys.PredictiveBackEnabled] ?: true,
@@ -257,6 +258,12 @@ class SettingsRepository(context: Context) {
         }
     }
 
+    suspend fun setNavigationRailExpanded(expanded: Boolean) {
+        dataStore.edit { preferences ->
+            preferences[Keys.NavigationRailExpanded] = expanded
+        }
+    }
+
     suspend fun setLiquidGlass(enabled: Boolean) {
         dataStore.edit { preferences ->
             preferences[Keys.LiquidGlass] = enabled
@@ -379,6 +386,7 @@ class SettingsRepository(context: Context) {
         val ProgressiveTopBarBlurEnabled =
             booleanPreferencesKey("progressive_top_bar_blur_enabled")
         val FloatingBottomBar = booleanPreferencesKey("floating_bottom_bar")
+        val NavigationRailExpanded = booleanPreferencesKey("navigation_rail_expanded")
         val HideBottomBar = booleanPreferencesKey("hide_bottom_bar")
         val LiquidGlass = booleanPreferencesKey("liquid_glass")
         val PredictiveBackEnabled = booleanPreferencesKey("predictive_back_enabled")

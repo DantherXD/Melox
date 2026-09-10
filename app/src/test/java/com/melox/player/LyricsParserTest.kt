@@ -36,6 +36,21 @@ class LyricsParserTest {
     }
 
     @Test
+    fun lrcOffsetAppliesToLinesBeforeItsMetadataTag() {
+        val document = LyricsParser.parse(
+            raw = """
+                [00:01.00]First
+                [offset:+250]
+                [00:02.00]Second
+            """.trimIndent(),
+            source = LyricsSource.SIDECAR,
+        )!!
+
+        assertEquals(1_250L, document.lines[0].startTimeMs)
+        assertEquals(2_250L, document.lines[1].startTimeMs)
+    }
+
+    @Test
     fun ttmlRetainsAgentTranslationAndTimedSpans() {
         val document = LyricsParser.parse(
             raw = """
@@ -79,6 +94,27 @@ class LyricsParserTest {
 
         assertEquals(10_200L, document.lines.single().words.first().endTimeMs)
         assertEquals(11_000L, document.lines.single().words.last().startTimeMs)
+    }
+
+    @Test
+    fun ttmlUsesDeclaredFrameRateMultiplierAndTickRate() {
+        val document = LyricsParser.parse(
+            raw = """
+                <tt xmlns="http://www.w3.org/ns/ttml"
+                    xmlns:ttp="http://www.w3.org/ns/ttml#parameter"
+                    ttp:frameRate="25"
+                    ttp:frameRateMultiplier="1000 1001"
+                    ttp:tickRate="50">
+                  <body><div>
+                    <p begin="00:00:01:12" end="125t">Timed</p>
+                  </div></body>
+                </tt>
+            """.trimIndent(),
+            source = LyricsSource.EMBEDDED,
+        )!!.lines.single()
+
+        assertEquals(1_480L, document.startTimeMs)
+        assertEquals(2_500L, document.endTimeMs)
     }
 
     @Test

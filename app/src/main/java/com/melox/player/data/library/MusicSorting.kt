@@ -32,7 +32,9 @@ internal fun filterMusicTracks(
 internal fun sortMusicTracks(
     tracks: List<MusicTrack>,
     config: MusicSortConfig,
-): List<MusicTrack> {
+): List<MusicTrack> = tracks.sortedWith(musicTrackComparator(config))
+
+internal fun musicTrackComparator(config: MusicSortConfig): Comparator<MusicTrack> {
     val comparator = when (config.field) {
         MusicSortField.TITLE -> compareBy<MusicTrack>(MusicTrack::titleSortKey)
             .thenBy(MusicTrack::id)
@@ -56,10 +58,9 @@ internal fun sortMusicTracks(
             .thenBy(MusicTrack::id)
     }
 
-    val effectiveComparator = if (config.descending) {
+    return if (config.descending) {
         Comparator<MusicTrack> { first, second -> comparator.compare(second, first) }
     } else {
         comparator
     }
-    return tracks.sortedWith(effectiveComparator)
 }
