@@ -49,7 +49,6 @@ fun AlbumSortButton(
     LibrarySortPopup(
         modifier = modifier,
         contentDescription = stringResource(R.string.album_sort_action),
-        popupPositionProvider = ListPopupDefaults.DropdownPositionProvider,
     ) { dismiss ->
         gridStyles.forEachIndexed { index, (gridStyle, label) ->
             DropdownImpl(

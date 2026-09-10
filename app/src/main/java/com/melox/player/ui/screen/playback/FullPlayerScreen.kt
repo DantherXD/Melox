@@ -17,11 +17,12 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.gestures.drag
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.WindowInsets
@@ -29,14 +30,17 @@ import androidx.compose.foundation.layout.asPaddingValues
 import androidx.compose.foundation.layout.calculateEndPadding
 import androidx.compose.foundation.layout.calculateStartPadding
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.navigationBars
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.safeDrawing
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.wrapContentHeight
 import androidx.compose.foundation.pager.HorizontalPager
 import androidx.compose.foundation.pager.PagerState
 import androidx.compose.foundation.pager.rememberPagerState
@@ -69,6 +73,7 @@ import androidx.compose.ui.layout.layout
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalLayoutDirection
+import androidx.compose.ui.platform.LocalWindowInfo
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.ProgressBarRangeInfo
@@ -84,6 +89,7 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.Dp
+import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -100,7 +106,9 @@ import com.melox.player.model.PlaybackBackgroundStyle
 import com.melox.player.model.PlaybackQueueItem
 import com.melox.player.model.PlaybackUiState
 import com.melox.player.model.withTrackMetadata
+import com.melox.player.ui.isMiuixWideLayout
 import com.melox.player.ui.component.library.PlaybackArtworkFrame
+import com.melox.player.ui.component.library.PLAYBACK_ARTWORK_SHADOW_BLUR_RADIUS
 import com.melox.player.ui.component.library.TrackActionsOverlay
 import com.melox.player.ui.component.library.formatDuration
 import com.melox.player.ui.component.library.rememberArtworkBitmap
@@ -129,13 +137,13 @@ import top.yukonga.miuix.kmp.basic.Scaffold
 import top.yukonga.miuix.kmp.basic.Slider
 import top.yukonga.miuix.kmp.basic.Text
 import top.yukonga.miuix.kmp.icon.MiuixIcons
-import top.yukonga.miuix.kmp.icon.extended.ConvertFile
 import top.yukonga.miuix.kmp.icon.extended.More
 import top.yukonga.miuix.kmp.icon.extended.Playlist
-import top.yukonga.miuix.kmp.icon.extended.Replace
+import top.yukonga.miuix.kmp.icon.extended.Tune
 import top.yukonga.miuix.kmp.overlay.OverlayBottomSheet
 import top.yukonga.miuix.kmp.preference.SwitchPreference
 import top.yukonga.miuix.kmp.theme.MiuixTheme
+import top.yukonga.miuix.kmp.utils.overScrollVertical
 
 @Composable
 internal fun FullPlayerScreen(
@@ -168,11 +176,14 @@ internal fun FullPlayerScreen(
     onOpenQueue: () -> Unit,
     onPlayNext: (MusicTrack) -> Unit,
     onAppendToQueue: (MusicTrack) -> Unit,
+    onAddToPlaylist: (MusicTrack) -> Unit,
     onGoToAlbum: (MusicTrack) -> Unit,
     artistGroups: List<ArtistGroup>,
     onGoToArtist: (ArtistGroup) -> Unit,
     onExternalEditReturned: (Long) -> Unit,
-    playerLayer: GraphicsLayer,
+    backgroundLayer: GraphicsLayer,
+    contentLayer: GraphicsLayer,
+    frameRecordingGeneration: Int,
     interactionEnabled: Boolean,
     lyricsPagingEnabled: Boolean,
     drawInPlace: Boolean,
@@ -182,6 +193,8 @@ internal fun FullPlayerScreen(
     onPlayerDrag: (Float) -> Unit,
     onPlayerDragEnd: (Float) -> Unit,
     onPlayerDragCancel: () -> Unit,
+    onBackgroundLayerRecorded: (generation: Int, size: IntSize) -> Unit,
+    onContentLayerRecorded: (generation: Int, size: IntSize) -> Unit,
     onPlayerBoundsChanged: (Rect) -> Unit,
     onArtworkBoundsChanged: (Rect) -> Unit,
     onArtworkPageSelectedChanged: (Boolean) -> Unit,
@@ -204,7 +217,7 @@ internal fun FullPlayerScreen(
         animate = drawInPlace,
     )
     val emphasisControlColor = Color.White
-    val controlColor = emphasisControlColor.copy(alpha = 0.8f)
+    val controlColor = emphasisControlColor.copy(alpha = 0.6f)
     val artistControlColor = emphasisControlColor.copy(
         alpha = 0.6f,
     )
@@ -231,14 +244,34 @@ internal fun FullPlayerScreen(
     var lyricsSeekRequestKey by remember { mutableIntStateOf(0) }
     var lyricsSeekPositionMs by remember { mutableLongStateOf(playback.positionMs) }
     var lyricsPreviewPositionMs by remember { mutableStateOf<Long?>(null) }
+    val artworkPadding by animateDpAsState(
+        targetValue = if (playback.playWhenReady) {
+            PLAYER_ARTWORK_PLAYING_PADDING
+        } else {
+            PLAYER_ARTWORK_PAUSED_PADDING
+        },
+        animationSpec = spring(
+            dampingRatio = 0.6f,
+            stiffness = 200f,
+        ),
+        label = "playerArtworkPadding",
+    )
+    val density = LocalDensity.current
+    val playerHeaderTitleSlotHeight = with(density) {
+        PLAYER_HEADER_TITLE_LINE_HEIGHT.toDp()
+    }
+    val playerHeaderArtistSlotHeight = with(density) {
+        PLAYER_HEADER_ARTIST_LINE_HEIGHT.toDp()
+    }
+    val playerHeaderContentHeight = playerHeaderTitleSlotHeight +
+        1.dp +
+        playerHeaderArtistSlotHeight
     val layoutDirection = LocalLayoutDirection.current
     val playerSafeDrawingPadding = WindowInsets.safeDrawing.asPaddingValues()
-    val playerForegroundPadding = PaddingValues(
-        start = playerSafeDrawingPadding.calculateStartPadding(layoutDirection),
-        top = playerSafeDrawingPadding.calculateTopPadding(),
-        end = playerSafeDrawingPadding.calculateEndPadding(layoutDirection),
-    )
-    val playerBottomPadding = playerSafeDrawingPadding.calculateBottomPadding()
+    val playerSafeStart = playerSafeDrawingPadding.calculateStartPadding(layoutDirection)
+    val playerSafeTop = playerSafeDrawingPadding.calculateTopPadding()
+    val playerSafeEnd = playerSafeDrawingPadding.calculateEndPadding(layoutDirection)
+    val playerSafeBottom = playerSafeDrawingPadding.calculateBottomPadding()
     val onTogglePlayPauseFromPlayer = {
         if (!playback.playWhenReady) lyricsFollowRequestKey += 1
         onTogglePlayPause()
@@ -285,10 +318,6 @@ internal fun FullPlayerScreen(
     LaunchedEffect(showLyricsTranslation) {
         displayedShowLyricsTranslation = showLyricsTranslation
     }
-    val artworkPageSelected = pagerState.settledPage == 0
-    SideEffect {
-        onArtworkPageSelectedChanged(artworkPageSelected)
-    }
     val dismissGestureModifier = rememberPlayerSheetVerticalDragModifier(
         enabled = interactionEnabled,
         hasItem = item != null,
@@ -306,11 +335,7 @@ internal fun FullPlayerScreen(
             .fillMaxSize()
             .onGloballyPositioned { coordinates ->
                 onPlayerBoundsChanged(coordinates.boundsInRoot())
-            }
-            .recordPlayerLayer(
-                layer = playerLayer,
-                drawInPlace = drawInPlace,
-            ),
+            },
         containerColor = Color.Transparent,
     ) {
         Box(
@@ -318,192 +343,182 @@ internal fun FullPlayerScreen(
                 .fillMaxSize()
                 .then(dismissGestureModifier),
         ) {
-            when (playbackBackgroundStyle) {
-                PlaybackBackgroundStyle.BLURRED_ARTWORK -> BlurredArtworkBackground(
-                    contentUri = item?.contentUri.orEmpty(),
-                    dateModifiedEpochSeconds = item?.dateModifiedEpochSeconds ?: 0L,
-                    fileSizeBytes = item?.fileSizeBytes ?: 0L,
-                    animate = drawInPlace && playback.isPlaying,
-                    animateArtworkTransition = true,
-                    onStatusBarBackgroundDarkChanged = onStatusBarBackgroundDarkChanged,
-                    modifier = Modifier.fillMaxSize(),
-                )
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .recordPlayerLayer(
+                        layer = backgroundLayer,
+                        drawInPlace = drawInPlace,
+                        recordingGeneration = frameRecordingGeneration,
+                        onRecorded = onBackgroundLayerRecorded,
+                    ),
+            ) {
+                when (playbackBackgroundStyle) {
+                    PlaybackBackgroundStyle.BLURRED_ARTWORK -> BlurredArtworkBackground(
+                        contentUri = item?.contentUri.orEmpty(),
+                        dateModifiedEpochSeconds = item?.dateModifiedEpochSeconds ?: 0L,
+                        fileSizeBytes = item?.fileSizeBytes ?: 0L,
+                        animate = drawInPlace && playback.isPlaying,
+                        animateArtworkTransition = true,
+                        onStatusBarBackgroundDarkChanged = onStatusBarBackgroundDarkChanged,
+                        modifier = Modifier.fillMaxSize(),
+                    )
 
-                PlaybackBackgroundStyle.DYNAMIC_FLOW -> DynamicFlowBackground(
-                    artwork = artworkBlend.currentBitmap,
-                    animate = drawInPlace && playback.isPlaying,
-                    onStatusBarBackgroundDarkChanged = onStatusBarBackgroundDarkChanged,
-                    modifier = Modifier.fillMaxSize(),
-                )
+                    PlaybackBackgroundStyle.DYNAMIC_FLOW -> DynamicFlowBackground(
+                        artwork = artworkBlend.currentBitmap,
+                        animate = drawInPlace && playback.isPlaying,
+                        onStatusBarBackgroundDarkChanged = onStatusBarBackgroundDarkChanged,
+                        modifier = Modifier.fillMaxSize(),
+                    )
+                }
             }
-    Column(
-                    modifier = Modifier
-                        .fillMaxSize()
-                        .padding(playerForegroundPadding),
-                    horizontalAlignment = Alignment.CenterHorizontally,
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .recordPlayerLayer(
+                        layer = contentLayer,
+                        drawInPlace = drawInPlace,
+                        recordingGeneration = frameRecordingGeneration,
+                        onRecorded = onContentLayerRecorded,
+                    ),
+            ) {
+                BoxWithConstraints(
+                    modifier = Modifier.fillMaxSize(),
                 ) {
+                    val safeContentWidth = (maxWidth - playerSafeStart - playerSafeEnd)
+                        .coerceAtLeast(0.dp)
+                    val safeContentHeight = (maxHeight - playerSafeTop - playerSafeBottom)
+                        .coerceAtLeast(0.dp)
+                    val playerLayout = playerLayout(
+                        windowWidth = safeContentWidth,
+                        windowHeight = safeContentHeight,
+                    )
+                    val headerTopPadding = playerHeaderTopPadding(playerLayout, playerSafeTop)
+                    val lyricsActive = playerLyricsAreActive(
+                        layout = playerLayout,
+                        currentPage = pagerState.currentPage,
+                        targetPage = pagerState.targetPage,
+                    )
+                    SideEffect {
+                        onArtworkPageSelectedChanged(
+                            playerLayout != PlayerLayout.PORTRAIT || pagerState.settledPage == 0,
+                        )
+                    }
+                    val portraitArtworkSize = playerArtworkSizeForContent(
+                        playerContentWidth(
+                            safeContentWidth,
+                            PLAYER_PORTRAIT_CONTENT_MAX_WIDTH,
+                        ),
+                    )
+                    val portraitArtworkContentWidth = playerArtworkAlignmentContentSize(
+                        portraitArtworkSize,
+                    )
+                    val headerSpacing = playerVerticalSpacing(
+                        availableHeight = maxHeight - playerHeaderContentHeight -
+                            headerTopPadding,
+                        preferredArtworkSize = portraitArtworkSize,
+                    ).headerToArtwork
+                    Column(
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .padding(
+                                start = playerSafeStart,
+                                end = playerSafeEnd,
+                            ),
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                    ) {
                     val lyricsCenterOffsetY = if (displayedHideControlsOnLyrics) {
                         (-(
-                            playerForegroundPadding.calculateTopPadding().value +
-                                PLAYER_HEADER_TOP_PADDING.value +
-                                PLAYER_HEADER_CONTENT_HEIGHT.value +
-                                PLAYER_HEADER_TO_CONTENT_SPACING.value
+                            PLAYER_HEADER_TOP_PADDING.value +
+                                playerHeaderContentHeight.value +
+                                headerSpacing.value
                             ) / 2f).dp
                     } else {
                         0.dp
                     }
-                    PlayerHeader(
-                        item = item,
-                        titleColor = emphasisControlColor,
-                        artistColor = artistControlColor,
-                        leftAligned = displayedLeftAlignPlayerTitle,
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(
-                                start = 32.dp,
-                                top = PLAYER_HEADER_TOP_PADDING,
-                                end = 32.dp,
-                            ),
-                    )
-                    Spacer(Modifier.height(PLAYER_HEADER_TO_CONTENT_SPACING))
+                    if (playerLayout == PlayerLayout.PORTRAIT) {
+                        PlayerHeader(
+                            item = item,
+                            titleColor = emphasisControlColor,
+                            artistColor = artistControlColor,
+                            leftAligned = displayedLeftAlignPlayerTitle,
+                            titleSlotHeight = playerHeaderTitleSlotHeight,
+                            artistSlotHeight = playerHeaderArtistSlotHeight,
+                            modifier = Modifier
+                                .width(portraitArtworkContentWidth)
+                                .padding(top = headerTopPadding),
+                        )
+                        Spacer(Modifier.height(headerSpacing))
+                    }
                     BoxWithConstraints(
                         modifier = Modifier
                             .fillMaxWidth()
                             .weight(1f),
                         contentAlignment = Alignment.Center,
                     ) {
-                        val landscape = maxWidth >= 600.dp && maxWidth > maxHeight
-                        if (landscape) {
-                            val artworkSize = minOf(
-                                maxHeight - playerBottomPadding - 24.dp,
-                                (maxWidth - 32.dp) / 2f,
-                                292.dp,
+                        if (playerLayout == PlayerLayout.WIDE_TWO_PANE) {
+                            val playbackPaneWidth = landscapePlayerPlaybackPaneWidth(maxWidth)
+                            val lyricsPaneWidth = landscapePlayerLyricsPaneWidth(maxWidth)
+                            val paneSpacing = landscapePlayerPaneSpacing(maxWidth)
+                            val artworkSize = landscapePlayerArtworkSize(
+                                availableWidth = playbackPaneWidth,
+                                availableHeight = maxHeight,
                             )
-                            if (displayedHideControlsOnLyrics) {
-                                PlayerContentPager(
-                                    pagerState = pagerState,
-                                    lyrics = lyrics,
-                                    positionMs = playback.positionMs,
-                                    previewPositionMs = lyricsPreviewPositionMs,
-                                    isPlaying = playback.isPlaying,
-                                    onSeek = onSeekFromPlayer,
-                                    contentWidth = artworkSize,
-                                    controlColor = controlColor,
-                                    emphasisControlColor = emphasisControlColor,
-                                    lyricsPagingEnabled = lyricsPagingEnabled,
-                                    lyricFontScale = displayedLyricFontScale,
-                                    lyricFontWeight = displayedLyricFontWeight,
-                                    forceWordByWordLyrics = displayedForceWordByWordLyrics,
-                                    lyricBlurEnabled = displayedLyricBlurEnabled,
-                                    centerLyrics = displayedCenterLyrics,
-                                    lyricCenterOffsetY = lyricsCenterOffsetY,
-                                    showLyricsTranslation = displayedShowLyricsTranslation,
-                                    showBottomFade = false,
-                                    resumeFollowRequestKey = lyricsFollowRequestKey,
-                                    seekRequestKey = lyricsSeekRequestKey,
-                                    seekPositionMs = lyricsSeekPositionMs,
-                                    modifier = Modifier.fillMaxSize(),
-                                    artworkContent = {
-                                        Row(
-                                            modifier = Modifier
-                                                .fillMaxSize()
-                                                .padding(
-                                                    top = 12.dp,
-                                                    bottom = playerBottomPadding + 12.dp,
-                                                ),
-                                            horizontalArrangement = Arrangement.spacedBy(32.dp),
-                                            verticalAlignment = Alignment.CenterVertically,
-                                        ) {
-                                            Box(
-                                                modifier = Modifier
-                                                    .weight(1f)
-                                                    .fillMaxSize(),
-                                                contentAlignment = Alignment.Center,
-                                            ) {
-                                                PlayerArtwork(
-                                                    size = artworkSize,
-                                                    playWhenReady = playback.playWhenReady,
-                                                    artworkBlend = artworkBlend,
-                                                    cornerRadius = artworkCornerRadius,
-                                                    sharedArtworkVisible = sharedArtworkVisible,
-                                                    onArtworkBoundsChanged = onArtworkBoundsChanged,
-                                                )
-                                            }
-                                            PlayerDetails(
-                                                modifier = Modifier.width(artworkSize),
-                                                contentWidth = artworkSize,
-                                                playback = playback,
-                                                controlColor = controlColor,
-                                                emphasisControlColor = emphasisControlColor,
-                                                onTogglePlayPause = onTogglePlayPauseFromPlayer,
-                                                onPrevious = onPrevious,
-                                                onNext = onNext,
-                                                onSeek = onSeekFromPlayer,
-                                                onPreviewPositionChange = onPreviewSeekFromPlayer,
-                                                onCyclePlaybackMode = onCyclePlaybackMode,
-                                                onOpenLyricsSettings = {
-                                                    showLyricsSettings = true
-                                                },
-                                                onOpenQueue = onOpenQueue,
-                                                onOpenTrackActions = {
-                                                    if (currentTrack != null) {
-                                                        showTrackActions = true
-                                                    }
-                                                },
-                                            )
-                                        }
-                                    },
-                                )
-                            } else {
-                                Row(
+                            val artworkContentWidth = playerUnboundedContentWidth(playbackPaneWidth)
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxSize()
+                                    .padding(
+                                        top = headerTopPadding,
+                                        bottom = PLAYER_CONTENT_BOTTOM_SPACING,
+                                    ),
+                                horizontalArrangement = Arrangement.Center,
+                                verticalAlignment = Alignment.Top,
+                            ) {
+                                Spacer(Modifier.width(PLAYER_WIDE_FIXED_START_INSET))
+                                Column(
                                     modifier = Modifier
-                                        .fillMaxSize()
-                                        .padding(
-                                            top = 12.dp,
-                                            bottom = playerBottomPadding + 12.dp,
-                                        ),
-                                    horizontalArrangement = Arrangement.spacedBy(32.dp),
-                                    verticalAlignment = Alignment.CenterVertically,
+                                        .width(playbackPaneWidth)
+                                        .fillMaxHeight(),
+                                    horizontalAlignment = Alignment.CenterHorizontally,
                                 ) {
-                                    PlayerContentPager(
-                                        pagerState = pagerState,
-                                        lyrics = lyrics,
-                                        positionMs = playback.positionMs,
-                                        previewPositionMs = lyricsPreviewPositionMs,
-                                        isPlaying = playback.isPlaying,
-                                        onSeek = onSeekFromPlayer,
-                                        contentWidth = artworkSize,
-                                        controlColor = controlColor,
-                                        emphasisControlColor = emphasisControlColor,
-                                        lyricsPagingEnabled = lyricsPagingEnabled,
-                                        lyricFontScale = displayedLyricFontScale,
-                                        lyricFontWeight = displayedLyricFontWeight,
-                                        forceWordByWordLyrics = displayedForceWordByWordLyrics,
-                                        lyricBlurEnabled = displayedLyricBlurEnabled,
-                                        centerLyrics = displayedCenterLyrics,
-                                        lyricCenterOffsetY = lyricsCenterOffsetY,
-                                        showLyricsTranslation = displayedShowLyricsTranslation,
-                                        showBottomFade = true,
-                                        resumeFollowRequestKey = lyricsFollowRequestKey,
-                                        seekRequestKey = lyricsSeekRequestKey,
-                                        seekPositionMs = lyricsSeekPositionMs,
-                                        modifier = Modifier.weight(1f),
-                                        artworkContent = {
-                                            PlayerArtwork(
-                                                size = artworkSize,
-                                                playWhenReady = playback.playWhenReady,
-                                                artworkBlend = artworkBlend,
-                                                cornerRadius = artworkCornerRadius,
-                                                sharedArtworkVisible = sharedArtworkVisible,
-                                                onArtworkBoundsChanged = onArtworkBoundsChanged,
-                                            )
-                                        },
+                                    val spacing = landscapePlayerSpacing()
+                                    PlayerHeader(
+                                        item = item,
+                                        titleColor = emphasisControlColor,
+                                        artistColor = artistControlColor,
+                                        leftAligned = displayedLeftAlignPlayerTitle,
+                                        titleSlotHeight = playerHeaderTitleSlotHeight,
+                                        artistSlotHeight = playerHeaderArtistSlotHeight,
+                                        modifier = Modifier.width(artworkContentWidth),
                                     )
+                                    Spacer(Modifier.height(LANDSCAPE_PLAYER_TITLE_TO_ARTWORK_SPACING))
+                                    BoxWithConstraints(
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .weight(1f),
+                                        contentAlignment = Alignment.Center,
+                                    ) {
+                                        PlayerArtwork(
+                                            size = fitPlayerArtworkSize(
+                                                preferredSize = artworkSize,
+                                                availableHeight = maxHeight,
+                                            ),
+                                            artworkPadding = artworkPadding,
+                                            artworkBlend = artworkBlend,
+                                            cornerRadius = artworkCornerRadius,
+                                            sharedArtworkVisible = sharedArtworkVisible,
+                                            onArtworkBoundsChanged = onArtworkBoundsChanged,
+                                        )
+                                    }
+                                    Spacer(Modifier.height(LANDSCAPE_PLAYER_ARTWORK_TO_PROGRESS_SPACING))
                                     PlayerDetails(
-                                        modifier = Modifier.width(artworkSize),
-                                        contentWidth = artworkSize,
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .wrapContentHeight(),
+                                        contentWidth = artworkContentWidth,
+                                        spacing = spacing,
                                         playback = playback,
-                                        controlColor = controlColor,
                                         emphasisControlColor = emphasisControlColor,
                                         onTogglePlayPause = onTogglePlayPauseFromPlayer,
                                         onPrevious = onPrevious,
@@ -516,23 +531,172 @@ internal fun FullPlayerScreen(
                                         onOpenTrackActions = {
                                             if (currentTrack != null) showTrackActions = true
                                         },
+                                        primaryControlsWidth = artworkContentWidth,
+                                        secondaryControlsWidth = playbackPaneWidth,
+                                    )
+                                    Spacer(Modifier.height(spacing.panelBottom))
+                                }
+                                Spacer(Modifier.width(paneSpacing))
+                                Box(
+                                    modifier = Modifier
+                                        .width(lyricsPaneWidth)
+                                        .fillMaxHeight(),
+                                    contentAlignment = Alignment.Center,
+                                ) {
+                                    SyncedLyrics(
+                                        lyrics = lyrics,
+                                        positionMs = playback.positionMs,
+                                        positionUpdateElapsedRealtimeMs =
+                                            playback.positionUpdateElapsedRealtimeMs,
+                                        playbackSpeed = playback.playbackSpeed,
+                                        previewPositionMs = lyricsPreviewPositionMs,
+                                        isPlaying = playback.isPlaying,
+                                        active = lyricsActive,
+                                        onSeek = onSeekFromPlayer,
+                                        contentWidth = landscapePlayerLyricsContentWidth(lyricsPaneWidth),
+                                        controlColor = controlColor,
+                                        emphasisControlColor = emphasisControlColor,
+                                        lyricFontScale = displayedLyricFontScale,
+                                        lyricFontWeight = displayedLyricFontWeight,
+                                        forceWordByWordLyrics = displayedForceWordByWordLyrics,
+                                        lyricBlurEnabled = displayedLyricBlurEnabled,
+                                        centerLyrics = displayedCenterLyrics,
+                                        lyricCenterOffsetY = 0.dp,
+                                        showLyricsTranslation = displayedShowLyricsTranslation,
+                                        showBottomFade = true,
+                                        resumeFollowRequestKey = lyricsFollowRequestKey,
+                                        seekRequestKey = lyricsSeekRequestKey,
+                                        seekPositionMs = lyricsSeekPositionMs,
+                                        modifier = Modifier.fillMaxSize(),
                                     )
                                 }
                             }
+                        } else if (playerLayout == PlayerLayout.COMPACT_LANDSCAPE) {
+                            CompactLandscapePlayerLayout(
+                                pagerState = pagerState,
+                                lyricsPagingEnabled = lyricsPagingEnabled,
+                                artworkContent = { artworkSize ->
+                                    PlayerArtwork(
+                                        size = artworkSize,
+                                        artworkPadding = artworkPadding,
+                                        artworkBlend = artworkBlend,
+                                        cornerRadius = artworkCornerRadius,
+                                        sharedArtworkVisible = sharedArtworkVisible,
+                                        onArtworkBoundsChanged = onArtworkBoundsChanged,
+                                    )
+                                },
+                                lyricsContent = { contentWidth, contentHeight ->
+                                    Box(
+                                        modifier = Modifier
+                                            .width(contentWidth)
+                                            .height(contentHeight),
+                                    ) {
+                                        SyncedLyrics(
+                                            lyrics = lyrics,
+                                            positionMs = playback.positionMs,
+                                            positionUpdateElapsedRealtimeMs =
+                                                playback.positionUpdateElapsedRealtimeMs,
+                                            playbackSpeed = playback.playbackSpeed,
+                                            previewPositionMs = lyricsPreviewPositionMs,
+                                            isPlaying = playback.isPlaying,
+                                            active = lyricsActive,
+                                            onSeek = onSeekFromPlayer,
+                                            contentWidth = contentWidth,
+                                            controlColor = controlColor,
+                                            emphasisControlColor = emphasisControlColor,
+                                            lyricFontScale = displayedLyricFontScale,
+                                            lyricFontWeight = displayedLyricFontWeight,
+                                            forceWordByWordLyrics = displayedForceWordByWordLyrics,
+                                            lyricBlurEnabled = displayedLyricBlurEnabled,
+                                            centerLyrics = displayedCenterLyrics,
+                                            lyricCenterOffsetY = 0.dp,
+                                            showLyricsTranslation = displayedShowLyricsTranslation,
+                                            showBottomFade = true,
+                                            resumeFollowRequestKey = lyricsFollowRequestKey,
+                                            seekRequestKey = lyricsSeekRequestKey,
+                                            seekPositionMs = lyricsSeekPositionMs,
+                                            modifier = Modifier.fillMaxSize(),
+                                        )
+                                    }
+                                },
+                                controlsContent = { paneWidth, contentWidth ->
+                                    Column(
+                                        modifier = Modifier
+                                            .width(paneWidth)
+                                            .wrapContentHeight(),
+                                        horizontalAlignment = Alignment.CenterHorizontally,
+                                    ) {
+                                        PlayerHeader(
+                                            item = item,
+                                            titleColor = emphasisControlColor,
+                                            artistColor = artistControlColor,
+                                            leftAligned = displayedLeftAlignPlayerTitle,
+                                            titleSlotHeight = playerHeaderTitleSlotHeight,
+                                            artistSlotHeight = playerHeaderArtistSlotHeight,
+                                            modifier = Modifier.width(contentWidth),
+                                        )
+                                        Spacer(Modifier.height(COMPACT_LANDSCAPE_HEADER_TO_CONTROLS_SPACING))
+                                        PlayerDetails(
+                                            modifier = Modifier.fillMaxWidth(),
+                                            contentWidth = contentWidth,
+                                            spacing = compactLandscapePlayerSpacing(),
+                                            playback = playback,
+                                            emphasisControlColor = emphasisControlColor,
+                                            onTogglePlayPause = onTogglePlayPauseFromPlayer,
+                                            onPrevious = onPrevious,
+                                            onNext = onNext,
+                                            onSeek = onSeekFromPlayer,
+                                            onPreviewPositionChange = onPreviewSeekFromPlayer,
+                                            onCyclePlaybackMode = onCyclePlaybackMode,
+                                            onOpenLyricsSettings = { showLyricsSettings = true },
+                                            onOpenQueue = onOpenQueue,
+                                            onOpenTrackActions = {
+                                                if (currentTrack != null) showTrackActions = true
+                                            },
+                                            primaryControlsWidth = minOf(contentWidth, 320.dp),
+                                            secondaryControlsWidth = paneWidth,
+                                        )
+                                    }
+                                },
+                                modifier = Modifier
+                                    .fillMaxSize()
+                                    .padding(
+                                        start = compactLandscapeSidePadding(
+                                            ownSafeInset = playerSafeStart,
+                                            oppositeSafeInset = playerSafeEnd,
+                                        ),
+                                        top = playerSafeTop,
+                                        end = compactLandscapeSidePadding(
+                                            ownSafeInset = playerSafeEnd,
+                                            oppositeSafeInset = playerSafeStart,
+                                        ),
+                                        bottom = playerSafeBottom,
+                                    ),
+                            )
                         } else {
-                            val artworkSize = minOf(
-                                maxWidth - 56.dp,
-                                (maxHeight - playerBottomPadding) * 0.58f,
-                            ).coerceAtMost(344.dp)
+                            val contentWidth = playerContentWidth(
+                                maxWidth, PLAYER_PORTRAIT_CONTENT_MAX_WIDTH,
+                            )
+                            val artworkSize = playerArtworkSizeForContent(contentWidth)
+                            val artworkContentWidth = playerArtworkAlignmentContentSize(artworkSize)
+                            val spacing = playerVerticalSpacing(
+                                availableHeight = maxHeight,
+                                preferredArtworkSize = artworkSize,
+                                panelBottom = PLAYER_CONTENT_BOTTOM_SPACING,
+                            )
                             if (displayedHideControlsOnLyrics) {
                                 PlayerContentPager(
                                     pagerState = pagerState,
                                     lyrics = lyrics,
                                     positionMs = playback.positionMs,
+                                    positionUpdateElapsedRealtimeMs =
+                                        playback.positionUpdateElapsedRealtimeMs,
+                                    playbackSpeed = playback.playbackSpeed,
                                     previewPositionMs = lyricsPreviewPositionMs,
                                     isPlaying = playback.isPlaying,
+                                    lyricsActive = lyricsActive,
                                     onSeek = onSeekFromPlayer,
-                                    contentWidth = artworkSize,
+                                    contentWidth = artworkContentWidth,
                                     controlColor = controlColor,
                                     emphasisControlColor = emphasisControlColor,
                                     lyricsPagingEnabled = lyricsPagingEnabled,
@@ -550,10 +714,14 @@ internal fun FullPlayerScreen(
                                     modifier = Modifier.fillMaxSize(),
                                     artworkContent = {
                                         PortraitPlayerLayout(
-                                            artworkContent = {
+                                            spacing = spacing,
+                                            artworkContent = { artworkHeight ->
                                                 PlayerArtwork(
-                                                    size = artworkSize,
-                                                    playWhenReady = playback.playWhenReady,
+                                                    size = fitPlayerArtworkSize(
+                                                        artworkSize,
+                                                        artworkHeight,
+                                                    ),
+                                                    artworkPadding = artworkPadding,
                                                     artworkBlend = artworkBlend,
                                                     cornerRadius = artworkCornerRadius,
                                                     sharedArtworkVisible = sharedArtworkVisible,
@@ -563,9 +731,10 @@ internal fun FullPlayerScreen(
                                             detailsContent = {
                                                 PlayerDetails(
                                                     modifier = Modifier.fillMaxWidth(),
-                                                    contentWidth = artworkSize,
+                                                    contentWidth = artworkContentWidth,
+                                                    secondaryControlsWidth = maxWidth,
+                                                    spacing = spacing,
                                                     playback = playback,
-                                                    controlColor = controlColor,
                                                     emphasisControlColor = emphasisControlColor,
                                                     onTogglePlayPause =
                                                         onTogglePlayPauseFromPlayer,
@@ -591,15 +760,20 @@ internal fun FullPlayerScreen(
                                 )
                             } else {
                                 PortraitPlayerLayout(
-                                    artworkContent = {
+                                    spacing = spacing,
+                                    artworkContent = { artworkHeight ->
                                         PlayerContentPager(
                                             pagerState = pagerState,
                                             lyrics = lyrics,
                                             positionMs = playback.positionMs,
+                                            positionUpdateElapsedRealtimeMs =
+                                                playback.positionUpdateElapsedRealtimeMs,
+                                            playbackSpeed = playback.playbackSpeed,
                                             previewPositionMs = lyricsPreviewPositionMs,
                                             isPlaying = playback.isPlaying,
+                                            lyricsActive = lyricsActive,
                                             onSeek = onSeekFromPlayer,
-                                            contentWidth = artworkSize,
+                                            contentWidth = artworkContentWidth,
                                             controlColor = controlColor,
                                             emphasisControlColor = emphasisControlColor,
                                             lyricsPagingEnabled = lyricsPagingEnabled,
@@ -619,8 +793,11 @@ internal fun FullPlayerScreen(
                                             modifier = Modifier.fillMaxSize(),
                                             artworkContent = {
                                                 PlayerArtwork(
-                                                    size = artworkSize,
-                                                    playWhenReady = playback.playWhenReady,
+                                                    size = fitPlayerArtworkSize(
+                                                        artworkSize,
+                                                        artworkHeight,
+                                                    ),
+                                                    artworkPadding = artworkPadding,
                                                     artworkBlend = artworkBlend,
                                                     cornerRadius = artworkCornerRadius,
                                                     sharedArtworkVisible = sharedArtworkVisible,
@@ -633,9 +810,10 @@ internal fun FullPlayerScreen(
                                     detailsContent = {
                                         PlayerDetails(
                                             modifier = Modifier.fillMaxWidth(),
-                                            contentWidth = artworkSize,
+                                            contentWidth = artworkContentWidth,
+                                            secondaryControlsWidth = maxWidth,
+                                            spacing = spacing,
                                             playback = playback,
-                                            controlColor = controlColor,
                                             emphasisControlColor = emphasisControlColor,
                                             onTogglePlayPause = onTogglePlayPauseFromPlayer,
                                             onPrevious = onPrevious,
@@ -659,63 +837,67 @@ internal fun FullPlayerScreen(
                             }
                         }
                     }
+                    }
                 }
-        }
-        TrackActionsOverlay(
-            track = currentTrack.takeIf { showTrackActions },
-            onDismiss = { showTrackActions = false },
-            onPlayNext = onPlayNext,
-            onAppendToQueue = onAppendToQueue,
-            onGoToAlbum = onGoToAlbum,
-            artistGroups = artistGroups,
-            onGoToArtist = onGoToArtist,
-            onExternalEditReturned = onExternalEditReturned,
-        )
-        PlayerSettingsSheet(
-            show = showLyricsSettings,
-            leftAlignPlayerTitle = displayedLeftAlignPlayerTitle,
-            lyricFontScale = displayedLyricFontScale,
-            lyricFontWeight = displayedLyricFontWeight,
-            forceWordByWordLyrics = displayedForceWordByWordLyrics,
-            lyricBlurEnabled = displayedLyricBlurEnabled,
-            centerLyrics = displayedCenterLyrics,
-            hideControlsOnLyrics = displayedHideControlsOnLyrics,
-            showLyricsTranslation = displayedShowLyricsTranslation,
-            onDismiss = { showLyricsSettings = false },
-            onLeftAlignPlayerTitleChange = {
-                displayedLeftAlignPlayerTitle = it
-                onLeftAlignPlayerTitleChange(it)
-            },
-            onLyricFontScalePreview = { displayedLyricFontScale = it },
-            onLyricFontScaleCommit = {
-                onLyricFontScaleChange(displayedLyricFontScale)
-            },
-            onLyricFontWeightPreview = { displayedLyricFontWeight = it },
-            onLyricFontWeightCommit = {
-                onLyricFontWeightChange(displayedLyricFontWeight)
-            },
-            onForceWordByWordLyricsChange = {
-                displayedForceWordByWordLyrics = it
-                onForceWordByWordLyricsChange(it)
-            },
-            onLyricBlurEnabledChange = {
-                displayedLyricBlurEnabled = it
-                onLyricBlurEnabledChange(it)
-            },
-            onCenterLyricsChange = {
-                displayedCenterLyrics = it
-                onCenterLyricsChange(it)
-            },
-            onHideControlsOnLyricsChange = {
-                displayedHideControlsOnLyrics = it
-                onHideControlsOnLyricsChange(it)
-            },
-            onShowLyricsTranslationChange = {
-                displayedShowLyricsTranslation = it
-                onShowLyricsTranslationChange(it)
-            },
-        )
+                TrackActionsOverlay(
+                    track = currentTrack.takeIf { showTrackActions },
+                    onDismiss = { showTrackActions = false },
+                    onPlayNext = onPlayNext,
+                    onAppendToQueue = onAppendToQueue,
+                    onAddToPlaylist = onAddToPlaylist,
+                    onGoToAlbum = onGoToAlbum,
+                    artistGroups = artistGroups,
+                    onGoToArtist = onGoToArtist,
+                    onExternalEditReturned = onExternalEditReturned,
+                )
+                PlayerSettingsSheet(
+                    show = showLyricsSettings,
+                    leftAlignPlayerTitle = displayedLeftAlignPlayerTitle,
+                    lyricFontScale = displayedLyricFontScale,
+                    lyricFontWeight = displayedLyricFontWeight,
+                    forceWordByWordLyrics = displayedForceWordByWordLyrics,
+                    lyricBlurEnabled = displayedLyricBlurEnabled,
+                    centerLyrics = displayedCenterLyrics,
+                    hideControlsOnLyrics = displayedHideControlsOnLyrics,
+                    showLyricsTranslation = displayedShowLyricsTranslation,
+                    onDismiss = { showLyricsSettings = false },
+                    onLeftAlignPlayerTitleChange = {
+                        displayedLeftAlignPlayerTitle = it
+                        onLeftAlignPlayerTitleChange(it)
+                    },
+                    onLyricFontScalePreview = { displayedLyricFontScale = it },
+                    onLyricFontScaleCommit = {
+                        onLyricFontScaleChange(displayedLyricFontScale)
+                    },
+                    onLyricFontWeightPreview = { displayedLyricFontWeight = it },
+                    onLyricFontWeightCommit = {
+                        onLyricFontWeightChange(displayedLyricFontWeight)
+                    },
+                    onForceWordByWordLyricsChange = {
+                        displayedForceWordByWordLyrics = it
+                        onForceWordByWordLyricsChange(it)
+                    },
+                    onLyricBlurEnabledChange = {
+                        displayedLyricBlurEnabled = it
+                        onLyricBlurEnabledChange(it)
+                    },
+                    onCenterLyricsChange = {
+                        displayedCenterLyrics = it
+                        onCenterLyricsChange(it)
+                    },
+                    onHideControlsOnLyricsChange = {
+                        displayedHideControlsOnLyrics = it
+                        onHideControlsOnLyricsChange(it)
+                    },
+                    onShowLyricsTranslationChange = {
+                        displayedShowLyricsTranslation = it
+                        onShowLyricsTranslationChange(it)
+                    },
+                )
+            }
     }
+}
+
 }
 
 private data class ArtworkBlend(
@@ -775,34 +957,295 @@ private fun rememberArtworkBlend(
 
 @Composable
 private fun PortraitPlayerLayout(
+    spacing: PlayerVerticalSpacing,
     modifier: Modifier = Modifier,
-    artworkContent: @Composable () -> Unit,
+    artworkContent: @Composable (Dp) -> Unit,
     detailsContent: @Composable () -> Unit,
 ) {
     Column(
-        modifier = modifier.padding(bottom = PLAYER_PANEL_BOTTOM_SPACING),
+        modifier = modifier.padding(bottom = spacing.panelBottom),
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {
-        Box(
+        BoxWithConstraints(
             modifier = Modifier
                 .fillMaxWidth()
                 .weight(1f),
             contentAlignment = Alignment.Center,
         ) {
-            artworkContent()
+            artworkContent(maxHeight)
         }
-        Spacer(Modifier.height(PLAYER_ARTWORK_PROGRESS_SPACING))
+        Spacer(Modifier.height(spacing.artworkToProgress))
         detailsContent()
     }
 }
+
+@Composable
+private fun CompactLandscapePlayerLayout(
+    pagerState: PagerState,
+    lyricsPagingEnabled: Boolean,
+    artworkContent: @Composable (Dp) -> Unit,
+    lyricsContent: @Composable (contentWidth: Dp, contentHeight: Dp) -> Unit,
+    controlsContent: @Composable (paneWidth: Dp, contentWidth: Dp) -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    // The caller removes safe drawing. Each pane gets half of that remaining
+    // width. Lyrics plus the control header/progress/primary row follow the
+    // portrait inset; the secondary function row spans the entire right pane.
+    BoxWithConstraints(modifier = modifier) {
+        val paneWidth = maxWidth / 2f
+        val artworkSize = compactLandscapeArtworkSize(
+            paneWidth = paneWidth,
+            availableHeight = maxHeight,
+        )
+        val pageContentWidth = compactLandscapePaneContentWidth(paneWidth)
+        Row(
+            modifier = Modifier.fillMaxSize(),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Box(
+                modifier = Modifier
+                    .weight(1f)
+                    .fillMaxHeight(),
+                contentAlignment = Alignment.Center,
+            ) {
+                artworkContent(artworkSize)
+            }
+            Box(
+                modifier = Modifier
+                    .weight(1f)
+                    .fillMaxHeight(),
+            ) {
+                HorizontalPager(
+                    state = pagerState,
+                    userScrollEnabled = lyricsPagingEnabled,
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .clipToBounds(),
+                    beyondViewportPageCount = 1,
+                    verticalAlignment = Alignment.CenterVertically,
+                    key = { it },
+                ) { page ->
+                    Box(
+                        modifier = Modifier.fillMaxSize(),
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        if (page == 0) {
+                            controlsContent(paneWidth, pageContentWidth)
+                        } else {
+                            lyricsContent(pageContentWidth, artworkSize)
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+internal data class PlayerVerticalSpacing(
+    val artworkToProgress: Dp = PLAYER_ARTWORK_PROGRESS_SPACING,
+    val progressToPrimary: Dp = PLAYER_PROGRESS_TO_PRIMARY_SPACING,
+    val controlGroup: Dp = PLAYER_CONTROL_GROUP_SPACING,
+    val headerToArtwork: Dp = PLAYER_HEADER_TO_CONTENT_SPACING,
+    val panelBottom: Dp = PLAYER_PANEL_BOTTOM_SPACING,
+)
+
+internal data class PlayerPrimaryControlLayout(
+    val previousIconOffset: Dp,
+    val playPauseIconOffset: Dp,
+    val nextIconOffset: Dp,
+    val previousTouchOffset: Dp,
+    val playPauseTouchOffset: Dp,
+    val nextTouchOffset: Dp,
+)
+
+internal fun playerPrimaryControlLayout(containerWidth: Dp): PlayerPrimaryControlLayout {
+    val equalVisualGap = (
+        containerWidth - PLAYER_SIDE_CONTROL_ICON_SIZE * 2f - PLAYER_PLAY_PAUSE_ICON_SIZE
+    ).coerceAtLeast(0.dp) / 4f
+    val minimumVisualGapForTouch = PLAYER_PRIMARY_CONTROL_MIN_TOUCH_GAP +
+        (PLAYER_SIDE_CONTROL_TOUCH_SIZE - PLAYER_SIDE_CONTROL_ICON_SIZE) / 2f +
+        (PLAYER_PLAY_PAUSE_TOUCH_SIZE - PLAYER_PLAY_PAUSE_ICON_SIZE) / 2f
+    val previousTouchOffset: Dp
+    val playPauseTouchOffset: Dp
+    val nextTouchOffset: Dp
+    if (equalVisualGap >= minimumVisualGapForTouch) {
+        previousTouchOffset = equalVisualGap -
+            (PLAYER_SIDE_CONTROL_TOUCH_SIZE - PLAYER_SIDE_CONTROL_ICON_SIZE) / 2f
+        playPauseTouchOffset = equalVisualGap * 2f + PLAYER_SIDE_CONTROL_ICON_SIZE -
+            (PLAYER_PLAY_PAUSE_TOUCH_SIZE - PLAYER_PLAY_PAUSE_ICON_SIZE) / 2f
+        nextTouchOffset = equalVisualGap * 3f +
+            PLAYER_SIDE_CONTROL_ICON_SIZE + PLAYER_PLAY_PAUSE_ICON_SIZE -
+            (PLAYER_SIDE_CONTROL_TOUCH_SIZE - PLAYER_SIDE_CONTROL_ICON_SIZE) / 2f
+    } else {
+        val touchGroupWidth = PLAYER_SIDE_CONTROL_TOUCH_SIZE * 2f +
+            PLAYER_PLAY_PAUSE_TOUCH_SIZE + PLAYER_PRIMARY_CONTROL_MIN_TOUCH_GAP * 2f
+        previousTouchOffset = ((containerWidth - touchGroupWidth) / 2f).coerceAtLeast(0.dp)
+        playPauseTouchOffset = previousTouchOffset +
+            PLAYER_SIDE_CONTROL_TOUCH_SIZE + PLAYER_PRIMARY_CONTROL_MIN_TOUCH_GAP
+        nextTouchOffset = playPauseTouchOffset +
+            PLAYER_PLAY_PAUSE_TOUCH_SIZE + PLAYER_PRIMARY_CONTROL_MIN_TOUCH_GAP
+    }
+    return PlayerPrimaryControlLayout(
+        previousIconOffset = previousTouchOffset +
+            (PLAYER_SIDE_CONTROL_TOUCH_SIZE - PLAYER_SIDE_CONTROL_ICON_SIZE) / 2f,
+        playPauseIconOffset = playPauseTouchOffset +
+            (PLAYER_PLAY_PAUSE_TOUCH_SIZE - PLAYER_PLAY_PAUSE_ICON_SIZE) / 2f,
+        nextIconOffset = nextTouchOffset +
+            (PLAYER_SIDE_CONTROL_TOUCH_SIZE - PLAYER_SIDE_CONTROL_ICON_SIZE) / 2f,
+        previousTouchOffset = previousTouchOffset,
+        playPauseTouchOffset = playPauseTouchOffset,
+        nextTouchOffset = nextTouchOffset,
+    )
+}
+
+internal enum class PlayerLayout {
+    PORTRAIT,
+    COMPACT_LANDSCAPE,
+    WIDE_TWO_PANE,
+}
+
+internal fun playerLayout(windowWidth: Dp, windowHeight: Dp): PlayerLayout = when {
+    windowWidth <= 0.dp || windowHeight <= 0.dp -> PlayerLayout.PORTRAIT
+    isMiuixWideLayout(windowWidth, windowHeight) && (
+        windowWidth < windowHeight || windowHeight >= PLAYER_WIDE_LANDSCAPE_MIN_HEIGHT
+    ) -> PlayerLayout.WIDE_TWO_PANE
+    windowWidth < windowHeight -> PlayerLayout.PORTRAIT
+    else -> PlayerLayout.COMPACT_LANDSCAPE
+}
+
+internal fun playerLyricsAreActive(
+    layout: PlayerLayout,
+    currentPage: Int,
+    targetPage: Int,
+): Boolean = layout == PlayerLayout.WIDE_TWO_PANE || currentPage == 1 || targetPage == 1
+
+internal fun usesWidePlayerLayout(windowWidth: Dp, windowHeight: Dp): Boolean =
+    playerLayout(windowWidth, windowHeight) == PlayerLayout.WIDE_TWO_PANE
+
+internal fun compactLandscapeArtworkSize(
+    paneWidth: Dp,
+    availableHeight: Dp,
+): Dp = fitPlayerArtworkSize(
+    preferredSize = paneWidth.coerceAtLeast(0.dp),
+    availableHeight = availableHeight,
+)
+
+internal fun compactLandscapePaneContentWidth(paneWidth: Dp): Dp =
+    playerContentWidth(paneWidth, PLAYER_PORTRAIT_CONTENT_MAX_WIDTH)
+
+internal fun compactLandscapeSidePadding(
+    ownSafeInset: Dp,
+    oppositeSafeInset: Dp,
+): Dp = (oppositeSafeInset - ownSafeInset).coerceAtLeast(0.dp)
+
+internal fun playerHeaderTopPadding(layout: PlayerLayout, safeTop: Dp): Dp =
+    safeTop.coerceAtLeast(0.dp) + when (layout) {
+        PlayerLayout.PORTRAIT -> PLAYER_HEADER_TOP_PADDING
+        PlayerLayout.COMPACT_LANDSCAPE -> 0.dp
+        PlayerLayout.WIDE_TWO_PANE -> PLAYER_LANDSCAPE_VERTICAL_PADDING
+    }
+
+internal fun landscapePlayerDesignContentWidth(availableWidth: Dp): Dp =
+    (availableWidth - PLAYER_WIDE_FIXED_START_INSET).coerceAtLeast(0.dp)
+
+internal fun landscapePlayerPlaybackPaneWidth(availableWidth: Dp): Dp = (
+    landscapePlayerDesignContentWidth(availableWidth) -
+        PLAYER_WIDE_LYRICS_PANE_WIDTH_EXPANSION - PLAYER_WIDE_PANE_SPACING_MAX
+).coerceAtLeast(0.dp)
+    .div(2f)
+    .coerceAtMost(PLAYER_WIDE_PLAYBACK_PANE_MAX_WIDTH)
+
+internal fun landscapePlayerLyricsPaneWidth(availableWidth: Dp): Dp = (
+    landscapePlayerPlaybackPaneWidth(availableWidth) +
+        PLAYER_WIDE_LYRICS_PANE_WIDTH_EXPANSION
+).coerceAtMost(landscapePlayerDesignContentWidth(availableWidth))
+
+internal fun landscapePlayerPaneSpacing(availableWidth: Dp): Dp {
+    val compressionFraction = (
+        (PLAYER_WIDE_PREFERRED_GROUP_WIDTH - availableWidth).value /
+            (PLAYER_WIDE_PREFERRED_GROUP_WIDTH -
+                PLAYER_WIDE_PANE_SPACING_COMPRESSION_END_WIDTH).value
+        ).coerceIn(0f, 1f)
+    return PLAYER_WIDE_PANE_SPACING_MAX -
+        (PLAYER_WIDE_PANE_SPACING_MAX - PLAYER_WIDE_PANE_SPACING_MIN) * compressionFraction
+}
+
+internal fun landscapePlayerLyricsContentWidth(lyricsPaneWidth: Dp): Dp =
+    (lyricsPaneWidth - PLAYER_WIDE_LYRICS_CONTENT_SIDE_INSET * 2f)
+        .coerceAtLeast(0.dp)
+
+internal fun landscapePlayerArtworkSize(availableWidth: Dp, availableHeight: Dp): Dp =
+    minOf(
+        playerUnboundedContentWidth(availableWidth),
+        availableHeight - LANDSCAPE_PLAYER_ARTWORK_VERTICAL_INSET * 2 -
+            PLAYER_ARTWORK_VERTICAL_FOOTPRINT_EXPANSION,
+    ).coerceAtLeast(0.dp)
+
+internal fun landscapePlayerArtworkAlignmentSize(availableWidth: Dp): Dp =
+    playerUnboundedContentWidth(availableWidth)
+
+internal fun playerArtworkSizeForContent(availableSize: Dp): Dp =
+    (availableSize - PLAYER_ARTWORK_HORIZONTAL_REDUCTION).coerceAtLeast(0.dp)
+
+internal fun playerArtworkContentSize(size: Dp, padding: Dp): Dp =
+    (size + PLAYER_ARTWORK_CONTAINER_EXPANSION - padding * 2f).coerceAtLeast(0.dp)
+
+internal fun playerArtworkAlignmentContentSize(size: Dp): Dp =
+    playerArtworkContentSize(size, PLAYER_ARTWORK_PLAYING_PADDING)
+
+internal val PLAYER_PORTRAIT_CONTENT_MAX_WIDTH = 560.dp
+
+internal fun playerContentWidth(availableWidth: Dp, maximumWidth: Dp): Dp =
+    (availableWidth - 56.dp).coerceIn(0.dp, maximumWidth)
+
+internal fun playerUnboundedContentWidth(availableWidth: Dp): Dp =
+    (availableWidth - 56.dp).coerceAtLeast(0.dp)
+
+internal fun playerVerticalSpacing(
+    availableHeight: Dp,
+    preferredArtworkSize: Dp,
+    panelBottom: Dp = PLAYER_PANEL_BOTTOM_SPACING,
+): PlayerVerticalSpacing = PlayerVerticalSpacing(
+    artworkToProgress = PLAYER_ARTWORK_PROGRESS_SPACING,
+    progressToPrimary = PLAYER_PROGRESS_TO_PRIMARY_SPACING,
+    controlGroup = PLAYER_CONTROL_GROUP_SPACING,
+    headerToArtwork = PLAYER_HEADER_TO_CONTENT_SPACING,
+    panelBottom = panelBottom,
+)
+
+// Landscape uses its dedicated cover/content relationship and 8 dp artwork gaps.
+internal fun landscapePlayerSpacing(): PlayerVerticalSpacing = PlayerVerticalSpacing(
+    artworkToProgress = LANDSCAPE_PLAYER_ARTWORK_TO_PROGRESS_SPACING,
+    progressToPrimary = PLAYER_PROGRESS_TO_PRIMARY_SPACING,
+    controlGroup = PLAYER_CONTROL_GROUP_SPACING,
+    headerToArtwork = LANDSCAPE_PLAYER_TITLE_TO_ARTWORK_SPACING,
+    panelBottom = PLAYER_WIDE_PANEL_BOTTOM_SPACING,
+)
+
+internal fun compactLandscapePlayerSpacing(): PlayerVerticalSpacing = PlayerVerticalSpacing(
+    artworkToProgress = PLAYER_ARTWORK_PROGRESS_SPACING,
+    progressToPrimary = PLAYER_PROGRESS_TO_PRIMARY_SPACING,
+    controlGroup = PLAYER_CONTROL_GROUP_SPACING,
+    headerToArtwork = PLAYER_HEADER_TO_CONTENT_SPACING,
+    panelBottom = 0.dp,
+)
+
+internal fun fitPlayerArtworkSize(preferredSize: Dp, availableHeight: Dp): Dp =
+    minOf(
+        preferredSize,
+        availableHeight - PLAYER_ARTWORK_VERTICAL_FOOTPRINT_EXPANSION,
+    ).coerceAtLeast(0.dp)
 
 @Composable
 private fun PlayerContentPager(
     pagerState: PagerState,
     lyrics: LyricsUiState,
     positionMs: Long,
+    positionUpdateElapsedRealtimeMs: Long,
+    playbackSpeed: Float,
     previewPositionMs: Long?,
     isPlaying: Boolean,
+    lyricsActive: Boolean,
     onSeek: (Long) -> Unit,
     contentWidth: Dp,
     controlColor: Color,
@@ -840,8 +1283,11 @@ private fun PlayerContentPager(
                 SyncedLyrics(
                     lyrics = lyrics,
                     positionMs = positionMs,
+                    positionUpdateElapsedRealtimeMs = positionUpdateElapsedRealtimeMs,
+                    playbackSpeed = playbackSpeed,
                     previewPositionMs = previewPositionMs,
                     isPlaying = isPlaying,
+                    active = lyricsActive,
                     onSeek = onSeek,
                     contentWidth = contentWidth,
                     controlColor = controlColor,
@@ -868,8 +1314,11 @@ private fun PlayerContentPager(
 private fun SyncedLyrics(
     lyrics: LyricsUiState,
     positionMs: Long,
+    positionUpdateElapsedRealtimeMs: Long,
+    playbackSpeed: Float,
     previewPositionMs: Long?,
     isPlaying: Boolean,
+    active: Boolean,
     onSeek: (Long) -> Unit,
     contentWidth: Dp,
     controlColor: Color,
@@ -945,8 +1394,10 @@ private fun SyncedLyrics(
                     LyricsView(
                         document = document,
                         positionMs = positionMs,
+                        positionUpdateElapsedRealtimeMs = positionUpdateElapsedRealtimeMs,
+                        playbackSpeed = playbackSpeed,
                         previewPositionMs = previewPositionMs,
-                        isPlaying = isPlaying,
+                        isPlaying = isPlaying && active,
                         onSeek = onSeek,
                         contentWidth = contentWidth,
                         lyricFontScale = lyricFontScale,
@@ -1014,9 +1465,15 @@ private fun PlayerSettingsSheet(
         enableWindowDim = true,
         onDismissRequest = onDismiss,
     ) {
+        val scrollState = rememberScrollState()
         Column(
             modifier = Modifier
                 .fillMaxWidth()
+                .overScrollVertical(
+                    nestedScrollToParent = false,
+                    isEnabled = { scrollState.maxValue > 0 },
+                )
+                .verticalScroll(scrollState, overscrollEffect = null)
                 .padding(bottom = bottomPadding + 12.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {
@@ -1237,33 +1694,23 @@ internal fun sliderValueAtPosition(
 @Composable
 private fun PlayerArtwork(
     size: Dp,
-    playWhenReady: Boolean,
+    artworkPadding: Dp,
     artworkBlend: ArtworkBlend,
     cornerRadius: Dp,
     sharedArtworkVisible: Boolean,
     onArtworkBoundsChanged: (Rect) -> Unit,
 ) {
-    val artworkPadding by animateDpAsState(
-        targetValue = if (playWhenReady) {
-            PLAYER_ARTWORK_PLAYING_PADDING
-        } else {
-            PLAYER_ARTWORK_PAUSED_PADDING
-        },
-        animationSpec = spring(
-            dampingRatio = 0.6f,
-            stiffness = 200f,
-        ),
-        label = "playerArtworkPadding",
-    )
     val artworkContainerSize = size + PLAYER_ARTWORK_CONTAINER_EXPANSION
     val artworkContentSize =
         (artworkContainerSize - artworkPadding * 2f).coerceAtLeast(0.dp)
     val density = LocalDensity.current
     var artworkLayoutBounds by remember { mutableStateOf(Rect.Zero) }
-    SideEffect {
-        if (artworkLayoutBounds.width > 0f && artworkLayoutBounds.height > 0f) {
+    val artworkWindowSize = LocalWindowInfo.current.containerSize
+    var boundsWindowSize by remember { mutableStateOf(artworkWindowSize) }
+    fun reportArtworkBounds(bounds: Rect) {
+        if (bounds.width > 0f && bounds.height > 0f) {
             val insetArtworkBounds = artworkInsetRect(
-                bounds = artworkLayoutBounds,
+                bounds = bounds,
                 inset = with(density) { artworkPadding.toPx() },
             )
             val visibleArtworkBounds = artworkBlend.currentBitmap?.let { bitmap ->
@@ -1276,11 +1723,16 @@ private fun PlayerArtwork(
             onArtworkBoundsChanged(visibleArtworkBounds)
         }
     }
+    SideEffect {
+        if (boundsWindowSize == artworkWindowSize) reportArtworkBounds(artworkLayoutBounds)
+    }
     Box(
         modifier = Modifier
             .size(artworkContainerSize)
             .onGloballyPositioned { coordinates ->
                 artworkLayoutBounds = coordinates.boundsInRoot()
+                boundsWindowSize = artworkWindowSize
+                reportArtworkBounds(artworkLayoutBounds)
             }
             .graphicsLayer {
                 alpha = if (sharedArtworkVisible) 1f else 0f
@@ -1338,6 +1790,8 @@ private fun PlayerHeader(
     titleColor: Color,
     artistColor: Color,
     leftAligned: Boolean,
+    titleSlotHeight: Dp,
+    artistSlotHeight: Dp,
     modifier: Modifier = Modifier,
 ) {
     val header = PlayerHeaderContent(
@@ -1366,7 +1820,7 @@ private fun PlayerHeader(
             Box(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .height(PLAYER_HEADER_TITLE_SLOT_HEIGHT),
+                    .heightIn(min = titleSlotHeight),
                 contentAlignment = if (leftAligned) Alignment.CenterStart else Alignment.Center,
             ) {
                 Box(
@@ -1419,7 +1873,7 @@ private fun PlayerHeader(
             Box(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .height(PLAYER_HEADER_ARTIST_SLOT_HEIGHT),
+                    .heightIn(min = artistSlotHeight),
                 contentAlignment = if (leftAligned) Alignment.CenterStart else Alignment.Center,
             ) {
                 Text(
@@ -1455,7 +1909,6 @@ private fun Modifier.expandLeftForMarquee(extra: Dp): Modifier = layout { measur
 private fun PlayerDetails(
     contentWidth: Dp,
     playback: PlaybackUiState,
-    controlColor: Color,
     emphasisControlColor: Color,
     onTogglePlayPause: () -> Unit,
     onPrevious: () -> Unit,
@@ -1467,7 +1920,13 @@ private fun PlayerDetails(
     onOpenQueue: () -> Unit,
     onOpenTrackActions: () -> Unit,
     modifier: Modifier = Modifier,
+    primaryControlsWidth: Dp = contentWidth,
+    secondaryControlsWidth: Dp = contentWidth,
+    spacing: PlayerVerticalSpacing = PlayerVerticalSpacing(),
 ) {
+    val progressIndicatorColor = emphasisControlColor.copy(alpha = 0.6f)
+    val progressLabelColor = emphasisControlColor.copy(alpha = 0.6f)
+    val secondaryControlColor = emphasisControlColor.copy(alpha = 0.6f)
     Box(
         modifier = modifier,
     ) {
@@ -1484,26 +1943,31 @@ private fun PlayerDetails(
                     positionMs = playback.positionMs,
                     durationMs = playback.durationMs,
                     enabled = playback.currentItem != null,
-                    indicatorColor = emphasisControlColor,
-                    labelColor = controlColor,
+                    indicatorColor = progressIndicatorColor,
+                    labelColor = progressLabelColor,
+                    primaryControlSpacing = spacing.progressToPrimary,
                     onSeek = onSeek,
                     onPreviewPositionChange = onPreviewPositionChange,
                 )
             }
-            Row(
-                modifier = Modifier.width(minOf(contentWidth, 320.dp)),
-                horizontalArrangement = Arrangement.SpaceEvenly,
-                verticalAlignment = Alignment.CenterVertically,
+            BoxWithConstraints(
+                modifier = Modifier
+                    .width(primaryControlsWidth)
+                    .height(PLAYER_PLAY_PAUSE_TOUCH_SIZE),
             ) {
+                val layout = playerPrimaryControlLayout(maxWidth)
                 IconButton(
                     onClick = onPrevious,
-                    minWidth = 64.dp,
-                    minHeight = 64.dp,
+                    modifier = Modifier
+                        .align(Alignment.CenterStart)
+                        .offset(x = layout.previousTouchOffset),
+                    minWidth = PLAYER_SIDE_CONTROL_TOUCH_SIZE,
+                    minHeight = PLAYER_SIDE_CONTROL_TOUCH_SIZE,
                 ) {
                     Icon(
                         painter = painterResource(R.drawable.ic_player_previous_track),
                         contentDescription = stringResource(R.string.previous_track),
-                        modifier = Modifier.size(26.dp),
+                        modifier = Modifier.size(PLAYER_SIDE_CONTROL_ICON_SIZE),
                         tint = emphasisControlColor,
                     )
                 }
@@ -1511,48 +1975,59 @@ private fun PlayerDetails(
                     playWhenReady = playback.playWhenReady,
                     tint = emphasisControlColor,
                     onClick = onTogglePlayPause,
+                    modifier = Modifier
+                        .align(Alignment.CenterStart)
+                        .offset(x = layout.playPauseTouchOffset),
                 )
                 IconButton(
                     onClick = onNext,
-                    minWidth = 64.dp,
-                    minHeight = 64.dp,
+                    modifier = Modifier
+                        .align(Alignment.CenterStart)
+                        .offset(x = layout.nextTouchOffset),
+                    minWidth = PLAYER_SIDE_CONTROL_TOUCH_SIZE,
+                    minHeight = PLAYER_SIDE_CONTROL_TOUCH_SIZE,
                 ) {
                     Icon(
                         painter = painterResource(R.drawable.ic_player_next_track),
                         contentDescription = stringResource(R.string.next_track),
-                        modifier = Modifier.size(26.dp),
+                        modifier = Modifier.size(PLAYER_SIDE_CONTROL_ICON_SIZE),
                         tint = emphasisControlColor,
                     )
                 }
             }
-            Spacer(Modifier.height(PLAYER_CONTROL_GROUP_SPACING))
+            Spacer(Modifier.height(spacing.controlGroup))
             Row(
-                modifier = Modifier.fillMaxWidth(),
+                modifier = Modifier.width(secondaryControlsWidth),
                 horizontalArrangement = Arrangement.SpaceEvenly,
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 PlaybackModeButton(
                     mode = playback.playbackMode,
-                    tint = controlColor,
+                    tint = secondaryControlColor,
                     onClick = onCyclePlaybackMode,
                 )
-                PlayerIconButton(
-                    icon = MiuixIcons.ConvertFile,
-                    description = stringResource(R.string.player_settings_open),
-                    tint = controlColor,
+                IconButton(
                     onClick = onOpenLyricsSettings,
-                )
+                ) {
+                    Icon(
+                        imageVector = MiuixIcons.Tune,
+                        contentDescription = stringResource(R.string.player_settings_open),
+                        modifier = Modifier.size(24.dp),
+                        tint = secondaryControlColor,
+                    )
+                }
                 PlayerIconButton(
                     icon = MiuixIcons.Playlist,
                     description = stringResource(R.string.open_queue),
-                    tint = controlColor,
+                    size = 24.dp,
+                    tint = secondaryControlColor,
                     onClick = onOpenQueue,
                 )
                 PlayerIconButton(
                     icon = MiuixIcons.More,
                     description = stringResource(R.string.track_actions),
-                    size = 24.dp,
-                    tint = controlColor,
+                    size = 23.dp,
+                    tint = secondaryControlColor,
                     onClick = onOpenTrackActions,
                 )
             }
@@ -1565,11 +2040,13 @@ private fun AnimatedPlayPauseButton(
     playWhenReady: Boolean,
     tint: Color,
     onClick: () -> Unit,
+    modifier: Modifier = Modifier,
 ) {
     IconButton(
         onClick = onClick,
-        minWidth = 80.dp,
-        minHeight = 80.dp,
+        modifier = modifier,
+        minWidth = PLAYER_PLAY_PAUSE_TOUCH_SIZE,
+        minHeight = PLAYER_PLAY_PAUSE_TOUCH_SIZE,
     ) {
         AnimatedContent(
             targetState = playWhenReady,
@@ -1581,7 +2058,7 @@ private fun AnimatedPlayPauseButton(
                     if (playing) R.drawable.ic_player_pause else R.drawable.ic_player_play,
                 ),
                 contentDescription = stringResource(if (playing) R.string.pause else R.string.play),
-                modifier = Modifier.size(42.dp),
+                modifier = Modifier.size(PLAYER_PLAY_PAUSE_ICON_SIZE),
                 tint = tint,
             )
         }
@@ -1596,43 +2073,21 @@ private fun PlaybackModeButton(
 ) {
     IconButton(
         onClick = onClick,
-        minWidth = 36.dp,
-        minHeight = 36.dp,
     ) {
-        Box(contentAlignment = Alignment.Center) {
-            when (mode) {
-                PlaybackMode.ORDER -> Icon(
-                    imageVector = MiuixIcons.Replace,
-                    contentDescription = stringResource(R.string.playback_mode_order),
-                    modifier = Modifier
-                        .size(26.dp)
-                        .graphicsLayer { scaleX = -1f },
-                    tint = tint,
-                )
-                PlaybackMode.REPEAT_ONE -> Icon(
-                    imageVector = MiuixIcons.Replace,
-                    contentDescription = stringResource(R.string.playback_mode_repeat_one),
-                    modifier = Modifier
-                        .size(26.dp)
-                        .graphicsLayer { scaleX = -1f },
-                    tint = tint,
-                )
-                PlaybackMode.RANDOM -> Icon(
-                    painter = painterResource(R.drawable.ic_player_shuffle),
-                    contentDescription = stringResource(R.string.playback_mode_random),
-                    modifier = Modifier.size(22.dp),
-                    tint = tint,
-                )
-            }
-            if (mode == PlaybackMode.REPEAT_ONE) {
-                Text(
-                    text = stringResource(R.string.playback_mode_one_badge),
-                    style = MiuixTheme.textStyles.footnote2,
-                    color = tint,
-                    fontWeight = FontWeight.Bold,
-                )
-            }
+        val (icon, description) = when (mode) {
+            PlaybackMode.ORDER -> R.drawable.ic_player_repeat_all to
+                R.string.playback_mode_order
+            PlaybackMode.REPEAT_ONE -> R.drawable.ic_player_repeat_one to
+                R.string.playback_mode_repeat_one
+            PlaybackMode.RANDOM -> R.drawable.ic_player_shuffle to
+                R.string.playback_mode_random
         }
+        Icon(
+            painter = painterResource(icon),
+            contentDescription = stringResource(description),
+            modifier = Modifier.size(24.dp),
+            tint = tint,
+        )
     }
 }
 
@@ -1643,6 +2098,7 @@ private fun PlayerProgress(
     enabled: Boolean,
     indicatorColor: Color,
     labelColor: Color,
+    primaryControlSpacing: Dp,
     onSeek: (Long) -> Unit,
     onPreviewPositionChange: (Long?) -> Unit,
 ) {
@@ -1676,7 +2132,7 @@ private fun PlayerProgress(
     Box(
         modifier = Modifier
             .fillMaxWidth()
-            .height(PLAYER_PROGRESS_LAYOUT_HEIGHT),
+            .height(playerProgressLayoutHeight(primaryControlSpacing)),
     ) {
         BoxWithConstraints(
             modifier = Modifier
@@ -1746,12 +2202,12 @@ private fun PlayerProgress(
                     foregroundColor = if (enabled) {
                         indicatorColor
                     } else {
-                        indicatorColor.copy(alpha = indicatorColor.alpha * 0.55f)
+                        indicatorColor.copy(alpha = indicatorColor.alpha * 0.6f)
                     },
                     disabledForegroundColor =
-                        indicatorColor.copy(alpha = indicatorColor.alpha * 0.55f),
+                        indicatorColor.copy(alpha = indicatorColor.alpha * 0.5f),
                     backgroundColor =
-                        indicatorColor.copy(alpha = indicatorColor.alpha * 0.28f),
+                        indicatorColor.copy(alpha = 0.3f),
                 ),
                 height = indicatorHeight,
                 modifier = Modifier
@@ -1788,8 +2244,6 @@ private fun PlayerIconButton(
 ) {
     IconButton(
         onClick = onClick,
-        minWidth = 36.dp,
-        minHeight = 36.dp,
     ) {
         Icon(
             imageVector = icon,
@@ -1817,44 +2271,91 @@ private const val MIN_LYRIC_FONT_WEIGHT = 100
 private const val MAX_LYRIC_FONT_WEIGHT = 900
 // 歌词设置区域：100 至 900 字重的可选档位数。
 private const val LYRICS_FONT_WEIGHT_STEP_COUNT = 7
+// 播放页标题跑马灯：重复内容之间占标题可用宽度的间距比例。
 private const val PLAYER_HEADER_MARQUEE_SPACING_FRACTION = 0.15f
+// 播放页标题跑马灯：标题两端的渐隐宽度。
 private val PLAYER_HEADER_TITLE_EDGE_FADE_WIDTH = 12.dp
+
+// 宽屏播放页：固定 24 dp 作为双栏组的首项，整个组在页面中居中。
+private val PLAYER_WIDE_FIXED_START_INSET = 24.dp
+// 宽屏播放页：左侧播放列的最大宽度。
+private val PLAYER_WIDE_PLAYBACK_PANE_MAX_WIDTH = 500.dp
+// 宽屏播放页：歌词列相对播放列的固定宽度增量。
+private val PLAYER_WIDE_LYRICS_PANE_WIDTH_EXPANSION = 96.dp
+// 宽屏播放页：播放栏与歌词栏之间的可调间距范围。
+private val PLAYER_WIDE_PANE_SPACING_MAX = 32.dp
+private val PLAYER_WIDE_PANE_SPACING_MIN = 12.dp
+// 宽屏播放页：双栏组触及左边缘后，间距压缩到最小值的终止宽度。
+private val PLAYER_WIDE_PANE_SPACING_COMPRESSION_END_WIDTH = 600.dp
+private val PLAYER_WIDE_PREFERRED_GROUP_WIDTH =
+    PLAYER_WIDE_FIXED_START_INSET +
+        PLAYER_WIDE_PLAYBACK_PANE_MAX_WIDTH * 2f +
+        PLAYER_WIDE_LYRICS_PANE_WIDTH_EXPANSION +
+        PLAYER_WIDE_PANE_SPACING_MAX
+// 宽屏播放页：歌词栏内容两侧的固定内缩。
+private val PLAYER_WIDE_LYRICS_CONTENT_SIDE_INSET = 32.dp
+// 宽屏播放页：双栏区域的上下内边距。
+private val PLAYER_LANDSCAPE_VERTICAL_PADDING = 24.dp
+// 播放页：功能行到页面底边的固定间距。
+private val PLAYER_CONTENT_BOTTOM_SPACING = 32.dp
+// 紧凑横屏播放页：标题区域下边缘到主控制区上边缘的间距。
+private val COMPACT_LANDSCAPE_HEADER_TO_CONTROLS_SPACING = 36.dp
+
+// 横屏窗口只有在可用高度达到阈值时才启用双栏播放页。
+private val PLAYER_WIDE_LANDSCAPE_MIN_HEIGHT = 600.dp
+
+// 横屏封面：上下预留的固定内缩量。
+private val LANDSCAPE_PLAYER_ARTWORK_VERTICAL_INSET = 64.dp
+// 横屏封面：标题槽位下边缘到封面上边缘的间距。
+private val LANDSCAPE_PLAYER_TITLE_TO_ARTWORK_SPACING = 12.dp
+// 横屏封面：封面下边缘到进度条上边缘的间距。
+private val LANDSCAPE_PLAYER_ARTWORK_TO_PROGRESS_SPACING = 12.dp
+// 宽屏播放页：左侧播放列功能行下边缘到该列底部的间距。
+private val PLAYER_WIDE_PANEL_BOTTOM_SPACING = 0.dp
+// 播放页封面：内容尺寸相对测量可用尺寸的水平缩减量。
+private val PLAYER_ARTWORK_HORIZONTAL_REDUCTION = 6.dp
 
 // 播放页封面区域：播放状态下封面四周内边距。
 private val PLAYER_ARTWORK_PLAYING_PADDING = 6.dp
 // 播放页封面区域：暂停状态下封面四周内边距。
-private val PLAYER_ARTWORK_PAUSED_PADDING = 30.dp
+private val PLAYER_ARTWORK_PAUSED_PADDING = 24.dp
 // 播放页封面区域：外层容器相对封面的宽高总扩展量。
 private val PLAYER_ARTWORK_CONTAINER_EXPANSION = 12.dp
+// 播放页封面：垂直占用范围的总扩展量，取容器扩展量与阴影模糊直径中的较大值。
+private val PLAYER_ARTWORK_VERTICAL_FOOTPRINT_EXPANSION =
+    maxOf(
+        PLAYER_ARTWORK_CONTAINER_EXPANSION,
+        PLAYBACK_ARTWORK_SHADOW_BLUR_RADIUS * 2f,
+    )
 
 // 播放页标题区：安全区以下的顶部间距。
 private val PLAYER_HEADER_TOP_PADDING = 16.dp
-// 播放页标题区：标题区到封面内容区的间距。
+// 播放页标题区：标题槽位到内容区的间距。
 private val PLAYER_HEADER_TO_CONTENT_SPACING = 12.dp
 // 播放页标题区：歌名文本行高。
 private val PLAYER_HEADER_TITLE_LINE_HEIGHT = 32.sp
 // 播放页标题区：歌手名文本行高。
 private val PLAYER_HEADER_ARTIST_LINE_HEIGHT = 20.sp
-// 播放页标题区：歌名固定单行槽位高度。
-private val PLAYER_HEADER_TITLE_SLOT_HEIGHT = 32.dp
-// 播放页标题区：歌手名固定单行槽位高度。
-private val PLAYER_HEADER_ARTIST_SLOT_HEIGHT = 20.dp
-// 播放页标题区：歌名与歌手名槽位之间保留 1 dp 间隔。
-private val PLAYER_HEADER_CONTENT_HEIGHT =
-    PLAYER_HEADER_TITLE_SLOT_HEIGHT + 1.dp + PLAYER_HEADER_ARTIST_SLOT_HEIGHT
-
-// 播放页控制区：封面底部到进度条的间距。
+// 播放页控制区：封面内容下边缘到进度条上边缘的间距。
 private val PLAYER_ARTWORK_PROGRESS_SPACING = 16.dp
-// 播放页控制区：进度条实际下边缘到主控制行的间距。
+// 播放页主控制：前后曲目图标和播放图标的可见布局尺寸。
+private val PLAYER_SIDE_CONTROL_ICON_SIZE = 26.dp
+private val PLAYER_PLAY_PAUSE_ICON_SIZE = 42.dp
+// 播放页主控制：前后曲目和播放按钮的最小按压区域。
+private val PLAYER_SIDE_CONTROL_TOUCH_SIZE = 56.dp
+private val PLAYER_PLAY_PAUSE_TOUCH_SIZE = 72.dp
+// 播放页主控制：相邻按压区域之间的最小水平间距。
+private val PLAYER_PRIMARY_CONTROL_MIN_TOUCH_GAP = 12.dp
+// 播放页控制区：进度条实际指示条下边缘到主控制行上边缘的间距。
 private val PLAYER_PROGRESS_TO_PRIMARY_SPACING = 32.dp
-// 播放页控制区：主控制行到下方功能按钮行的间距。
-private val PLAYER_CONTROL_GROUP_SPACING = 16.dp
-// 播放页控制区：底部功能按钮行到面板底边的间距。
+// 播放页控制区：主控制行下边缘到功能行上边缘的间距。
+private val PLAYER_CONTROL_GROUP_SPACING = 20.dp
+// 播放页控制区：功能行下边缘到播放面板底边的间距。
 private val PLAYER_PANEL_BOTTOM_SPACING = 32.dp
 // 播放页进度条区域：未触摸时实际指示条高度。
 private val PLAYER_PROGRESS_IDLE_HEIGHT = 6.dp
 // 播放页进度条区域：拖动进度条的触摸目标高度。
-private val PLAYER_PROGRESS_TOUCH_HEIGHT = 26.dp
+private val PLAYER_PROGRESS_TOUCH_HEIGHT = 24.dp
 // 播放页进度条区域：时间文本与实际指示条下边缘的间距。
 private val PLAYER_PROGRESS_TIME_SPACING = 8.dp
 // 播放页进度条区域：实际指示条下边缘相对触摸目标顶部的偏移。
@@ -1864,5 +2365,5 @@ private val PLAYER_PROGRESS_IDLE_BOTTOM =
 private val PLAYER_PROGRESS_LABEL_OFFSET =
     PLAYER_PROGRESS_IDLE_BOTTOM + PLAYER_PROGRESS_TIME_SPACING
 // 播放页进度条区域：进度条容器总高度，保证主控制行距实际条下边缘 32 dp。
-private val PLAYER_PROGRESS_LAYOUT_HEIGHT =
-    PLAYER_PROGRESS_IDLE_BOTTOM + PLAYER_PROGRESS_TO_PRIMARY_SPACING
+private fun playerProgressLayoutHeight(primaryControlSpacing: Dp): Dp =
+    PLAYER_PROGRESS_IDLE_BOTTOM + primaryControlSpacing

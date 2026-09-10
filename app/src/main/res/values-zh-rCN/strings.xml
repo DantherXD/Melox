@@ -1,4 +1,14 @@
 <resources>
+    <string name="selection_selected_count">已选择 %1$d 首</string>
+    <string name="selection_choose_songs">请选择歌曲</string>
+    <string name="selection_select_all">全选</string>
+    <string name="selection_deselect_all">取消全选</string>
+    <string name="selection_add_to_playlist">将所选歌曲添加到歌单</string>
+    <string name="selection_remove_from_playlist">从歌单移出所选歌曲</string>
+    <string name="playlist_remove_selected_title">从歌单移除</string>
+    <string name="playlist_remove_selected_message">确定移除已选的%1$d首歌曲吗?</string>
+    <string name="playlist_remove_selected_cancel">取消</string>
+    <string name="playlist_remove_selected_confirm">确认</string>
     <string name="app_name">Melox</string>
 
     <string name="navigation_home">首页</string>
@@ -8,8 +18,38 @@
     <string name="navigation_artists">艺术家</string>
     <string name="navigation_folders">文件夹</string>
     <string name="navigation_settings">设置</string>
+    <string name="navigation_expand">展开导航</string>
+    <string name="navigation_collapse">收起导航</string>
     <string name="home_recommendation_title">随机推荐</string>
+    <string name="home_recommendation_empty_description">扫描到歌曲后可查看随机推荐</string>
     <string name="home_recently_added_title">最近添加</string>
+    <string name="home_playlists_title">歌单</string>
+    <string name="playlist_create">创建歌单</string>
+    <string name="playlist_create_title">新建歌单</string>
+    <string name="playlist_name_hint">歌单名称</string>
+    <string name="playlist_rename">重命名</string>
+    <string name="playlist_rename_title">重命名歌单</string>
+    <string name="playlist_delete">删除歌单</string>
+    <string name="playlist_delete_title">删除歌单</string>
+    <string name="playlist_delete_message">是否删除“%1$s”？</string>
+    <string name="playlist_add_to">添加到歌单</string>
+    <string name="playlist_added_to">已添加到歌单%1$s</string>
+    <string name="playlist_picker_title">添加到歌单</string>
+    <string name="playlist_empty">暂无歌单</string>
+    <string name="playlist_empty_description">可创建歌单对内容进行整理分类</string>
+    <string name="playlist_detail_empty">歌单中暂无歌曲</string>
+    <string name="playlist_unavailable">不可用</string>
+    <string name="playlist_remove_song">从歌单移除</string>
+    <string name="playlist_sort_action">歌单排序</string>
+    <string name="playlist_sort_custom">自定义</string>
+    <string name="playlist_more_actions">歌单操作</string>
+    <string name="playlist_add_collection">全部添加到歌单</string>
+    <plurals name="playlist_song_count">
+        <item quantity="other">%1$d 首歌曲</item>
+    </plurals>
+    <plurals name="playlist_card_song_count">
+        <item quantity="other">%1$d首</item>
+    </plurals>
 
     <string name="music_artist_album">%1$s - %2$s</string>
     <string name="music_play_track_action">播放%1$s</string>
@@ -128,6 +168,10 @@
     <string name="playback_mode_order">顺序播放</string>
     <string name="playback_mode_repeat_one">单曲循环</string>
     <string name="playback_mode_random">随机队列</string>
+    <string name="notification_playback_mode_list_loop">列表循环</string>
+    <string name="notification_playback_mode_repeat_one">单曲循环</string>
+    <string name="notification_playback_mode_shuffle">随机循环</string>
+    <string name="notification_close">关闭</string>
     <string name="track_actions">歌曲操作</string>
     <string name="open_queue">打开队列</string>
     <string name="playback_queue">播放队列</string>
@@ -138,6 +182,8 @@
     <string name="clear_queue_confirm_confirm">确认</string>
     <string name="queue_empty">队列为空</string>
     <string name="remove_from_queue">从队列移除</string>
+    <string name="move_after_current">置顶</string>
+    <string name="locate_current_track">定位当前歌曲</string>
     <string name="back">返回</string>
     <string name="close">关闭</string>
 
@@ -210,6 +256,9 @@
     <string name="scan_remove_blocked_folder_title">移出</string>
     <string name="scan_remove_blocked_folder_message">是否将 %1$s 文件夹移出屏蔽？</string>
     <string name="scan_start">开始扫描</string>
+    <string name="scan_clear_library">清空音乐库</string>
+    <string name="scan_clear_library_confirm_title">清空音乐库</string>
+    <string name="scan_clear_library_confirm_message">是否清空所有已扫描音乐</string>
     <string name="scan_no_changes">音乐文件无变化</string>
     <plurals name="scan_complete">
         <item quantity="other">扫描完成，共%1$d首歌曲</item>

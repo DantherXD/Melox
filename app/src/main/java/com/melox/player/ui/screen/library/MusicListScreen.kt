@@ -1,16 +1,21 @@
 package com.melox.player.ui.screen.library
 
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.calculateEndPadding
 import androidx.compose.foundation.layout.calculateStartPadding
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -18,6 +23,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.platform.LocalLayoutDirection
 import androidx.compose.ui.res.stringResource
@@ -33,9 +39,13 @@ import com.melox.player.ui.component.library.AlphabetSections
 import com.melox.player.ui.component.library.AlphabetSideBar
 import com.melox.player.ui.component.library.MusicTrackRow
 import com.melox.player.ui.component.library.TrackActionsOverlay
+import com.melox.player.ui.component.library.toggleTrackSelection
 import top.yukonga.miuix.kmp.basic.InfiniteProgressIndicator
+import top.yukonga.miuix.kmp.basic.Icon
 import top.yukonga.miuix.kmp.basic.ScrollBehavior
 import top.yukonga.miuix.kmp.basic.Text
+import top.yukonga.miuix.kmp.icon.MiuixIcons
+import top.yukonga.miuix.kmp.icon.extended.Music
 import top.yukonga.miuix.kmp.theme.MiuixTheme
 import top.yukonga.miuix.kmp.utils.overScrollVertical
 import top.yukonga.miuix.kmp.utils.scrollEndHaptic
@@ -52,6 +62,7 @@ fun MusicListScreen(
     sortConfig: MusicSortConfig,
     onPlayNext: (MusicTrack) -> Unit,
     onAppendToQueue: (MusicTrack) -> Unit,
+    onAddToPlaylist: (MusicTrack) -> Unit,
     onGoToAlbum: (MusicTrack) -> Unit,
     artistGroups: List<ArtistGroup>,
     onGoToArtist: (ArtistGroup) -> Unit,
@@ -63,6 +74,10 @@ fun MusicListScreen(
     contentPadding: PaddingValues = PaddingValues(),
     showIndex: Boolean = true,
     indexBottomSpacing: Dp = 12.dp,
+    selectionMode: Boolean = false,
+    selectedTrackUris: Set<String> = emptySet(),
+    onSelectionChange: ((Set<String>) -> Unit)? = null,
+    onSelectionModeChange: ((Boolean) -> Unit)? = null,
 ) {
     val layoutDirection = LocalLayoutDirection.current
     var selectedTrack by remember { mutableStateOf<MusicTrack?>(null) }
@@ -77,6 +92,17 @@ fun MusicListScreen(
     }
     val sections = remember(sortConfig.descending) {
         if (sortConfig.descending) AlphabetSections.asReversed() else AlphabetSections
+    }
+    val displayedTrackUris = remember(displayedTracks) {
+        displayedTracks.map(MusicTrack::contentUri).toSet()
+    }
+    LaunchedEffect(displayedTrackUris, selectedTrackUris) {
+        if (selectedTrackUris.isNotEmpty()) {
+            val retainedSelection = selectedTrackUris intersect displayedTrackUris
+            if (retainedSelection != selectedTrackUris) {
+                onSelectionChange?.invoke(retainedSelection)
+            }
+        }
     }
 
     Box(
@@ -109,16 +135,31 @@ fun MusicListScreen(
                         track = track,
                         isCurrent = track.id == currentTrackId,
                         onClick = {
-                            resolveMusicPlaybackSelection(
-                                displayedTracks = displayedTracks,
-                                queueTracks = queueTracks,
-                                query = query,
-                                selectedIndex = index,
-                            )?.let { (playbackTracks, playbackIndex) ->
-                                onTrackClick(playbackTracks, playbackIndex)
+                            if (selectionMode) {
+                                onSelectionChange?.invoke(
+                                    toggleTrackSelection(selectedTrackUris, track.contentUri),
+                                )
+                            } else {
+                                resolveMusicPlaybackSelection(
+                                    displayedTracks = displayedTracks,
+                                    queueTracks = queueTracks,
+                                    query = query,
+                                    selectedIndex = index,
+                                )?.let { (playbackTracks, playbackIndex) ->
+                                    onTrackClick(playbackTracks, playbackIndex)
+                                }
                             }
                         },
                         onMoreClick = { selectedTrack = track },
+                        selectionMode = selectionMode,
+                        selected = track.contentUri in selectedTrackUris,
+                        onLongClick = onSelectionChange?.let { selectionChange ->
+                            {
+                                selectedTrack = null
+                                onSelectionModeChange?.invoke(true)
+                                selectionChange(selectedTrackUris + track.contentUri)
+                            }
+                        },
                     )
                 }
             }
@@ -172,6 +213,7 @@ fun MusicListScreen(
         onDismiss = { selectedTrack = null },
         onPlayNext = onPlayNext,
         onAppendToQueue = onAppendToQueue,
+        onAddToPlaylist = onAddToPlaylist,
         onGoToAlbum = onGoToAlbum,
         artistGroups = artistGroups,
         onGoToArtist = onGoToArtist,
@@ -212,13 +254,13 @@ private fun EmptyMusicState(
 
             MusicLibraryPlaceholder.Error,
             MusicLibraryPlaceholder.Empty,
-            -> Text(
+            -> MusicLibraryEmptyMessage(
+                icon = MiuixIcons.Music,
                 text = when {
                     query.isNotBlank() -> stringResource(R.string.music_no_search_results)
                     scanStatus is ScanStatus.Error -> stringResource(R.string.music_scan_failed)
                     else -> stringResource(R.string.music_empty_after_scan)
                 },
-                color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
             )
         }
     }
@@ -230,6 +272,7 @@ internal fun MusicLibraryEmptyState(
     query: String,
     emptyMessageRes: Int,
     noSearchResultsRes: Int,
+    icon: ImageVector,
     modifier: Modifier = Modifier,
 ) {
     Box(
@@ -243,13 +286,33 @@ internal fun MusicLibraryEmptyState(
 
             MusicLibraryPlaceholder.Error,
             MusicLibraryPlaceholder.Empty,
-            -> Text(
+            -> MusicLibraryEmptyMessage(
+                icon = icon,
                 text = stringResource(
                     if (query.isBlank()) emptyMessageRes else noSearchResultsRes,
                 ),
-                color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
             )
         }
+    }
+}
+
+@Composable
+private fun MusicLibraryEmptyMessage(
+    icon: ImageVector,
+    text: String,
+) {
+    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+        Icon(
+            imageVector = icon,
+            contentDescription = null,
+            tint = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+            modifier = Modifier.size(48.dp),
+        )
+        Spacer(Modifier.height(12.dp))
+        Text(
+            text = text,
+            color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+        )
     }
 }
 

@@ -3,7 +3,6 @@ package com.melox.player.ui.component.playback
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.tween
-import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.foundation.interaction.MutableInteractionSource
@@ -19,7 +18,6 @@ import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -31,7 +29,6 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.draw.drawWithContent
 import androidx.compose.ui.graphics.BlendMode
@@ -55,6 +52,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
+import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.melox.player.R
@@ -76,6 +74,8 @@ import top.yukonga.miuix.kmp.basic.DividerDefaults
 import top.yukonga.miuix.kmp.basic.Text
 import top.yukonga.miuix.kmp.icon.MiuixIcons
 import top.yukonga.miuix.kmp.icon.extended.Playlist
+import top.yukonga.miuix.kmp.squircle.squircleBorder
+import top.yukonga.miuix.kmp.squircle.squircleClip
 import top.yukonga.miuix.kmp.theme.MiuixTheme
 
 @Composable
@@ -92,10 +92,15 @@ internal fun MiniPlayer(
     onPlayerDragEnd: (Float) -> Unit,
     onPlayerDragCancel: () -> Unit,
     playerLayer: GraphicsLayer,
+    playerContentLayer: GraphicsLayer,
+    frameRecordingGeneration: Int,
     drawInPlace: Boolean,
     surfaceVisible: Boolean,
     sharedArtworkVisible: Boolean,
+    onLayerRecorded: (generation: Int, size: IntSize) -> Unit,
     onPlayerBoundsChanged: (Rect) -> Unit,
+    onPlayerContentBoundsChanged: (Rect) -> Unit,
+    onPlayerControlsBoundsChanged: (Rect) -> Unit,
     onArtworkBoundsChanged: (Rect) -> Unit,
     modifier: Modifier = Modifier,
 ) {
@@ -104,7 +109,6 @@ internal fun MiniPlayer(
     val isNormal = chrome.style == BottomBarStyle.NORMAL
     val surfaceCornerRadius = if (isNormal) 18.dp else 32.dp
     val artworkCornerRadius = if (isNormal) 7.dp else 8.dp
-    val shape = RoundedCornerShape(surfaceCornerRadius)
     val normalOutlineColor = DividerDefaults.DividerColor.copy(
         alpha = NORMAL_BAR_STROKE_ALPHA,
     )
@@ -113,7 +117,6 @@ internal fun MiniPlayer(
     val controlSize = 40.dp
     val playPauseIconSize = 22.dp
     val controlIconSize = 24.dp
-    val artworkShape = RoundedCornerShape(artworkCornerRadius)
     val expansionGestureModifier = rememberPlayerSheetVerticalDragModifier(
         enabled = true,
         hasItem = hasItem,
@@ -127,7 +130,7 @@ internal fun MiniPlayer(
         modifier = modifier
             .fillMaxWidth()
             .padding(horizontal = if (isNormal) 6.dp else 0.dp)
-            .padding(bottom = if (isNormal) 6.dp else 8.dp)
+            .padding(bottom = if (isNormal) 6.dp else FLOATING_MINI_PLAYER_BOTTOM_PADDING)
             .height(if (isNormal) 68.dp else 64.dp)
             .onGloballyPositioned { coordinates ->
                 onPlayerBoundsChanged(coordinates.boundsInRoot())
@@ -135,6 +138,8 @@ internal fun MiniPlayer(
             .recordPlayerLayer(
                 layer = playerLayer,
                 drawInPlace = drawInPlace,
+                recordingGeneration = frameRecordingGeneration,
+                onRecorded = onLayerRecorded,
             )
             .then(expansionGestureModifier)
             .clickable(
@@ -154,14 +159,14 @@ internal fun MiniPlayer(
                             Modifier
                         } else {
                             Modifier.miuixFloatingBarShadow(
-                                shape = shape,
+                                cornerRadius = surfaceCornerRadius,
                                 isDark = chrome.isDark,
                             )
                         },
                     )
-                    .clip(shape)
+                    .squircleClip(surfaceCornerRadius)
                     .miniPlayerSurface(
-                        shape = shape,
+                        cornerRadius = surfaceCornerRadius,
                         backdrop = chrome.backdrop,
                         blurActive = chrome.blurActive,
                         liquidGlassActive = chrome.liquidGlassActive,
@@ -171,10 +176,10 @@ internal fun MiniPlayer(
                     )
                     .then(
                         if (isNormal) {
-                            Modifier.border(
+                            Modifier.squircleBorder(
                                 width = DividerDefaults.Thickness,
                                 color = normalOutlineColor,
-                                shape = shape,
+                                cornerRadius = surfaceCornerRadius,
                             )
                         } else {
                             Modifier
@@ -185,6 +190,10 @@ internal fun MiniPlayer(
         Row(
             modifier = Modifier
                 .fillMaxWidth()
+                .onGloballyPositioned { coordinates ->
+                    onPlayerContentBoundsChanged(coordinates.boundsInRoot())
+                }
+                .recordPlayerContentLayer(playerContentLayer)
                 .padding(
                     start = if (isNormal) 10.dp else 16.dp,
                     end = 10.dp,
@@ -199,8 +208,6 @@ internal fun MiniPlayer(
                     }
                     .graphicsLayer {
                         alpha = if (sharedArtworkVisible) 1f else 0f
-                        this.shape = artworkShape
-                        clip = false
                     },
             ) {
                 PlaybackArtwork(
@@ -229,6 +236,9 @@ internal fun MiniPlayer(
             )
             Spacer(modifier = Modifier.width(if (isNormal) 6.dp else 2.dp))
             Row(
+                modifier = Modifier.onGloballyPositioned { coordinates ->
+                    onPlayerControlsBoundsChanged(coordinates.boundsInRoot())
+                },
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 IconButton(
@@ -324,7 +334,7 @@ private fun SwipeableMetadata(
     }
 
     LaunchedEffect(liveMetadata) {
-        if (expectedSwipeMediaId == liveMetadata.mediaId) {
+        if (hasExpectedMiniMetadataSwipeTarget(expectedSwipeMediaId, liveMetadata.mediaId)) {
             expectedSwipeMediaId = null
             return@LaunchedEffect
         }
@@ -511,12 +521,18 @@ private fun SwipeableMetadata(
 private val MiniMetadataEdgeMaskWidth = 4.dp
 private val MiniMetadataLabelSpacing = 12.dp
 private const val MiniMetadataReturnDurationMillis = 160
+internal val FLOATING_MINI_PLAYER_BOTTOM_PADDING = 8.dp
 
 private data class MiniPlayerMetadata(
     val mediaId: String?,
     val title: String,
     val artist: String,
 )
+
+internal fun hasExpectedMiniMetadataSwipeTarget(
+    expectedMediaId: String?,
+    displayedMediaId: String?,
+): Boolean = expectedMediaId != null && expectedMediaId == displayedMediaId
 
 @Composable
 private fun MiniMetadataColumn(

@@ -1,4 +1,14 @@
 <resources>
+    <string name="selection_selected_count">%1$d selected</string>
+    <string name="selection_choose_songs">Select songs</string>
+    <string name="selection_select_all">Select all</string>
+    <string name="selection_deselect_all">Deselect all</string>
+    <string name="selection_add_to_playlist">Add selected songs to playlist</string>
+    <string name="selection_remove_from_playlist">Remove selected songs from playlist</string>
+    <string name="playlist_remove_selected_title">Remove from playlist</string>
+    <string name="playlist_remove_selected_message">Remove the selected %1$d songs from this playlist?</string>
+    <string name="playlist_remove_selected_cancel">Cancel</string>
+    <string name="playlist_remove_selected_confirm">Confirm</string>
     <string name="app_name">Melox</string>
 
     <string name="navigation_home">Home</string>
@@ -8,8 +18,40 @@
     <string name="navigation_artists">Artists</string>
     <string name="navigation_folders">Folders</string>
     <string name="navigation_settings">Settings</string>
+    <string name="navigation_expand">Expand navigation</string>
+    <string name="navigation_collapse">Collapse navigation</string>
     <string name="home_recommendation_title">Random recommendations</string>
+    <string name="home_recommendation_empty_description">Random recommendations appear after songs are scanned</string>
     <string name="home_recently_added_title">Recently added</string>
+    <string name="home_playlists_title">Playlists</string>
+    <string name="playlist_create">Create playlist</string>
+    <string name="playlist_create_title">New playlist</string>
+    <string name="playlist_name_hint">Playlist name</string>
+    <string name="playlist_rename">Rename</string>
+    <string name="playlist_rename_title">Rename playlist</string>
+    <string name="playlist_delete">Delete playlist</string>
+    <string name="playlist_delete_title">Delete playlist</string>
+    <string name="playlist_delete_message">Delete “%1$s”?</string>
+    <string name="playlist_add_to">Add to playlist</string>
+    <string name="playlist_added_to">Added to playlist %1$s</string>
+    <string name="playlist_picker_title">Add to playlist</string>
+    <string name="playlist_empty">No playlists</string>
+    <string name="playlist_empty_description">Create playlists to organize your music</string>
+    <string name="playlist_detail_empty">No songs in this playlist</string>
+    <string name="playlist_unavailable">Unavailable</string>
+    <string name="playlist_remove_song">Remove from playlist</string>
+    <string name="playlist_sort_action">Sort playlist</string>
+    <string name="playlist_sort_custom">Custom</string>
+    <string name="playlist_more_actions">Playlist actions</string>
+    <string name="playlist_add_collection">Add all to playlist</string>
+    <plurals name="playlist_song_count">
+        <item quantity="one">%1$d song</item>
+        <item quantity="other">%1$d songs</item>
+    </plurals>
+    <plurals name="playlist_card_song_count">
+        <item quantity="one">%1$d song</item>
+        <item quantity="other">%1$d songs</item>
+    </plurals>
 
     <string name="music_artist_album">%1$s - %2$s</string>
     <string name="music_play_track_action">Play %1$s</string>
@@ -134,6 +176,10 @@
     <string name="playback_mode_order">Order playback</string>
     <string name="playback_mode_repeat_one">Repeat one</string>
     <string name="playback_mode_random">Random queue</string>
+    <string name="notification_playback_mode_list_loop">List loop</string>
+    <string name="notification_playback_mode_repeat_one">Repeat one</string>
+    <string name="notification_playback_mode_shuffle">Shuffle</string>
+    <string name="notification_close">Close</string>
     <string name="playback_mode_one_badge" translatable="false">1</string>
     <string name="track_actions">Song actions</string>
     <string name="open_queue">Open queue</string>
@@ -145,6 +191,8 @@
     <string name="clear_queue_confirm_confirm">Confirm</string>
     <string name="queue_empty">The queue is empty</string>
     <string name="remove_from_queue">Remove from queue</string>
+    <string name="move_after_current">Play next</string>
+    <string name="locate_current_track">Locate current song</string>
     <string name="back">Back</string>
     <string name="close">Close</string>
 
@@ -219,6 +267,9 @@
     <string name="scan_remove_blocked_folder_title">Remove</string>
     <string name="scan_remove_blocked_folder_message">Remove the %1$s folder from blocked folders?</string>
     <string name="scan_start">Start scan</string>
+    <string name="scan_clear_library">Clear music library</string>
+    <string name="scan_clear_library_confirm_title">Clear music library</string>
+    <string name="scan_clear_library_confirm_message">Clear all scanned music?</string>
     <string name="scan_no_changes">No music file changes</string>
     <plurals name="scan_complete">
         <item quantity="one">Scan complete, %1$d song</item>

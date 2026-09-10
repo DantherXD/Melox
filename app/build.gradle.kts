@@ -13,6 +13,7 @@ import java.time.format.DateTimeFormatter
 plugins {
     alias(libs.plugins.android.application)
     alias(libs.plugins.compose.compiler)
+    alias(libs.plugins.kotlin.serialization)
 }
 
 val localPropertiesFile = rootProject.file("local.properties")
@@ -183,6 +184,7 @@ dependencies {
     implementation(libs.miuix.nav)
     implementation(libs.miuix.preference)
     implementation(libs.miuix.ui)
+    implementation(libs.reorderable)
     implementation(libs.taglib)
     implementation(libs.tinypinyin)
     testImplementation(libs.junit)

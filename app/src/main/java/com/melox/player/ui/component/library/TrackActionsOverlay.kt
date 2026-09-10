@@ -57,6 +57,7 @@ import top.yukonga.miuix.kmp.icon.extended.Close
 import top.yukonga.miuix.kmp.icon.extended.ContactsCircle
 import top.yukonga.miuix.kmp.icon.extended.Edit
 import top.yukonga.miuix.kmp.icon.extended.Info
+import top.yukonga.miuix.kmp.icon.extended.Playlist
 import top.yukonga.miuix.kmp.overlay.OverlayBottomSheet
 import top.yukonga.miuix.kmp.theme.MiuixTheme
 import top.yukonga.miuix.kmp.utils.overScrollVertical
@@ -71,6 +72,7 @@ fun TrackActionsOverlay(
     onDismiss: () -> Unit,
     onPlayNext: (MusicTrack) -> Unit,
     onAppendToQueue: (MusicTrack) -> Unit,
+    onAddToPlaylist: (MusicTrack) -> Unit,
     onGoToAlbum: ((MusicTrack) -> Unit)? = null,
     artistGroups: List<ArtistGroup> = emptyList(),
     onGoToArtist: ((ArtistGroup) -> Unit)? = null,
@@ -209,6 +211,14 @@ fun TrackActionsOverlay(
                         iconEndPadding = 2.dp,
                         onClick = {
                             onAppendToQueue(selectedTrack)
+                            onDismiss()
+                        },
+                    )
+                    TrackAction(
+                        icon = painterResource(R.drawable.ic_add_to_playlist),
+                        text = stringResource(R.string.playlist_add_to),
+                        onClick = {
+                            onAddToPlaylist(selectedTrack)
                             onDismiss()
                         },
                     )
@@ -411,11 +421,15 @@ private fun SheetScrollableContent(
     bottomPadding: Dp,
     content: @Composable ColumnScope.() -> Unit,
 ) {
+    val scrollState = rememberScrollState()
     Column(
         modifier = Modifier
             .fillMaxWidth()
-            .verticalScroll(rememberScrollState(), overscrollEffect = null)
-            .overScrollVertical()
+            .overScrollVertical(
+                nestedScrollToParent = false,
+                isEnabled = { scrollState.maxValue > 0 },
+            )
+            .verticalScroll(scrollState, overscrollEffect = null)
             .padding(bottom = bottomPadding),
         content = content,
     )
