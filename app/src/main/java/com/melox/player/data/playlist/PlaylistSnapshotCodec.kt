@@ -241,4 +241,3 @@ internal object PlaylistSnapshotCodec {
         return this
     }
 }
-

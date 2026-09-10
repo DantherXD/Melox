@@ -8,7 +8,6 @@ data class LocalPlaylist(
     val updatedAtEpochMillis: Long,
     val entries: List<PlaylistTrackEntry> = emptyList(),
 )
-
 /** One stable playlist slot with enough metadata to remain visible when its source disappears. */
 data class PlaylistTrackEntry(
     val id: String,
@@ -22,4 +21,3 @@ data class ResolvedPlaylistTrack(
     val track: MusicTrack,
     val available: Boolean,
 )
-
