@@ -9,6 +9,11 @@ import android.provider.MediaStore
 import androidx.annotation.OptIn
 import androidx.media3.common.MediaItem
 import androidx.media3.common.util.UnstableApi
+import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
+import androidx.media3.extractor.DefaultExtractorsFactory
+import androidx.media3.extractor.amr.AmrExtractor
+import androidx.media3.extractor.mp4.Mp4Extractor
+import androidx.media3.extractor.ts.AdtsExtractor
 import androidx.media3.extractor.metadata.id3.BinaryFrame
 import androidx.media3.extractor.metadata.id3.CommentFrame
 import androidx.media3.extractor.metadata.id3.InternalFrame
@@ -19,6 +24,7 @@ import com.melox.player.data.lyrics.LyricsParser
 import com.melox.player.model.LyricsDocument
 import com.melox.player.model.LyricsFormat
 import com.melox.player.model.LyricsSource
+import com.melox.player.playback.PlaybackExtractorsFactory
 import java.io.ByteArrayOutputStream
 import java.io.File
 import java.io.InputStream
@@ -131,6 +137,19 @@ class LyricsRepository(context: Context) {
             MetadataRetriever.Builder(
                 applicationContext,
                 MediaItem.fromUri(contentUri),
+            ).setMediaSourceFactory(
+                DefaultMediaSourceFactory(
+                    applicationContext,
+                    PlaybackExtractorsFactory(
+                        DefaultExtractorsFactory()
+                            .setAdtsExtractorFlags(AdtsExtractor.FLAG_ENABLE_CONSTANT_BITRATE_SEEKING)
+                            .setAmrExtractorFlags(AmrExtractor.FLAG_ENABLE_CONSTANT_BITRATE_SEEKING)
+                            .setMp4ExtractorFlags(
+                                Mp4Extractor.FLAG_READ_SEF_DATA or
+                                    Mp4Extractor.FLAG_OMIT_TRACK_SAMPLE_TABLE,
+                            ),
+                    ),
+                ),
             ).build().use { retriever ->
                 retriever.retrieveTrackGroups().get(METADATA_TIMEOUT_SECONDS, TimeUnit.SECONDS)
             }
