@@ -7,6 +7,8 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.calculateEndPadding
+import androidx.compose.foundation.layout.calculateStartPadding
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
@@ -22,6 +24,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.input.nestedscroll.nestedScroll
+import androidx.compose.ui.platform.LocalLayoutDirection
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
@@ -30,6 +33,7 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.melox.player.R
+import com.melox.player.ui.component.AdaptiveTopAppBar
 import com.melox.player.ui.component.BlurredBar
 import com.melox.player.ui.component.miuixBarColor
 import com.melox.player.ui.component.rememberBlurBackdrop
@@ -40,7 +44,6 @@ import top.yukonga.miuix.kmp.basic.MiuixScrollBehavior
 import top.yukonga.miuix.kmp.basic.Scaffold
 import top.yukonga.miuix.kmp.basic.Text
 import top.yukonga.miuix.kmp.basic.TextButton
-import top.yukonga.miuix.kmp.basic.TopAppBar
 import top.yukonga.miuix.kmp.icon.MiuixIcons
 import top.yukonga.miuix.kmp.icon.extended.Back
 import top.yukonga.miuix.kmp.blur.layerBackdrop
@@ -58,6 +61,7 @@ fun BlockedFoldersScreen(
 ) {
     val scrollBehavior = MiuixScrollBehavior()
     val backdrop = rememberBlurBackdrop()
+    val layoutDirection = LocalLayoutDirection.current
     var pendingPath by remember { mutableStateOf<String?>(null) }
     val sortedPaths = remember(paths) {
         paths.sortedWith(compareBy(String::lowercase).thenBy { it })
@@ -69,7 +73,7 @@ fun BlockedFoldersScreen(
                 blurEnabled = backdrop != null,
                 scrollBehavior = scrollBehavior,
             ) {
-                TopAppBar(
+                AdaptiveTopAppBar(
                     title = stringResource(R.string.scan_blocked_folder_title),
                     color = backdrop.miuixBarColor(),
                     scrollBehavior = scrollBehavior,
@@ -97,7 +101,9 @@ fun BlockedFoldersScreen(
                     .overScrollVertical()
                     .nestedScroll(scrollBehavior.nestedScrollConnection),
                 contentPadding = PaddingValues(
+                    start = padding.calculateStartPadding(layoutDirection),
                     top = padding.calculateTopPadding() + 12.dp,
+                    end = padding.calculateEndPadding(layoutDirection),
                     bottom = maxOf(padding.calculateBottomPadding(), bottomContentPadding) + 16.dp,
                 ),
                 overscrollEffect = null,

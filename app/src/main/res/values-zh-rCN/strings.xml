@@ -20,10 +20,13 @@
     <string name="navigation_settings">设置</string>
     <string name="navigation_expand">展开导航</string>
     <string name="navigation_collapse">收起导航</string>
-    <string name="home_recommendation_title">随机推荐</string>
-    <string name="home_recommendation_empty_description">扫描到歌曲后可查看随机推荐</string>
+    <string name="home_recommendation_title">推荐</string>
+    <string name="home_recommendation_empty_title">暂时没有音乐</string>
+    <string name="home_recommendation_empty_description">将在扫描音乐后随机推荐</string>
     <string name="home_recently_added_title">最近添加</string>
     <string name="home_playlists_title">歌单</string>
+    <string name="home_playlist_empty_title">暂时没有歌单</string>
+    <string name="home_playlist_empty_description">可创建歌单对音乐整理分类</string>
     <string name="playlist_create">创建歌单</string>
     <string name="playlist_create_title">新建歌单</string>
     <string name="playlist_name_hint">歌单名称</string>

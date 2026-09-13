@@ -7,6 +7,7 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.calculateEndPadding
+import androidx.compose.foundation.layout.calculateStartPadding
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -84,9 +85,9 @@ fun AlbumLibraryScreen(
 
     BoxWithConstraints(modifier = modifier.fillMaxSize()) {
         val gridContentPadding = PaddingValues(
-            start = 20.dp,
+            start = contentPadding.calculateStartPadding(layoutDirection) + 20.dp,
             top = contentPadding.calculateTopPadding() + 12.dp,
-            end = 20.dp,
+            end = contentPadding.calculateEndPadding(layoutDirection) + 20.dp,
             bottom = contentPadding.calculateBottomPadding() + 12.dp,
         )
         LazyVerticalGrid(

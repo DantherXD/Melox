@@ -19,6 +19,8 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.calculateEndPadding
+import androidx.compose.foundation.layout.calculateStartPadding
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -53,6 +55,7 @@ import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.input.pointer.PointerEventPass
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalLayoutDirection
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
@@ -88,9 +91,9 @@ import top.yukonga.miuix.kmp.basic.Icon
 import top.yukonga.miuix.kmp.basic.ScrollBehavior
 import top.yukonga.miuix.kmp.basic.Text
 import top.yukonga.miuix.kmp.icon.MiuixIcons
-import top.yukonga.miuix.kmp.icon.extended.Album
 import top.yukonga.miuix.kmp.icon.extended.ChevronForward
-import top.yukonga.miuix.kmp.icon.extended.Music
+import top.yukonga.miuix.kmp.icon.extended.Create
+import top.yukonga.miuix.kmp.icon.extended.RecordingTape
 import top.yukonga.miuix.kmp.theme.MiuixTheme
 import top.yukonga.miuix.kmp.utils.PressFeedbackType
 import top.yukonga.miuix.kmp.utils.overScrollVertical
@@ -124,6 +127,7 @@ fun HomeScreen(
     modifier: Modifier = Modifier,
     contentPadding: PaddingValues = PaddingValues(),
 ) {
+    val layoutDirection = LocalLayoutDirection.current
     val recommendationTracks = recommendations?.tracks.orEmpty()
     val currentOnRecommendationGestureActiveChanged by rememberUpdatedState(
         onRecommendationGestureActiveChanged,
@@ -141,7 +145,9 @@ fun HomeScreen(
                 .overScrollVertical()
                 .nestedScroll(scrollBehavior.nestedScrollConnection),
             contentPadding = PaddingValues(
+                start = contentPadding.calculateStartPadding(layoutDirection),
                 top = contentPadding.calculateTopPadding() + 12.dp,
+                end = contentPadding.calculateEndPadding(layoutDirection),
                 bottom = contentPadding.calculateBottomPadding() + 12.dp,
             ),
             overscrollEffect = null,
@@ -293,6 +299,7 @@ fun HomeScreen(
                                 playlist = playlist,
                                 onClick = { onPlaylistClick(playlist) },
                                 modifier = Modifier.weight(1f),
+                                showEmptyArtworkIcon = false,
                             )
                         }
                         repeat(playlistGridColumns - row.size) {
@@ -318,9 +325,9 @@ private fun HomeEmptyPlaylistCard(
         cornerRadius = 20.dp,
     ) {
         HomeEmptyCardContent(
-            imageVector = MiuixIcons.Album,
-            title = stringResource(R.string.playlist_empty),
-            description = stringResource(R.string.playlist_empty_description),
+            imageVector = MiuixIcons.RecordingTape,
+            title = stringResource(R.string.home_playlist_empty_title),
+            description = stringResource(R.string.home_playlist_empty_description),
         )
         HorizontalDivider(modifier = Modifier.padding(horizontal = 20.dp))
         BasicComponent(
@@ -364,11 +371,11 @@ private fun HomeEmptyRecommendationState(
             cornerRadius = 20.dp,
         ) {
             HomeEmptyCardContent(
-                imageVector = MiuixIcons.Music,
+                imageVector = MiuixIcons.Create,
                 title = if (scanStatus is ScanStatus.Error) {
                     stringResource(R.string.music_scan_failed)
                 } else {
-                    stringResource(R.string.music_empty_after_scan)
+                    stringResource(R.string.home_recommendation_empty_title)
                 },
                 description = stringResource(R.string.home_recommendation_empty_description),
             )

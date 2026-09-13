@@ -12,6 +12,8 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.calculateEndPadding
+import androidx.compose.foundation.layout.calculateStartPadding
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -48,6 +50,7 @@ import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.layout.positionInRoot
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.LocalLayoutDirection
 import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.contentDescription
@@ -63,9 +66,11 @@ import com.melox.player.data.library.MusicLibraryStatistics
 import com.melox.player.data.library.buildMusicLibraryStatistics
 import com.melox.player.model.AudioQuality
 import com.melox.player.model.MusicTrack
+import com.melox.player.ui.component.AdaptiveTopAppBar
 import com.melox.player.ui.component.BlurredBar
 import com.melox.player.ui.component.miuixBarColor
 import com.melox.player.ui.component.rememberBlurBackdrop
+import com.melox.player.ui.screen.library.MusicLibraryEmptyMessage
 import java.util.Locale
 import top.yukonga.miuix.kmp.basic.DropdownImpl
 import top.yukonga.miuix.kmp.basic.HorizontalDivider
@@ -78,10 +83,10 @@ import top.yukonga.miuix.kmp.basic.PopupPositionProvider
 import top.yukonga.miuix.kmp.basic.Scaffold
 import top.yukonga.miuix.kmp.basic.ScrollBehavior
 import top.yukonga.miuix.kmp.basic.Text
-import top.yukonga.miuix.kmp.basic.TopAppBar
 import top.yukonga.miuix.kmp.blur.layerBackdrop
 import top.yukonga.miuix.kmp.icon.MiuixIcons
 import top.yukonga.miuix.kmp.icon.extended.Back
+import top.yukonga.miuix.kmp.icon.extended.Music
 import top.yukonga.miuix.kmp.icon.extended.Tune
 import top.yukonga.miuix.kmp.overlay.OverlayListPopup
 import top.yukonga.miuix.kmp.theme.MiuixTheme
@@ -125,6 +130,7 @@ fun MusicStatisticsScreen(
     onBack: () -> Unit,
 ) {
     val statistics = remember(tracks) { buildMusicLibraryStatistics(tracks) }
+    val layoutDirection = LocalLayoutDirection.current
     var group by remember { mutableStateOf(StatisticsGroup.QUALITY) }
     var metric by remember { mutableStateOf(StatisticsMetric.COUNT) }
     val scrollBehavior = MiuixScrollBehavior()
@@ -137,7 +143,7 @@ fun MusicStatisticsScreen(
                 blurEnabled = topBarBackdrop != null,
                 scrollBehavior = scrollBehavior,
             ) {
-                TopAppBar(
+                AdaptiveTopAppBar(
                     title = stringResource(R.string.music_statistics_page_title),
                     color = topBarBackdrop.miuixBarColor(),
                     scrollBehavior = scrollBehavior,
@@ -170,7 +176,9 @@ fun MusicStatisticsScreen(
                 statistics = statistics,
                 group = group,
                 metric = metric,
+                startPadding = padding.calculateStartPadding(layoutDirection),
                 topPadding = padding.calculateTopPadding(),
+                endPadding = padding.calculateEndPadding(layoutDirection),
                 bottomPadding = maxOf(
                     padding.calculateBottomPadding(),
                     bottomContentPadding,
@@ -260,7 +268,9 @@ private fun StatisticsPage(
     statistics: MusicLibraryStatistics,
     group: StatisticsGroup,
     metric: StatisticsMetric,
+    startPadding: Dp,
     topPadding: Dp,
+    endPadding: Dp,
     bottomPadding: Dp,
     scrollBehavior: ScrollBehavior,
 ) {
@@ -331,7 +341,9 @@ private fun StatisticsPage(
                 .overScrollVertical()
                 .nestedScroll(scrollBehavior.nestedScrollConnection),
             contentPadding = PaddingValues(
+                start = startPadding,
                 top = topPadding + 32.dp,
+                end = endPadding,
                 bottom = bottomPadding + 16.dp,
             ),
             overscrollEffect = null,
@@ -344,10 +356,9 @@ private fun StatisticsPage(
                             .height(CYLINDER_HEIGHT),
                         contentAlignment = Alignment.Center,
                     ) {
-                        Text(
-                            text = stringResource(R.string.music_statistics_empty),
-                            style = MiuixTheme.textStyles.footnote1,
-                            color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+                        MusicLibraryEmptyMessage(
+                            icon = MiuixIcons.Music,
+                            text = stringResource(R.string.music_empty_after_scan),
                         )
                     }
                 } else {

@@ -61,6 +61,7 @@ fun PlaylistGridItem(
     playlist: LocalPlaylist,
     onClick: () -> Unit,
     modifier: Modifier = Modifier,
+    showEmptyArtworkIcon: Boolean = true,
 ) {
     Card(
         modifier = modifier.fillMaxWidth(),
@@ -77,6 +78,7 @@ fun PlaylistGridItem(
             Column(modifier = Modifier.fillMaxWidth()) {
                 PlaylistArtwork(
                     tracks = playlist.entries.map { entry -> entry.trackSnapshot },
+                    showEmptyArtworkIcon = showEmptyArtworkIcon,
                     modifier = Modifier.fillMaxWidth(),
                 )
                 Text(
@@ -108,6 +110,7 @@ fun PlaylistGridItem(
 @Composable
 private fun PlaylistArtwork(
     tracks: List<MusicTrack>,
+    showEmptyArtworkIcon: Boolean,
     modifier: Modifier = Modifier,
 ) {
     BoxWithConstraints(
@@ -120,6 +123,7 @@ private fun PlaylistArtwork(
             PlaylistArtworkLayout.EMPTY -> PlaylistArtworkTile(
                 track = null,
                 requestSize = coverHeight,
+                showPlaceholderIcon = showEmptyArtworkIcon,
             )
 
             PlaylistArtworkLayout.SINGLE -> PlaylistArtworkTile(
@@ -200,6 +204,7 @@ private fun PlaylistArtworkTile(
     track: MusicTrack?,
     requestSize: Dp,
     modifier: Modifier = Modifier,
+    showPlaceholderIcon: Boolean = true,
 ) {
     val bitmap = rememberArtworkBitmap(
         contentUri = track?.contentUri.orEmpty(),
@@ -221,7 +226,7 @@ private fun PlaylistArtworkTile(
                 contentScale = ContentScale.Crop,
                 filterQuality = FilterQuality.High,
             )
-        } else {
+        } else if (showPlaceholderIcon) {
             Icon(
                 imageVector = MiuixIcons.Music,
                 contentDescription = null,

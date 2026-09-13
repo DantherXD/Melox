@@ -1,6 +1,7 @@
 package com.melox.player.ui.component.playlist
 
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
@@ -8,6 +9,7 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.asPaddingValues
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.navigationBars
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
@@ -20,6 +22,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
@@ -46,6 +49,7 @@ import top.yukonga.miuix.kmp.icon.extended.Add
 import top.yukonga.miuix.kmp.icon.extended.Close
 import top.yukonga.miuix.kmp.overlay.OverlayBottomSheet
 import top.yukonga.miuix.kmp.overlay.OverlayDialog
+import top.yukonga.miuix.kmp.squircle.squircleBackground
 import top.yukonga.miuix.kmp.theme.MiuixTheme
 import top.yukonga.miuix.kmp.utils.overScrollVertical
 
@@ -54,11 +58,13 @@ fun PlaylistPickerOverlay(
     tracks: List<MusicTrack>?,
     playlists: List<LocalPlaylist>,
     onDismiss: () -> Unit,
+    onCreateRequestDismiss: () -> Unit,
     onCreatePlaylist: (List<MusicTrack>) -> Unit,
     onPlaylistSelected: (String, List<MusicTrack>) -> Unit,
 ) {
     var retainedTracks by remember { mutableStateOf<List<MusicTrack>>(emptyList()) }
     var retainedPlaylists by remember { mutableStateOf<List<LocalPlaylist>>(emptyList()) }
+    var pendingCreateTracks by remember { mutableStateOf<List<MusicTrack>?>(null) }
     LaunchedEffect(tracks) {
         if (tracks != null) retainedTracks = tracks
     }
@@ -82,43 +88,54 @@ fun PlaylistPickerOverlay(
                 )
             }
         },
+        endAction = {
+            IconButton(
+                onClick = {
+                    pendingCreateTracks = displayedTracks
+                    onCreateRequestDismiss()
+                },
+            ) {
+                Icon(
+                    imageVector = MiuixIcons.Add,
+                    contentDescription = stringResource(R.string.playlist_create),
+                )
+            }
+        },
         enableWindowDim = true,
         onDismissRequest = onDismiss,
         onDismissFinished = {
+            val tracksForCreation = pendingCreateTracks
+            pendingCreateTracks = null
             retainedTracks = emptyList()
             retainedPlaylists = emptyList()
+            tracksForCreation?.let(onCreatePlaylist)
         },
     ) {
         Column(
             modifier = Modifier
                 .fillMaxWidth()
                 .verticalScroll(rememberScrollState(), overscrollEffect = null)
-                .overScrollVertical()
-                .padding(bottom = bottomPadding),
+                .overScrollVertical(),
             verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {
-            Card(
-                modifier = Modifier.fillMaxWidth(),
-                colors = CardDefaults.defaultColors(
-                    color = MiuixTheme.colorScheme.secondaryContainer,
-                ),
-            ) {
-                BasicComponent(
-                    title = stringResource(R.string.playlist_create),
-                    startAction = {
-                        Icon(
-                            imageVector = MiuixIcons.Add,
-                            contentDescription = null,
-                            modifier = Modifier.size(22.dp),
-                            tint = MiuixTheme.colorScheme.onSurfaceVariantActions,
-                        )
-                    },
-                    onClick = { onCreatePlaylist(displayedTracks) },
-                )
-            }
-            if (displayedPlaylists.isNotEmpty()) {
+            if (displayedPlaylists.isEmpty()) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(120.dp + bottomPadding)
+                        .padding(bottom = bottomPadding),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Text(
+                        text = stringResource(R.string.playlist_empty),
+                        color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+                    )
+                }
+            } else {
                 Card(
-                    modifier = Modifier.fillMaxWidth(),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(bottom = bottomPadding),
                     colors = CardDefaults.defaultColors(
                         color = MiuixTheme.colorScheme.secondaryContainer,
                     ),
@@ -127,14 +144,24 @@ fun PlaylistPickerOverlay(
                         val cover = playlist.entries.firstOrNull()?.trackSnapshot
                         BasicComponent(
                             startAction = {
-                                PlaybackArtwork(
-                                    contentUri = cover?.contentUri.orEmpty(),
-                                    dateModifiedEpochSeconds =
-                                        cover?.dateModifiedEpochSeconds ?: 0L,
-                                    fileSizeBytes = cover?.fileSizeBytes ?: 0L,
-                                    size = 44.dp,
-                                    cornerRadius = 6.dp,
-                                )
+                                if (cover == null) {
+                                    Box(
+                                        modifier = Modifier
+                                            .size(44.dp)
+                                            .squircleBackground(
+                                                color = MiuixTheme.colorScheme.surfaceContainerHighest,
+                                                cornerRadius = 6.dp,
+                                            ),
+                                    )
+                                } else {
+                                    PlaybackArtwork(
+                                        contentUri = cover.contentUri,
+                                        dateModifiedEpochSeconds = cover.dateModifiedEpochSeconds,
+                                        fileSizeBytes = cover.fileSizeBytes,
+                                        size = 44.dp,
+                                        cornerRadius = 6.dp,
+                                    )
+                                }
                             },
                             onClick = {
                                 onPlaylistSelected(playlist.id, displayedTracks)

@@ -1,6 +1,8 @@
 package com.melox.player.ui.component.library
 
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.runtime.Composable
@@ -62,30 +64,42 @@ fun AlbumSortButton(
                 },
             )
         }
-        PopupDivider()
-        fields.forEachIndexed { index, (field, label) ->
-            DropdownImpl(
-                text = label,
-                optionSize = gridStyles.size + fields.size + 1,
-                isSelected = config.field == field,
-                index = gridStyles.size + index,
-                onSelectedIndexChange = {
-                    onConfigChange(config.copy(field = field))
-                    dismiss()
-                },
-            )
+        Column(modifier = Modifier.fillMaxWidth()) {
+            PopupDivider()
+            fields.forEachIndexed { index, (field, label) ->
+                Box(
+                    modifier = Modifier.fillMaxWidth(),
+                    propagateMinConstraints = true,
+                ) {
+                    DropdownImpl(
+                        text = label,
+                        optionSize = gridStyles.size + fields.size + 1,
+                        isSelected = config.field == field,
+                        index = gridStyles.size + index,
+                        onSelectedIndexChange = {
+                            onConfigChange(config.copy(field = field))
+                            dismiss()
+                        },
+                    )
+                }
+            }
+            PopupDivider()
+            Box(
+                modifier = Modifier.fillMaxWidth(),
+                propagateMinConstraints = true,
+            ) {
+                DropdownImpl(
+                    text = stringResource(R.string.music_sort_descending),
+                    optionSize = gridStyles.size + fields.size + 1,
+                    isSelected = config.descending,
+                    index = gridStyles.size + fields.size,
+                    onSelectedIndexChange = {
+                        onConfigChange(config.copy(descending = !config.descending))
+                        dismiss()
+                    },
+                )
+            }
         }
-        PopupDivider()
-        DropdownImpl(
-            text = stringResource(R.string.music_sort_descending),
-            optionSize = gridStyles.size + fields.size + 1,
-            isSelected = config.descending,
-            index = gridStyles.size + fields.size,
-            onSelectedIndexChange = {
-                onConfigChange(config.copy(descending = !config.descending))
-                dismiss()
-            },
-        )
     }
 }
 

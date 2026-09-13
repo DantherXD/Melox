@@ -6,6 +6,8 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.calculateEndPadding
+import androidx.compose.foundation.layout.calculateStartPadding
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -29,6 +31,7 @@ import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.LocalLayoutDirection
 import androidx.compose.ui.platform.LocalUriHandler
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
@@ -151,6 +154,7 @@ private fun AboutContent(
 ) {
     val uriHandler = LocalUriHandler.current
     val density = LocalDensity.current
+    val layoutDirection = LocalLayoutDirection.current
     val versionName = BuildConfig.VERSION_NAME.ifBlank { "1.0.0" }
     var headerHeight by remember { mutableStateOf(190.dp) }
     val contentBackdrop = rememberBlurBackdrop()
@@ -208,7 +212,9 @@ private fun AboutContent(
                 .overScrollVertical()
                 .nestedScroll(scrollBehavior.nestedScrollConnection),
             contentPadding = PaddingValues(
+                start = padding.calculateStartPadding(layoutDirection),
                 top = padding.calculateTopPadding(),
+                end = padding.calculateEndPadding(layoutDirection),
                 bottom = maxOf(
                     padding.calculateBottomPadding(),
                     bottomContentPadding,
@@ -280,7 +286,7 @@ private fun AboutContent(
 
 private const val PROJECT_URL = "https://github.com/Inefy-03/Melox"
 private const val DEVELOPER_GITHUB_URL = "https://github.com/Inefy-03"
-private const val TELEGRAM_CHANNEL_URL = "https://t.me/MeloxPlayer"
+private const val TELEGRAM_CHANNEL_URL = "https://t.me/MeloxPlayerUpdate"
 
 @Composable
 private fun AboutHeader(
@@ -294,7 +300,11 @@ private fun AboutHeader(
     Column(
         modifier = Modifier
             .fillMaxWidth()
-            .padding(top = contentPadding.calculateTopPadding() + 92.dp)
+            .padding(
+                start = contentPadding.calculateStartPadding(LocalLayoutDirection.current),
+                top = contentPadding.calculateTopPadding() + 92.dp,
+                end = contentPadding.calculateEndPadding(LocalLayoutDirection.current),
+            )
             .onSizeChanged { onHeightChanged(it.height) },
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {

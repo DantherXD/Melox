@@ -13,6 +13,8 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.calculateEndPadding
+import androidx.compose.foundation.layout.calculateStartPadding
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
@@ -27,6 +29,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalLayoutDirection
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
@@ -36,6 +39,7 @@ import androidx.compose.ui.unit.dp
 import com.melox.player.R
 import com.melox.player.model.AppSettings
 import com.melox.player.model.ScanStatus
+import com.melox.player.ui.component.AdaptiveTopAppBar
 import com.melox.player.ui.component.BlurredBar
 import com.melox.player.ui.component.miuixBarColor
 import com.melox.player.ui.component.rememberBlurBackdrop
@@ -43,6 +47,8 @@ import top.yukonga.miuix.kmp.basic.BasicComponent
 import top.yukonga.miuix.kmp.basic.Button
 import top.yukonga.miuix.kmp.basic.ButtonDefaults
 import top.yukonga.miuix.kmp.basic.Card
+import top.yukonga.miuix.kmp.basic.DropdownEntry
+import top.yukonga.miuix.kmp.basic.DropdownItem
 import top.yukonga.miuix.kmp.basic.Icon
 import top.yukonga.miuix.kmp.basic.IconButton
 import top.yukonga.miuix.kmp.basic.InfiniteProgressIndicator
@@ -51,10 +57,11 @@ import top.yukonga.miuix.kmp.basic.Scaffold
 import top.yukonga.miuix.kmp.basic.SmallTitle
 import top.yukonga.miuix.kmp.basic.Text
 import top.yukonga.miuix.kmp.basic.TextButton
-import top.yukonga.miuix.kmp.basic.TopAppBar
 import top.yukonga.miuix.kmp.blur.layerBackdrop
 import top.yukonga.miuix.kmp.icon.MiuixIcons
 import top.yukonga.miuix.kmp.icon.extended.Back
+import top.yukonga.miuix.kmp.icon.extended.More
+import top.yukonga.miuix.kmp.menu.OverlayIconDropdownMenu
 import top.yukonga.miuix.kmp.overlay.OverlayDialog
 import top.yukonga.miuix.kmp.preference.ArrowPreference
 import top.yukonga.miuix.kmp.preference.SwitchPreference
@@ -83,6 +90,7 @@ fun ScanMusicScreen(
     onClearMusicLibrary: () -> Unit,
 ) {
     val context = LocalContext.current
+    val layoutDirection = LocalLayoutDirection.current
     val isScanning = scanStatus is ScanStatus.Scanning
     val scrollBehavior = MiuixScrollBehavior()
     val topBarBackdrop = rememberBlurBackdrop()
@@ -124,7 +132,7 @@ fun ScanMusicScreen(
                 blurEnabled = topBarBackdrop != null,
                 scrollBehavior = scrollBehavior,
             ) {
-                TopAppBar(
+                AdaptiveTopAppBar(
                     title = stringResource(R.string.scan_music_page_title),
                     color = topBarBackdrop.miuixBarColor(),
                     scrollBehavior = scrollBehavior,
@@ -137,12 +145,19 @@ fun ScanMusicScreen(
                         }
                     },
                     actions = {
-                        IconButton(
-                            onClick = { showClearMusicLibraryConfirm = true },
+                        OverlayIconDropdownMenu(
+                            entry = DropdownEntry(
+                                items = listOf(
+                                    DropdownItem(
+                                        text = stringResource(R.string.scan_clear_library),
+                                        onClick = { showClearMusicLibraryConfirm = true },
+                                    ),
+                                ),
+                            ),
                             enabled = !isScanning,
                         ) {
                             Icon(
-                                painter = painterResource(R.drawable.ic_clear_music_library),
+                                imageVector = MiuixIcons.More,
                                 contentDescription = stringResource(R.string.scan_clear_library),
                                 modifier = Modifier.size(24.dp),
                             )
@@ -164,7 +179,9 @@ fun ScanMusicScreen(
                     .overScrollVertical()
                     .nestedScroll(scrollBehavior.nestedScrollConnection),
                 contentPadding = PaddingValues(
+                    start = padding.calculateStartPadding(layoutDirection),
                     top = padding.calculateTopPadding(),
+                    end = padding.calculateEndPadding(layoutDirection),
                     bottom = maxOf(
                         padding.calculateBottomPadding(),
                         bottomContentPadding,

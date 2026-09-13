@@ -297,7 +297,7 @@ internal fun MusicLibraryEmptyState(
 }
 
 @Composable
-private fun MusicLibraryEmptyMessage(
+internal fun MusicLibraryEmptyMessage(
     icon: ImageVector,
     text: String,
 ) {

@@ -52,6 +52,7 @@ import top.yukonga.miuix.kmp.basic.IconButton
 import top.yukonga.miuix.kmp.basic.Text
 import top.yukonga.miuix.kmp.icon.MiuixIcons
 import top.yukonga.miuix.kmp.icon.extended.Add
+import top.yukonga.miuix.kmp.icon.extended.AddCircle
 import top.yukonga.miuix.kmp.icon.extended.Album
 import top.yukonga.miuix.kmp.icon.extended.Close
 import top.yukonga.miuix.kmp.icon.extended.ContactsCircle
@@ -215,7 +216,7 @@ fun TrackActionsOverlay(
                         },
                     )
                     TrackAction(
-                        icon = painterResource(R.drawable.ic_add_to_playlist),
+                        icon = MiuixIcons.AddCircle,
                         text = stringResource(R.string.playlist_add_to),
                         onClick = {
                             onAddToPlaylist(selectedTrack)

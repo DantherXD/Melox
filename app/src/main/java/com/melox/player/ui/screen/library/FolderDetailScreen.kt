@@ -36,6 +36,7 @@ import com.melox.player.model.MusicTrack
 import com.melox.player.model.ScanStatus
 import com.melox.player.ui.LibrarySearchBar
 import com.melox.player.ui.LibrarySearchButton
+import com.melox.player.ui.component.AdaptiveTopAppBar
 import com.melox.player.ui.component.BlurredBar
 import com.melox.player.ui.component.library.MusicSortButton
 import com.melox.player.ui.component.library.SelectionActionsAnimatedContent
@@ -49,7 +50,6 @@ import top.yukonga.miuix.kmp.basic.Icon
 import top.yukonga.miuix.kmp.basic.IconButton
 import top.yukonga.miuix.kmp.basic.MiuixScrollBehavior
 import top.yukonga.miuix.kmp.basic.Scaffold
-import top.yukonga.miuix.kmp.basic.TopAppBar
 import top.yukonga.miuix.kmp.blur.layerBackdrop
 import top.yukonga.miuix.kmp.icon.MiuixIcons
 import top.yukonga.miuix.kmp.icon.extended.Back
@@ -134,7 +134,7 @@ fun FolderDetailScreen(
                 blurEnabled = backdrop != null,
                 scrollBehavior = scrollBehavior,
             ) {
-                TopAppBar(
+                AdaptiveTopAppBar(
                     title = if (selectionMode) {
                         if (selectedTrackUris.isEmpty()) {
                             stringResource(R.string.selection_choose_songs)

@@ -10,6 +10,7 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.RowScope
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.calculateEndPadding
+import androidx.compose.foundation.layout.calculateStartPadding
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -57,6 +58,7 @@ import com.melox.player.model.MusicTrack
 import com.melox.player.model.ResolvedPlaylistTrack
 import com.melox.player.ui.LibrarySearchBar
 import com.melox.player.ui.LibrarySearchButton
+import com.melox.player.ui.component.AdaptiveTopAppBar
 import com.melox.player.ui.component.BlurredBar
 import com.melox.player.ui.component.library.AlphabetSections
 import com.melox.player.ui.component.library.AlphabetSideBar
@@ -84,7 +86,6 @@ import top.yukonga.miuix.kmp.basic.PopupPositionProvider
 import top.yukonga.miuix.kmp.basic.Scaffold
 import top.yukonga.miuix.kmp.basic.Text
 import top.yukonga.miuix.kmp.basic.TextButton
-import top.yukonga.miuix.kmp.basic.TopAppBar
 import top.yukonga.miuix.kmp.blur.layerBackdrop
 import top.yukonga.miuix.kmp.icon.MiuixIcons
 import top.yukonga.miuix.kmp.icon.extended.Back
@@ -291,7 +292,7 @@ fun PlaylistDetailScreen(
                 blurEnabled = backdrop != null,
                 scrollBehavior = scrollBehavior,
             ) {
-                TopAppBar(
+                AdaptiveTopAppBar(
                     title = if (selectionMode) {
                         if (selectedEntryIds.isEmpty()) {
                             stringResource(R.string.selection_choose_songs)
@@ -431,42 +432,38 @@ fun PlaylistDetailScreen(
                 .fillMaxSize()
                 .then(backdrop?.let { Modifier.layerBackdrop(it) } ?: Modifier),
         ) {
-            if (displayedTracks.isEmpty()) {
-                Box(
-                    modifier = Modifier
-                        .fillMaxSize()
-                        .padding(
-                            top = padding.calculateTopPadding(),
-                            bottom = maxOf(
-                                padding.calculateBottomPadding(),
-                                bottomContentPadding,
-                            ),
-                        ),
-                    contentAlignment = Alignment.Center,
-                ) {
-                    PlaylistEmptyMessage(
-                        icon = MiuixIcons.Music,
-                        text = stringResource(R.string.playlist_detail_empty),
-                    )
-                }
-            } else {
-                LazyColumn(
-                    modifier = Modifier
-                        .fillMaxSize()
-                        .scrollEndHaptic()
-                        .overScrollVertical()
-                        .nestedScroll(scrollBehavior.nestedScrollConnection),
-                    state = listState,
-                    userScrollEnabled = !isDragging,
-                    contentPadding = PaddingValues(
-                        top = padding.calculateTopPadding() + 12.dp,
-                        bottom = maxOf(
-                            padding.calculateBottomPadding(),
-                            bottomContentPadding,
-                        ) + 12.dp,
-                    ),
-                    overscrollEffect = null,
-                ) {
+            LazyColumn(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .scrollEndHaptic()
+                    .overScrollVertical()
+                    .nestedScroll(scrollBehavior.nestedScrollConnection),
+                state = listState,
+                userScrollEnabled = !isDragging,
+                contentPadding = PaddingValues(
+                    start = padding.calculateStartPadding(layoutDirection),
+                    top = padding.calculateTopPadding() + 12.dp,
+                    end = padding.calculateEndPadding(layoutDirection),
+                    bottom = maxOf(
+                        padding.calculateBottomPadding(),
+                        bottomContentPadding,
+                    ) + 12.dp,
+                ),
+                overscrollEffect = null,
+            ) {
+                if (displayedTracks.isEmpty()) {
+                    item(key = "empty_playlist_detail") {
+                        Box(
+                            modifier = Modifier.fillParentMaxSize(),
+                            contentAlignment = Alignment.Center,
+                        ) {
+                            PlaylistEmptyMessage(
+                                icon = MiuixIcons.Music,
+                                text = stringResource(R.string.playlist_detail_empty),
+                            )
+                        }
+                    }
+                } else {
                     itemsIndexed(
                         items = displayedTracks,
                         key = { _, item -> item.entry.id },
@@ -539,43 +536,44 @@ fun PlaylistDetailScreen(
                         }
                     }
                 }
+            }
 
-                if (
-                    (sortConfig.field == PlaylistSortField.TITLE ||
-                        sortConfig.field == PlaylistSortField.FILE_NAME) &&
-                    query.isBlank()
-                ) {
-                    AlphabetSideBar(
-                        sectionIndexMap = sectionIndexMap,
-                        itemCount = displayedTracks.size,
-                        scrollStateKey = listState,
-                        isAtTarget = { targetIndex ->
-                            listState.firstVisibleItemIndex == targetIndex &&
-                                listState.firstVisibleItemScrollOffset == 0
-                        },
-                        scrollToItem = listState::scrollToItem,
-                        sections = sections,
-                        showScrollTop = showScrollTop,
-                        onTargetIndexChanged = { _, restoreLargeTitle ->
-                            val topBarState = scrollBehavior.state
-                            if (restoreLargeTitle) {
-                                topBarState.heightOffset = 0f
-                                topBarState.contentOffset = 0f
-                            } else if (topBarState.heightOffsetLimit != -Float.MAX_VALUE) {
-                                topBarState.heightOffset = topBarState.heightOffsetLimit
-                                topBarState.contentOffset = topBarState.heightOffsetLimit
-                            }
-                        },
-                        modifier = Modifier
-                            .align(Alignment.TopEnd)
-                            .padding(
-                                top = indexTopPadding + 4.dp,
-                                end = padding.calculateEndPadding(layoutDirection),
-                                bottom = indexBottomPadding + 12.dp,
-                            )
-                            .fillMaxHeight(),
-                    )
-                }
+            if (
+                displayedTracks.isNotEmpty() &&
+                (sortConfig.field == PlaylistSortField.TITLE ||
+                    sortConfig.field == PlaylistSortField.FILE_NAME) &&
+                query.isBlank()
+            ) {
+                AlphabetSideBar(
+                    sectionIndexMap = sectionIndexMap,
+                    itemCount = displayedTracks.size,
+                    scrollStateKey = listState,
+                    isAtTarget = { targetIndex ->
+                        listState.firstVisibleItemIndex == targetIndex &&
+                            listState.firstVisibleItemScrollOffset == 0
+                    },
+                    scrollToItem = listState::scrollToItem,
+                    sections = sections,
+                    showScrollTop = showScrollTop,
+                    onTargetIndexChanged = { _, restoreLargeTitle ->
+                        val topBarState = scrollBehavior.state
+                        if (restoreLargeTitle) {
+                            topBarState.heightOffset = 0f
+                            topBarState.contentOffset = 0f
+                        } else if (topBarState.heightOffsetLimit != -Float.MAX_VALUE) {
+                            topBarState.heightOffset = topBarState.heightOffsetLimit
+                            topBarState.contentOffset = topBarState.heightOffsetLimit
+                        }
+                    },
+                    modifier = Modifier
+                        .align(Alignment.TopEnd)
+                        .padding(
+                            top = indexTopPadding + 4.dp,
+                            end = padding.calculateEndPadding(layoutDirection),
+                            bottom = indexBottomPadding + 12.dp,
+                        )
+                        .fillMaxHeight(),
+                )
             }
         }
     }

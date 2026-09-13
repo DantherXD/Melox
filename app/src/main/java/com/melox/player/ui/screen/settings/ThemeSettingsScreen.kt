@@ -9,6 +9,8 @@ import androidx.compose.animation.shrinkVertically
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.calculateEndPadding
+import androidx.compose.foundation.layout.calculateStartPadding
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
@@ -21,6 +23,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.input.nestedscroll.nestedScroll
+import androidx.compose.ui.platform.LocalLayoutDirection
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
@@ -30,6 +33,7 @@ import com.melox.player.model.DynamicColorSource
 import com.melox.player.model.NavigationTransitionStyle
 import com.melox.player.model.PlaybackBackgroundStyle
 import com.melox.player.model.ThemeMode
+import com.melox.player.ui.component.AdaptiveTopAppBar
 import com.melox.player.ui.component.BlurredBar
 import com.melox.player.ui.component.miuixBarColor
 import com.melox.player.ui.component.rememberBlurBackdrop
@@ -39,7 +43,6 @@ import top.yukonga.miuix.kmp.basic.IconButton
 import top.yukonga.miuix.kmp.basic.Scaffold
 import top.yukonga.miuix.kmp.basic.ScrollBehavior
 import top.yukonga.miuix.kmp.basic.SmallTitle
-import top.yukonga.miuix.kmp.basic.TopAppBar
 import top.yukonga.miuix.kmp.blur.layerBackdrop
 import top.yukonga.miuix.kmp.icon.MiuixIcons
 import top.yukonga.miuix.kmp.icon.extended.Back
@@ -68,6 +71,7 @@ fun ThemeSettingsScreen(
     onPredictiveBackChange: (Boolean) -> Unit,
     onNavigationTransitionStyleChange: (NavigationTransitionStyle) -> Unit,
 ) {
+    val layoutDirection = LocalLayoutDirection.current
     val dynamicColorSupported = Build.VERSION.SDK_INT >= Build.VERSION_CODES.S
     val blurSupported = liquidGlassSupported
     var blurChecked by remember(settings.blurEnabled) {
@@ -122,7 +126,7 @@ fun ThemeSettingsScreen(
                 blurEnabled = topBarBackdrop != null,
                 scrollBehavior = scrollBehavior,
             ) {
-                TopAppBar(
+                AdaptiveTopAppBar(
                     title = stringResource(R.string.settings_theme_settings_title),
                     color = topBarBackdrop.miuixBarColor(),
                     scrollBehavior = scrollBehavior,
@@ -153,7 +157,9 @@ fun ThemeSettingsScreen(
                     .nestedScroll(scrollBehavior.nestedScrollConnection),
                 state = listState,
                 contentPadding = PaddingValues(
+                    start = padding.calculateStartPadding(layoutDirection),
                     top = padding.calculateTopPadding(),
+                    end = padding.calculateEndPadding(layoutDirection),
                     bottom = maxOf(
                         padding.calculateBottomPadding(),
                         bottomContentPadding,
