@@ -13,6 +13,7 @@ import androidx.media3.extractor.ExtractorsFactory
 import androidx.media3.extractor.FlacFrameReader
 import androidx.media3.extractor.FlacMetadataReader
 import androidx.media3.extractor.FlacStreamMetadata
+import androidx.media3.extractor.ForwardingExtractorInput
 import androidx.media3.extractor.PositionHolder
 import androidx.media3.extractor.flac.FlacConstants
 import androidx.media3.extractor.flac.FlacExtractor
@@ -20,6 +21,7 @@ import androidx.media3.extractor.flac.FlacExtractor
 private const val FLAC_STREAM_MARKER = 0x664C6143
 private const val FLAC_FRAME_RESYNC_BUFFER_SIZE = 64 * 1024
 private const val MAX_FLAC_FRAME_RESYNC_BYTES = 32 * 1024 * 1024
+private const val RESERVED_FLAC_METADATA_TYPE = 7
 private const val MISSING_FLAC_FRAME_SYNC_MESSAGE = "First frame does not start with sync code."
 
 @UnstableApi
@@ -50,12 +52,16 @@ internal class ResynchronizingFlacExtractor(
     private val delegate: FlacExtractor,
 ) : Extractor {
     private var streamMetadata: FlacStreamMetadata? = null
+    private var metadataMaskState: FlacMetadataMaskState? = null
     private var recoveryAttempted = false
 
     override fun sniff(input: ExtractorInput): Boolean {
         val recognized = delegate.sniff(input)
         if (recognized) {
-            streamMetadata = input.peekFlacStreamMetadata()
+            input.peekFlacRecoveryMetadata()?.let { metadata ->
+                streamMetadata = metadata.streamMetadata
+                metadataMaskState = FlacMetadataMaskState(metadata.firstMetadataHeaderPosition)
+            }
         }
         return recognized
     }
@@ -63,7 +69,7 @@ internal class ResynchronizingFlacExtractor(
     override fun init(output: ExtractorOutput) = delegate.init(output)
 
     override fun read(input: ExtractorInput, seekPosition: PositionHolder): Int = try {
-        delegate.read(input, seekPosition)
+        delegate.read(input.withDuplicateStreamInfoHeadersMasked(), seekPosition)
     } catch (exception: ParserException) {
         val metadata = streamMetadata
         if (
@@ -78,27 +84,39 @@ internal class ResynchronizingFlacExtractor(
 
         recoveryAttempted = true
         if (!resynchronizeFlacFrame(input, metadata)) throw exception
-        delegate.read(input, seekPosition)
+        delegate.read(input.withDuplicateStreamInfoHeadersMasked(), seekPosition)
     }
 
     override fun seek(position: Long, timeUs: Long) {
-        if (position == 0L) recoveryAttempted = false
+        if (position == 0L) {
+            recoveryAttempted = false
+            metadataMaskState?.reset()
+        }
         delegate.seek(position, timeUs)
     }
 
     override fun release() = delegate.release()
 
     override fun getUnderlyingImplementation(): Extractor = delegate
+
+    private fun ExtractorInput.withDuplicateStreamInfoHeadersMasked(): ExtractorInput =
+        metadataMaskState?.let { state ->
+            DuplicateStreamInfoMaskingExtractorInput(
+                input = this,
+                state = state,
+            )
+        } ?: this
 }
 
 @UnstableApi
-private fun ExtractorInput.peekFlacStreamMetadata(): FlacStreamMetadata? = try {
+internal fun ExtractorInput.peekFlacRecoveryMetadata(): FlacRecoveryMetadata? = try {
     resetPeekPosition()
     FlacMetadataReader.peekId3Metadata(
         this,
         /* parseData = */ false,
         /* ignoreArtwork = */ true,
     )
+    val streamMarkerPosition = peekPosition
     val streamInfo = ByteArray(
         FlacConstants.STREAM_MARKER_SIZE + FlacConstants.STREAM_INFO_BLOCK_SIZE,
     )
@@ -116,15 +134,139 @@ private fun ExtractorInput.peekFlacStreamMetadata(): FlacStreamMetadata? = try {
     ) {
         null
     } else {
-        FlacStreamMetadata(
+        val streamMetadata = FlacStreamMetadata(
             streamInfo,
             FlacConstants.STREAM_MARKER_SIZE + FlacConstants.METADATA_BLOCK_HEADER_SIZE,
+        )
+        FlacRecoveryMetadata(
+            streamMetadata = streamMetadata,
+            firstMetadataHeaderPosition = streamMarkerPosition + FlacConstants.STREAM_MARKER_SIZE,
         )
     }
 } catch (_: Exception) {
     null
 } finally {
     resetPeekPosition()
+}
+
+@UnstableApi
+internal data class FlacRecoveryMetadata(
+    val streamMetadata: FlacStreamMetadata,
+    val firstMetadataHeaderPosition: Long,
+)
+
+@UnstableApi
+internal class DuplicateStreamInfoMaskingExtractorInput(
+    input: ExtractorInput,
+    private val state: FlacMetadataMaskState,
+) : ForwardingExtractorInput(input) {
+    override fun read(target: ByteArray, offset: Int, length: Int): Int {
+        val startPosition = position
+        return super.read(target, offset, length).also { bytesRead ->
+            if (bytesRead > 0) maskHeaders(target, offset, bytesRead, startPosition)
+        }
+    }
+
+    override fun readFully(
+        target: ByteArray,
+        offset: Int,
+        length: Int,
+        allowEndOfInput: Boolean,
+    ): Boolean {
+        val startPosition = position
+        return super.readFully(target, offset, length, allowEndOfInput).also { completed ->
+            if (completed) maskHeaders(target, offset, length, startPosition)
+        }
+    }
+
+    override fun readFully(target: ByteArray, offset: Int, length: Int) {
+        val startPosition = position
+        super.readFully(target, offset, length)
+        maskHeaders(target, offset, length, startPosition)
+    }
+
+    override fun peek(target: ByteArray, offset: Int, length: Int): Int {
+        val startPosition = peekPosition
+        return super.peek(target, offset, length).also { bytesRead ->
+            if (bytesRead > 0) maskHeaders(target, offset, bytesRead, startPosition)
+        }
+    }
+
+    override fun peekFully(
+        target: ByteArray,
+        offset: Int,
+        length: Int,
+        allowEndOfInput: Boolean,
+    ): Boolean {
+        val startPosition = peekPosition
+        return super.peekFully(target, offset, length, allowEndOfInput).also { completed ->
+            if (completed) maskHeaders(target, offset, length, startPosition)
+        }
+    }
+
+    override fun peekFully(target: ByteArray, offset: Int, length: Int) {
+        val startPosition = peekPosition
+        super.peekFully(target, offset, length)
+        maskHeaders(target, offset, length, startPosition)
+    }
+
+    private fun maskHeaders(
+        target: ByteArray,
+        targetOffset: Int,
+        length: Int,
+        sourceStartPosition: Long,
+    ) = state.maskHeaders(target, targetOffset, length, sourceStartPosition)
+}
+
+internal class FlacMetadataMaskState(
+    private val firstMetadataHeaderPosition: Long,
+) {
+    private var nextMetadataHeaderPosition = firstMetadataHeaderPosition
+    private var streamInfoSeen = false
+    private var metadataFinished = false
+
+    fun reset() {
+        nextMetadataHeaderPosition = firstMetadataHeaderPosition
+        streamInfoSeen = false
+        metadataFinished = false
+    }
+
+    fun maskHeaders(
+        target: ByteArray,
+        targetOffset: Int,
+        length: Int,
+        sourceStartPosition: Long,
+    ) {
+        if (metadataFinished || length < FlacConstants.METADATA_BLOCK_HEADER_SIZE) return
+        val sourceEndPosition = sourceStartPosition + length
+        while (nextMetadataHeaderPosition >= sourceStartPosition) {
+            val headerEndPosition =
+                nextMetadataHeaderPosition + FlacConstants.METADATA_BLOCK_HEADER_SIZE
+            if (headerEndPosition > sourceEndPosition) return
+
+            val headerOffset = targetOffset +
+                (nextMetadataHeaderPosition - sourceStartPosition).toInt()
+            val firstHeaderByte = target[headerOffset].toInt() and 0xFF
+            val isLastMetadataBlock = firstHeaderByte and 0x80 != 0
+            val metadataType = firstHeaderByte and 0x7F
+            if (metadataType == FlacConstants.METADATA_TYPE_STREAM_INFO) {
+                if (streamInfoSeen) {
+                    target[headerOffset] = (
+                        (firstHeaderByte and 0x80) or RESERVED_FLAC_METADATA_TYPE
+                    ).toByte()
+                } else {
+                    streamInfoSeen = true
+                }
+            }
+            val blockLength =
+                ((target[headerOffset + 1].toInt() and 0xFF) shl 16) or
+                    ((target[headerOffset + 2].toInt() and 0xFF) shl 8) or
+                    (target[headerOffset + 3].toInt() and 0xFF)
+            nextMetadataHeaderPosition = headerEndPosition + blockLength
+            metadataFinished = isLastMetadataBlock
+            if (metadataFinished) return
+        }
+    }
 }
 
 @UnstableApi
