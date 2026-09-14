@@ -169,6 +169,7 @@ fun PlaylistLibraryScreen(
                         ) { playlist ->
                             PlaylistGridItem(
                                 playlist = playlist,
+                                showEmptyArtworkIcon = false,
                                 onClick = { onPlaylistClick(playlist) },
                             )
                         }
