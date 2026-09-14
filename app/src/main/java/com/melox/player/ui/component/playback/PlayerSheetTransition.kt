@@ -104,6 +104,7 @@ internal class PlayerSheetTransitionState(initialProgress: Float = 0f) {
     private var dragOriginOpen = false
     private var dragStartedFromMiniPlayer = false
     private var requestedInitialVelocity = 0f
+    private var hasBeenShown by mutableStateOf(restoredProgress > 0f)
 
     companion object {
         val Saver: Saver<PlayerSheetTransitionState, List<Any>> = Saver(
@@ -111,10 +112,13 @@ internal class PlayerSheetTransitionState(initialProgress: Float = 0f) {
                 listOf(
                     if (state.targetOpen) 1f else 0f,
                     state.fullPlayerArtworkPageSelected,
+                    state.hasBeenShown,
                 )
             },
             restore = { savedState ->
                 PlayerSheetTransitionState(savedState[0] as Float).apply {
+                    hasBeenShown = savedState.getOrNull(2) as? Boolean
+                        ?: ((savedState[0] as Float) > 0f)
                     updateFullPlayerArtworkPageSelected(savedState[1] as Boolean)
                 }
             },
@@ -294,7 +298,7 @@ internal class PlayerSheetTransitionState(initialProgress: Float = 0f) {
         )
 
     val fullPlayerHostMounted: Boolean
-        get() = isMounted && (isDragging || !sharedLayersReady || !miniPlayerAcceptsInput)
+        get() = hasBeenShown || isDragging
 
     val fullPlayerDrawsInPlace: Boolean
         get() = if (sharedLayersReady) {
@@ -308,9 +312,11 @@ internal class PlayerSheetTransitionState(initialProgress: Float = 0f) {
             (sharedLayersReady || (!isDragging && targetOpen && progress >= 1f))
 
     val fullPlayerDrawsAboveRoot: Boolean
-        get() = sharedLayersReady || progress > PLAYER_LAYER_HANDOFF_END_PROGRESS
+        get() = isMounted &&
+            (sharedLayersReady || progress > PLAYER_LAYER_HANDOFF_END_PROGRESS)
 
     fun open() {
+        hasBeenShown = true
         releaseDragForProgrammaticSettle()
         if (!sharedLayersReady) requestFreshFrameRecording()
         requestSettle(open = true)
@@ -442,7 +448,7 @@ internal class PlayerSheetTransitionState(initialProgress: Float = 0f) {
             targetValue = if (targetOpen) 1f else 0f,
             animationSpec = spring(
                 dampingRatio = Spring.DampingRatioNoBouncy,
-                stiffness = 500f,
+                stiffness = 360f,
                 visibilityThreshold = visibilityThreshold,
             ),
             initialVelocity = requestedInitialVelocity,
@@ -575,6 +581,15 @@ internal fun playerSheetMiniPlayerAcceptsInput(
     !targetOpen && progress.coerceIn(0f, 1f) <= PLAYER_LAYER_HANDOFF_END_PROGRESS
 }
 
+internal fun playerSheetResidentHostTranslationY(
+    miniPlayerAcceptsInput: Boolean,
+    windowHeight: Int,
+): Float = if (miniPlayerAcceptsInput) {
+    windowHeight.coerceAtLeast(0).toFloat()
+} else {
+    0f
+}
+
 internal fun Modifier.recordPlayerLayer(
     layer: GraphicsLayer,
     drawInPlace: Boolean,
@@ -586,7 +601,8 @@ internal fun Modifier.recordPlayerLayer(
     }
     onRecorded(recordingGeneration, layer.size)
     if (drawInPlace) {
-        this@drawWithContent.drawContent()
+        layer.alpha = 1f
+        drawLayer(layer)
     }
 }
 

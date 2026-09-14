@@ -427,9 +427,9 @@ private fun fittedArtworkSize(bitmap: Bitmap, bound: Dp): DpSize {
     }
 }
 
-private const val PLAYBACK_ARTWORK_SHADOW_ALPHA = 0.2f
+private const val PLAYBACK_ARTWORK_SHADOW_ALPHA = 0.5f
 private const val PLAYBACK_ARTWORK_SHADOW_SIZE_FRACTION = 0.9f
-private const val PLAYBACK_ARTWORK_SHADOW_HORIZONTAL_OFFSET_FRACTION = 0f
+private const val PLAYBACK_ARTWORK_SHADOW_HORIZONTAL_OFFSET_FRACTION = 0.05f
 private const val PLAYBACK_ARTWORK_SHADOW_VERTICAL_OFFSET_FRACTION = 0.1f
 internal val PLAYBACK_ARTWORK_SHADOW_BLUR_RADIUS = 16.dp
 

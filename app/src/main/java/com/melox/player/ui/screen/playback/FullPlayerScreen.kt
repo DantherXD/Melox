@@ -68,7 +68,7 @@ import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.layer.GraphicsLayer
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
-import androidx.compose.ui.layout.boundsInRoot
+import androidx.compose.ui.layout.findRootCoordinates
 import androidx.compose.ui.layout.layout
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.platform.LocalDensity
@@ -114,6 +114,7 @@ import com.melox.player.ui.component.library.formatDuration
 import com.melox.player.ui.component.library.rememberArtworkBitmap
 import com.melox.player.ui.component.playback.BlurredArtworkBackground
 import com.melox.player.ui.component.playback.DynamicFlowBackground
+import com.melox.player.ui.component.playback.DynamicFlowBackgroundState
 import com.melox.player.ui.component.playback.PLAYER_FULL_ARTWORK_CORNER_RADIUS
 import com.melox.player.ui.component.playback.PLAYER_FULL_ARTWORK_REQUEST_SIZE
 import com.melox.player.ui.component.playback.PLAYER_TRACK_ARTWORK_CROSSFADE_DURATION_MILLIS
@@ -153,6 +154,7 @@ internal fun FullPlayerScreen(
     currentTrack: MusicTrack?,
     lyrics: LyricsUiState,
     playbackBackgroundStyle: PlaybackBackgroundStyle,
+    dynamicFlowBackgroundState: DynamicFlowBackgroundState,
     lyricFontScale: Float,
     lyricFontWeight: Int,
     forceWordByWordLyrics: Boolean,
@@ -187,6 +189,7 @@ internal fun FullPlayerScreen(
     contentLayer: GraphicsLayer,
     frameRecordingGeneration: Int,
     interactionEnabled: Boolean,
+    blockUnderlyingInput: Boolean,
     lyricsPagingEnabled: Boolean,
     drawInPlace: Boolean,
     sharedArtworkVisible: Boolean,
@@ -359,8 +362,8 @@ internal fun FullPlayerScreen(
     Scaffold(
         modifier = modifier
             .fillMaxSize()
-            .pointerInput(interactionEnabled) {
-                if (interactionEnabled) return@pointerInput
+            .pointerInput(interactionEnabled, blockUnderlyingInput) {
+                if (interactionEnabled || !blockUnderlyingInput) return@pointerInput
                 awaitPointerEventScope {
                     while (true) {
                         awaitPointerEvent(androidx.compose.ui.input.pointer.PointerEventPass.Initial)
@@ -369,7 +372,12 @@ internal fun FullPlayerScreen(
                 }
             }
             .onGloballyPositioned { coordinates ->
-                onPlayerBoundsChanged(coordinates.boundsInRoot())
+                onPlayerBoundsChanged(
+                    coordinates.findRootCoordinates().localBoundingBoxOf(
+                        sourceCoordinates = coordinates,
+                        clipBounds = false,
+                    ),
+                )
             },
         containerColor = Color.Transparent,
     ) {
@@ -400,6 +408,7 @@ internal fun FullPlayerScreen(
                     )
 
                     PlaybackBackgroundStyle.DYNAMIC_FLOW -> DynamicFlowBackground(
+                        state = dynamicFlowBackgroundState,
                         artwork = artworkBlend.currentBitmap,
                         artworkLoading = !artworkLoadCompleted,
                         animate = drawInPlace && playback.isPlaying,
@@ -1778,7 +1787,10 @@ private fun PlayerArtwork(
         modifier = Modifier
             .size(artworkContainerSize)
             .onGloballyPositioned { coordinates ->
-                artworkLayoutBounds = coordinates.boundsInRoot()
+                artworkLayoutBounds = coordinates.findRootCoordinates().localBoundingBoxOf(
+                    sourceCoordinates = coordinates,
+                    clipBounds = false,
+                )
                 boundsWindowSize = artworkWindowSize
                 reportArtworkBounds(artworkLayoutBounds)
             }

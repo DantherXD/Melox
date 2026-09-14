@@ -68,6 +68,7 @@ import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.layer.GraphicsLayer
 import androidx.compose.ui.graphics.rememberGraphicsLayer
 import androidx.compose.ui.platform.LocalContext
@@ -138,12 +139,15 @@ import com.melox.player.ui.component.library.toggleAllTrackSelection
 import com.melox.player.ui.component.playlist.PlaylistNameDialog
 import com.melox.player.ui.component.playlist.PlaylistPickerOverlay
 import com.melox.player.ui.component.playback.MiniPlayer
+import com.melox.player.ui.component.playback.DynamicFlowBackgroundState
 import com.melox.player.ui.component.playback.PLAYER_FULL_ARTWORK_REQUEST_SIZE
 import com.melox.player.ui.component.playback.PlayerSheetArtworkOverlay
 import com.melox.player.ui.component.playback.PlayerSheetContentOverlay
 import com.melox.player.ui.component.playback.sharedArtworkTargetIsOnscreen
 import com.melox.player.ui.component.playback.playerSheetUsesFullPlayerStatusBar
+import com.melox.player.ui.component.playback.playerSheetResidentHostTranslationY
 import com.melox.player.ui.component.playback.prefetchBlurredArtworkBackground
+import com.melox.player.ui.component.playback.rememberDynamicFlowBackgroundState
 import com.melox.player.ui.component.playback.rememberPlayerSheetTransitionState
 import com.melox.player.ui.navigation.PredictiveNavDisplay
 import com.melox.player.ui.screen.library.MusicListScreen
@@ -332,6 +336,7 @@ fun MeloxApp(
         ThemeMode.LIGHT -> false
         ThemeMode.DARK -> true
     }
+    val dynamicFlowBackgroundState = rememberDynamicFlowBackgroundState()
     PlaybackArtworkPrefetchEffect(
         viewModel = viewModel,
         playbackBackgroundStyle = settings.playbackBackgroundStyle,
@@ -561,10 +566,17 @@ fun MeloxApp(
     BackHandler(enabled = playerTransition.isMounted) {
         closePlayer()
     }
-    LaunchedEffect(playerTransition.animationRequest, playerTransition.canSettle) {
-        if (!playerTransition.canSettle || playerTransition.isDragging) return@LaunchedEffect
+    LaunchedEffect(
+        playerTransition.animationRequest,
+        playerTransition.canSettle,
+    ) {
+        if (!playerTransition.canSettle || playerTransition.isDragging) {
+            return@LaunchedEffect
+        }
         withFrameNanos { }
-        if (!playerTransition.canSettle || playerTransition.isDragging) return@LaunchedEffect
+        if (!playerTransition.canSettle || playerTransition.isDragging) {
+            return@LaunchedEffect
+        }
         playerTransition.animateToTarget()
     }
     LaunchedEffect(
@@ -1930,12 +1942,17 @@ fun MeloxApp(
                                 }
                         }
                     if (playerTransition.fullPlayerHostMounted) {
+                        val fullPlayerHostTranslationY = playerSheetResidentHostTranslationY(
+                            miniPlayerAcceptsInput = playerTransition.miniPlayerAcceptsInput,
+                            windowHeight = windowSize.height,
+                        )
                         FullPlayerHost(
                             viewModel = viewModel,
                             tracks = uiState.tracks,
                             artistGroups = uiState.artists,
                             playbackBackgroundStyle =
                                 settings.playbackBackgroundStyle,
+                            dynamicFlowBackgroundState = dynamicFlowBackgroundState,
                             lyricFontScale = settings.lyricFontScale,
                             lyricFontWeight = settings.lyricFontWeight,
                             forceWordByWordLyrics = settings.forceWordByWordLyrics,
@@ -1956,6 +1973,8 @@ fun MeloxApp(
                             frameRecordingGeneration = frameRecordingGeneration,
                             interactionEnabled = playerTransition.fullPlayerAcceptsInput &&
                                 playerTransition.progress > 0f,
+                            blockUnderlyingInput = playerTransition.fullPlayerDrawsAboveRoot &&
+                                !playerTransition.miniPlayerAcceptsInput,
                             lyricsPagingEnabled = playerTransition.isFullyExpanded,
                             drawInPlace = playerTransition.fullPlayerDrawsInPlace,
                             sharedArtworkVisible =
@@ -1982,16 +2001,40 @@ fun MeloxApp(
                                     size,
                                 )
                             },
-                            onPlayerBoundsChanged = { playerTransition.updateFullPlayerBounds(it, windowSize) },
-                            onArtworkBoundsChanged = { playerTransition.updateFullArtworkBounds(it, windowSize) },
+                            onPlayerBoundsChanged = { bounds ->
+                                playerTransition.updateFullPlayerBounds(
+                                    androidx.compose.ui.geometry.Rect(
+                                        left = bounds.left,
+                                        top = bounds.top - fullPlayerHostTranslationY,
+                                        right = bounds.right,
+                                        bottom = bounds.bottom - fullPlayerHostTranslationY,
+                                    ),
+                                    windowSize,
+                                )
+                            },
+                            onArtworkBoundsChanged = { bounds ->
+                                playerTransition.updateFullArtworkBounds(
+                                    androidx.compose.ui.geometry.Rect(
+                                        left = bounds.left,
+                                        top = bounds.top - fullPlayerHostTranslationY,
+                                        right = bounds.right,
+                                        bottom = bounds.bottom - fullPlayerHostTranslationY,
+                                    ),
+                                    windowSize,
+                                )
+                            },
                             onArtworkPageSelectedChanged =
                                 playerTransition::updateFullPlayerArtworkPageSelected,
                             onStatusBarBackgroundDarkChanged = {
                                 playerStatusBarBackgroundIsDark = it
                             },
-                            modifier = Modifier.zIndex(
-                                if (playerTransition.fullPlayerDrawsAboveRoot) 1f else -1f,
-                            ),
+                            modifier = Modifier
+                                .zIndex(
+                                    if (playerTransition.fullPlayerDrawsAboveRoot) 1f else -1f,
+                                )
+                                .graphicsLayer {
+                                    translationY = fullPlayerHostTranslationY
+                                },
                         )
                     }
                     PlayerSheetContentOverlay(
@@ -2096,6 +2139,7 @@ private fun FullPlayerHost(
     tracks: List<MusicTrack>,
     artistGroups: List<ArtistGroup>,
     playbackBackgroundStyle: PlaybackBackgroundStyle,
+    dynamicFlowBackgroundState: DynamicFlowBackgroundState,
     lyricFontScale: Float,
     lyricFontWeight: Int,
     forceWordByWordLyrics: Boolean,
@@ -2113,6 +2157,7 @@ private fun FullPlayerHost(
     contentLayer: GraphicsLayer,
     frameRecordingGeneration: Int,
     interactionEnabled: Boolean,
+    blockUnderlyingInput: Boolean,
     lyricsPagingEnabled: Boolean,
     drawInPlace: Boolean,
     sharedArtworkVisible: Boolean,
@@ -2140,6 +2185,7 @@ private fun FullPlayerHost(
         currentTrack = currentTrack,
         lyrics = lyrics,
         playbackBackgroundStyle = playbackBackgroundStyle,
+        dynamicFlowBackgroundState = dynamicFlowBackgroundState,
         lyricFontScale = lyricFontScale,
         lyricFontWeight = lyricFontWeight,
         forceWordByWordLyrics = forceWordByWordLyrics,
@@ -2174,6 +2220,7 @@ private fun FullPlayerHost(
         contentLayer = contentLayer,
         frameRecordingGeneration = frameRecordingGeneration,
         interactionEnabled = interactionEnabled,
+        blockUnderlyingInput = blockUnderlyingInput,
         lyricsPagingEnabled = lyricsPagingEnabled,
         drawInPlace = drawInPlace,
         sharedArtworkVisible = sharedArtworkVisible,

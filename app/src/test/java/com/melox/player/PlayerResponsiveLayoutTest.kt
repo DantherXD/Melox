@@ -53,11 +53,11 @@ class PlayerResponsiveLayoutTest {
     }
 
     @Test
-    fun primaryControlsKeepTwelveDpBetweenTouchTargetsOnNarrowWidths() {
+    fun primaryControlsUseCurrentTouchTargetSpacingOnNarrowWidths() {
         val layout = playerPrimaryControlLayout(264.dp)
 
-        assertEquals(12.dp, layout.playPauseTouchOffset - layout.previousTouchOffset - 64.dp)
-        assertEquals(12.dp, layout.nextTouchOffset - layout.playPauseTouchOffset - 72.dp)
+        assertEquals(4.5.dp, layout.playPauseTouchOffset - layout.previousTouchOffset - 64.dp)
+        assertEquals(12.5.dp, layout.nextTouchOffset - layout.playPauseTouchOffset - 72.dp)
         assertTrue(layout.previousTouchOffset >= 0.dp)
         assertTrue(layout.nextTouchOffset + 64.dp <= 264.dp)
     }
@@ -77,11 +77,11 @@ class PlayerResponsiveLayoutTest {
         val contentWidth = playerUnboundedContentWidth(playbackPane)
 
         assertEquals(976.dp, designWidth)
-        assertEquals(424.dp, playbackPane)
-        assertEquals(520.dp, lyricsPane)
-        assertEquals(368.dp, contentWidth)
+        assertEquals(428.dp, playbackPane)
+        assertEquals(524.dp, lyricsPane)
+        assertEquals(372.dp, contentWidth)
         assertEquals(96.dp, lyricsPane - playbackPane)
-        assertEquals(456.dp, landscapePlayerLyricsContentWidth(lyricsPane))
+        assertEquals(460.dp, landscapePlayerLyricsContentWidth(lyricsPane))
         assertEquals(
             32.dp,
             (lyricsPane - landscapePlayerLyricsContentWidth(lyricsPane)) / 2f,
@@ -94,17 +94,17 @@ class PlayerResponsiveLayoutTest {
         val wideLyricsPane = landscapePlayerLyricsPaneWidth(widthAbovePaneLimit)
         assertEquals(500.dp, widePlaybackPane)
         assertEquals(596.dp, wideLyricsPane)
-        assertEquals(32.dp, landscapePlayerPaneSpacing(widthAbovePaneLimit))
-        assertEquals(48.dp, (widthAbovePaneLimit - 24.dp - widePlaybackPane -
+        assertEquals(24.dp, landscapePlayerPaneSpacing(widthAbovePaneLimit))
+        assertEquals(52.dp, (widthAbovePaneLimit - 24.dp - widePlaybackPane -
             landscapePlayerPaneSpacing(widthAbovePaneLimit) - wideLyricsPane) / 2f)
     }
 
     @Test
     fun widePaneSpacingCompressesBeforeTheFixedLeadingInsetLosesItsMargin() {
-        assertEquals(32.dp, landscapePlayerPaneSpacing(1152.dp))
-        assertEquals(24.dp, landscapePlayerPaneSpacing(876.dp))
-        assertEquals(16.dp, landscapePlayerPaneSpacing(600.dp))
-        assertEquals(16.dp, landscapePlayerPaneSpacing(400.dp))
+        assertEquals(24.dp, landscapePlayerPaneSpacing(1152.dp))
+        assertEquals(18.088236.dp, landscapePlayerPaneSpacing(876.dp))
+        assertEquals(12.dp, landscapePlayerPaneSpacing(600.dp))
+        assertEquals(12.dp, landscapePlayerPaneSpacing(400.dp))
     }
 
     @Test

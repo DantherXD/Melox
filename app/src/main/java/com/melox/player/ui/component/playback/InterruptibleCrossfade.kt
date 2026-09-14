@@ -5,6 +5,18 @@ internal data class WeightedCrossfadeFrame<T>(
     val alpha: Float,
 )
 
+internal fun sourceOverAlphas(weights: List<Float>): List<Float> {
+    val clampedWeights = weights.map { it.coerceIn(0f, 1f) }
+    val totalWeight = clampedWeights.sum().coerceAtMost(1f)
+    var accumulatedWeight = 1f - totalWeight
+    return clampedWeights.map { weight ->
+        val combinedWeight = accumulatedWeight + weight
+        val alpha = if (combinedWeight > 0f) weight / combinedWeight else 0f
+        accumulatedWeight = combinedWeight
+        alpha.coerceIn(0f, 1f)
+    }
+}
+
 internal fun <T> weightedCrossfadeFrames(
     startingFrames: List<WeightedCrossfadeFrame<T>>,
     currentValue: T?,

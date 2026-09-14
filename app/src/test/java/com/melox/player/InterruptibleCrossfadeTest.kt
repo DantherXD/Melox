@@ -1,11 +1,42 @@
 package com.melox.player
 
 import com.melox.player.ui.component.playback.WeightedCrossfadeFrame
+import com.melox.player.ui.component.playback.sourceOverAlphas
 import com.melox.player.ui.component.playback.weightedCrossfadeFrames
 import org.junit.Assert.assertEquals
 import org.junit.Test
 
 class InterruptibleCrossfadeTest {
+    @Test
+    fun sourceOverAlphasKeepAnOpaqueTwoFrameBlend() {
+        val alphas = sourceOverAlphas(listOf(0.6f, 0.4f))
+
+        assertEquals(1f, alphas[0], 0.0001f)
+        assertEquals(0.4f, alphas[1], 0.0001f)
+    }
+
+    @Test
+    fun sourceOverAlphasPreserveAnInterruptedThreeFrameMixture() {
+        val weights = listOf(0.4f, 0.3f, 0.3f)
+        val alphas = sourceOverAlphas(weights)
+        val visibleWeights = alphas.indices.map { index ->
+            alphas[index] * alphas.drop(index + 1).fold(1f) { value, alpha ->
+                value * (1f - alpha)
+            }
+        }
+
+        weights.indices.forEach { index ->
+            assertEquals(weights[index], visibleWeights[index], 0.0001f)
+        }
+    }
+
+    @Test
+    fun sourceOverAlphasRetainFallbackWeightWhenTheTargetIsMissing() {
+        val alphas = sourceOverAlphas(listOf(0.6f))
+
+        assertEquals(0.6f, alphas.single(), 0.0001f)
+    }
+
     @Test
     fun ordinaryTransitionKeepsTheExistingTwoFrameCurve() {
         val frames = weightedCrossfadeFrames(

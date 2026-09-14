@@ -172,12 +172,13 @@ private fun MovingBlurredArtworkLayer(
         progress = accelerateDecelerate(phase.value),
     )
 
+    val layerAlphas = sourceOverAlphas(layerBlend.frames.map { it.alpha })
     Box(modifier = modifier) {
-        layerBlend.frames.forEach { blendFrame ->
+        layerBlend.frames.forEachIndexed { index, blendFrame ->
             MovingArtworkImage(
                 bitmap = blendFrame.value.blurredArtwork,
                 frame = frame,
-                alpha = blendFrame.alpha,
+                alpha = layerAlphas[index],
                 modifier = Modifier.fillMaxSize(),
             )
         }

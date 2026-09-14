@@ -113,6 +113,18 @@ class PlayerResizeTransitionTest {
         assertTrue(state.miniPlayerAcceptsInput)
     }
 
+    @Test
+    fun openedPlayerHostStaysResidentWhenTheSheetIsCollapsed() {
+        val state = PlayerSheetTransitionState()
+        state.updateWindowSize(portrait)
+        reportContainerBounds(state, portrait)
+
+        state.open()
+        state.close()
+
+        assertTrue(state.fullPlayerHostMounted)
+    }
+
     private val portrait = IntSize(400, 800)
     private val landscape = IntSize(800, 400)
 

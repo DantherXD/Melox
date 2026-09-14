@@ -116,6 +116,7 @@ import com.melox.player.ui.component.playback.playerSheetDragTarget
 import com.melox.player.ui.component.playback.playerSheetVerticalTravel
 import com.melox.player.ui.component.playback.playerSheetGlassVisible
 import com.melox.player.ui.component.playback.playerSheetMiniPlayerAcceptsInput
+import com.melox.player.ui.component.playback.playerSheetResidentHostTranslationY
 import com.melox.player.ui.component.playback.scaledDynamicFlowTimeMs
 import com.melox.player.ui.component.playback.playerSheetPageAlpha
 import com.melox.player.ui.component.playback.playerSheetUsesFullPlayerStatusBar
@@ -171,6 +172,9 @@ import com.melox.player.ui.screen.playback.lyricBlurRadiusTarget
 import com.melox.player.ui.screen.playback.lyricBlurShouldDisableForBrowsing
 import com.melox.player.ui.screen.playback.lyricCenterScrollDelta
 import com.melox.player.ui.screen.playback.lyricDisplayedPositionMs
+import com.melox.player.ui.screen.playback.lyricLineRenderPositionMs
+import com.melox.player.ui.screen.playback.lyricLineLayerAlpha
+import com.melox.player.ui.screen.playback.lyricOutgoingSeekCanClear
 import com.melox.player.ui.screen.playback.lyricEdgeFadeHeights
 import com.melox.player.ui.screen.playback.lyricIntervalProgress
 import com.melox.player.ui.screen.playback.lyricLineVerticalPaddingDp
@@ -186,6 +190,7 @@ import com.melox.player.ui.screen.playback.lyricSeekRequestIsAcknowledged
 import com.melox.player.ui.screen.playback.stabilizedLyricPlaybackPositionMs
 import com.melox.player.ui.screen.playback.lyricTargetScrollOffset
 import com.melox.player.ui.screen.playback.lyricTranslationAlpha
+import com.melox.player.ui.screen.playback.lyricWordProgressActiveAlpha
 import com.melox.player.ui.screen.playback.lyricVerticalDragExceedsTouchSlop
 import com.melox.player.ui.screen.playback.LyricRowRenderMode
 import com.melox.player.ui.screen.playback.progressGestureIsDrag
@@ -413,6 +418,17 @@ class UiLogicTest {
     }
 
     @Test
+    fun wordProgressUsesOneAlphaChannelWithoutCompoundingInactiveColor() {
+        assertEquals(1f, lyricLineLayerAlpha(0.4f, usesWordProgress = true), 0f)
+        assertEquals(0.4f, lyricWordProgressActiveAlpha(0.4f, usesWordProgress = true), 0f)
+        assertEquals(1f, lyricLineLayerAlpha(1f, usesWordProgress = true), 0f)
+        assertEquals(1f, lyricWordProgressActiveAlpha(1f, usesWordProgress = true), 0f)
+
+        assertEquals(0.4f, lyricLineLayerAlpha(0.4f, usesWordProgress = false), 0f)
+        assertEquals(1f, lyricWordProgressActiveAlpha(0.4f, usesWordProgress = false), 0f)
+    }
+
+    @Test
     fun hiddenLyricsFocusesAtFortyPercentOfThePageHeight() {
         assertEquals(
             (-132).dp,
@@ -612,25 +628,62 @@ class UiLogicTest {
     }
 
     @Test
-    fun lyricClockSlewsSmallBackwardPlaybackSamplesWithoutFreezing() {
+    fun lyricClockStaysMonotonicAcrossOrdinaryBackwardSamples() {
         assertEquals(
-            10_112L,
+            10_116.666667,
             stabilizedLyricPlaybackPositionMs(
-                previousPositionMs = 10_100L,
+                previousPositionMs = 10_100.0,
                 sampledPositionMs = 10_000L,
-                expectedFrameAdvanceMs = 16L,
-                isPlaying = true,
+                frameAdvanceNanos = 16_666_667L,
+                playbackSpeed = 1f,
             ),
+            0.000001,
         )
         assertEquals(
-            5_000L,
+            10_116.666667,
             stabilizedLyricPlaybackPositionMs(
-                previousPositionMs = 10_100L,
+                previousPositionMs = 10_100.0,
                 sampledPositionMs = 5_000L,
-                expectedFrameAdvanceMs = 16L,
-                isPlaying = true,
+                frameAdvanceNanos = 16_666_667L,
+                playbackSpeed = 1f,
             ),
+            0.000001,
         )
+        assertEquals(
+            10_200.0,
+            stabilizedLyricPlaybackPositionMs(
+                previousPositionMs = 10_100.0,
+                sampledPositionMs = 10_200L,
+                frameAdvanceNanos = 16_666_667L,
+                playbackSpeed = 1f,
+            ),
+            0.0,
+        )
+    }
+
+    @Test
+    fun lyricClockPreservesSubMillisecondFrameTimeAcrossRefreshRates() {
+        var sixtyHertzPositionMs = 10_000.0
+        repeat(60) {
+            sixtyHertzPositionMs = stabilizedLyricPlaybackPositionMs(
+                previousPositionMs = sixtyHertzPositionMs,
+                sampledPositionMs = 10_000L,
+                frameAdvanceNanos = 16_666_667L,
+                playbackSpeed = 1f,
+            )
+        }
+        assertEquals(11_000.00002, sixtyHertzPositionMs, 0.000001)
+
+        var oneTwentyHertzPositionMs = 10_000.0
+        repeat(120) {
+            oneTwentyHertzPositionMs = stabilizedLyricPlaybackPositionMs(
+                previousPositionMs = oneTwentyHertzPositionMs,
+                sampledPositionMs = 10_000L,
+                frameAdvanceNanos = 8_333_333L,
+                playbackSpeed = 1f,
+            )
+        }
+        assertEquals(10_999.99996, oneTwentyHertzPositionMs, 0.000001)
     }
 
     @Test
@@ -664,6 +717,48 @@ class UiLogicTest {
         assertEquals(0, document.currentLineIndex(1_999L))
         assertEquals(-1, document.currentLineIndex(2_000L))
         assertEquals(1, document.currentLineIndex(4_000L))
+    }
+
+    @Test
+    fun lyricSeekKeepsTheOutgoingLineAtItsCapturedProgress() {
+        assertEquals(
+            12_345L,
+            lyricLineRenderPositionMs(
+                lineIndex = 2,
+                displayedPositionMs = 40_000L,
+                outgoingSeekLineIndex = 2,
+                outgoingSeekPositionMs = 12_345L,
+            ),
+        )
+        assertEquals(
+            40_000L,
+            lyricLineRenderPositionMs(
+                lineIndex = 5,
+                displayedPositionMs = 40_000L,
+                outgoingSeekLineIndex = 2,
+                outgoingSeekPositionMs = 12_345L,
+            ),
+        )
+    }
+
+    @Test
+    fun lyricSeekClearsTheOutgoingLineOnlyAfterItsFadeSettles() {
+        assertFalse(
+            lyricOutgoingSeekCanClear(
+                lineIndex = 2,
+                outgoingSeekLineIndex = 2,
+                currentLineIndex = 5,
+                settledAlpha = 0.5f,
+            ),
+        )
+        assertTrue(
+            lyricOutgoingSeekCanClear(
+                lineIndex = 2,
+                outgoingSeekLineIndex = 2,
+                currentLineIndex = 5,
+                settledAlpha = 0.4f,
+            ),
+        )
     }
 
     @Test
@@ -729,7 +824,7 @@ class UiLogicTest {
     }
 
     @Test
-    fun lyricTapAndProgressSeekKeepAnimatedCenteringAfterInitialPlacement() {
+    fun lyricPlaybackAndTapUseCenteringButPreviewSnapsToTheTarget() {
         assertTrue(lyricSeekUsesAnimatedCentering(true, centerOffsetUnchanged = true))
         assertFalse(lyricSeekUsesAnimatedCentering(true, centerOffsetUnchanged = false))
         assertFalse(lyricSeekUsesAnimatedCentering(false, centerOffsetUnchanged = true))
@@ -1693,9 +1788,9 @@ class UiLogicTest {
             height = 200f,
         )
 
-        assertEquals(0f, shadowBounds.left, 0.0001f)
+        assertEquals(15f, shadowBounds.left, 0.0001f)
         assertEquals(20f, shadowBounds.top, 0.0001f)
-        assertEquals(270f, shadowBounds.right, 0.0001f)
+        assertEquals(285f, shadowBounds.right, 0.0001f)
         assertEquals(200f, shadowBounds.bottom, 0.0001f)
     }
 
@@ -1823,6 +1918,12 @@ class UiLogicTest {
     }
 
     @Test
+    fun residentFullPlayerMovesOffscreenWhileTheMiniPlayerOwnsInput() {
+        assertEquals(800f, playerSheetResidentHostTranslationY(true, 800), 0f)
+        assertEquals(0f, playerSheetResidentHostTranslationY(false, 800), 0f)
+    }
+
+    @Test
     fun fullPlayerWaitsForVisibleReadyContentBeforeAcceptingInput() {
         val state = PlayerSheetTransitionState()
 
@@ -1844,7 +1945,7 @@ class UiLogicTest {
     }
 
     @Test
-    fun collapsedTransitionTailUnmountsTheFullPlayerHost() {
+    fun collapsedTransitionTailKeepsTheFullPlayerHostResidentAfterFirstOpen() {
         val state = PlayerSheetTransitionState(initialProgress = 0.1f)
         state.updateMiniPlayerBounds(Rect(6f, 720f, 354f, 788f))
         state.updateFullPlayerBounds(Rect(0f, 0f, 360f, 800f))
@@ -1853,7 +1954,7 @@ class UiLogicTest {
 
         assertTrue(state.isMounted)
         assertTrue(state.miniPlayerAcceptsInput)
-        assertFalse(state.fullPlayerHostMounted)
+        assertTrue(state.fullPlayerHostMounted)
         assertFalse(state.fullPlayerAcceptsInput)
     }
 

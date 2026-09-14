@@ -15,6 +15,7 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.Stable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
@@ -68,9 +69,20 @@ internal const val DYNAMIC_FLOW_ARTWORK_SATURATION = 2.5f
 internal const val DYNAMIC_FLOW_BACKGROUND_DARKEN_AMOUNT = 0.25f
 private val DynamicFlowFallbackColor = Color(0xFF242424)
 
+@Stable
+internal class DynamicFlowBackgroundState {
+    internal var displayedFrame by mutableStateOf<Bitmap?>(null)
+    internal var elapsedMillis by mutableLongStateOf(0L)
+}
+
+@Composable
+internal fun rememberDynamicFlowBackgroundState(): DynamicFlowBackgroundState =
+    remember { DynamicFlowBackgroundState() }
+
 /** Multi-layer cover background. */
 @Composable
 internal fun DynamicFlowBackground(
+    state: DynamicFlowBackgroundState,
     artwork: Bitmap?,
     animate: Boolean,
     modifier: Modifier = Modifier,
@@ -84,8 +96,6 @@ internal fun DynamicFlowBackground(
         animate && lifecycleState.isAtLeast(Lifecycle.State.RESUMED),
     )
     var viewportSize by remember { mutableStateOf(IntSize.Zero) }
-    var displayedFrame by remember { mutableStateOf<Bitmap?>(null) }
-    var elapsedMillis by remember { mutableLongStateOf(0L) }
     var frameRevision by remember { mutableIntStateOf(0) }
     val currentDensityDpi by rememberUpdatedState(densityDpi)
     val frameBufferPool = remember { DynamicFlowFrameBufferPool() }
@@ -104,7 +114,7 @@ internal fun DynamicFlowBackground(
         suspend fun renderFrame(): Bitmap {
             val size = viewportSize
             val density = currentDensityDpi
-            val visibleFrame = displayedFrame
+            val visibleFrame = state.displayedFrame
             val frame = withContext(Dispatchers.Default) {
                 if (cover == null) {
                     Bitmap.createBitmap(1, 1, Bitmap.Config.ARGB_8888).apply {
@@ -119,7 +129,7 @@ internal fun DynamicFlowBackground(
                         viewportWidth = size.width,
                         viewportHeight = size.height,
                         timeMillis = scaledDynamicFlowTimeMs(
-                            elapsedMillis, DYNAMIC_FLOW_DEFAULT_SPEED_TENTHS,
+                            state.elapsedMillis, DYNAMIC_FLOW_DEFAULT_SPEED_TENTHS,
                         ),
                         densityDpi = density,
                         blur = DYNAMIC_FLOW_DEFAULT_BLUR,
@@ -138,7 +148,7 @@ internal fun DynamicFlowBackground(
 
         // Keep the exact visible mixture when a newer artwork cancels this handoff.
         val target = renderFrame()
-        val previous = displayedFrame
+        val previous = state.displayedFrame
         if (previous != null) {
             val width = max(previous.width, target.width)
             val height = max(previous.height, target.height)
@@ -166,11 +176,13 @@ internal fun DynamicFlowBackground(
             ) {
                 interpolateDynamicFlowPixels(fromPixels, toPixels, pixels, value)
                 transitionFrame.setPixels(pixels, 0, width, 0, 0, width, height)
-                displayedFrame = transitionFrame
+                state.displayedFrame = transitionFrame
                 frameRevision += 1
             }
         }
-        displayedFrame = if (renderedSize != viewportSize || renderedDensity != currentDensityDpi) {
+        state.displayedFrame = if (
+            renderedSize != viewportSize || renderedDensity != currentDensityDpi
+        ) {
             renderFrame()
         } else {
             target
@@ -184,17 +196,17 @@ internal fun DynamicFlowBackground(
                 val frameNanos = withFrameNanos { it }
                 if (!animationEnabled) continue
                 if (!shouldRenderDynamicFlowFrame(previousFrameNanos, frameNanos)) continue
-                elapsedMillis = advanceDynamicFlowClockMillis(
-                    elapsedMillis, previousFrameNanos, frameNanos,
+                state.elapsedMillis = advanceDynamicFlowClockMillis(
+                    state.elapsedMillis, previousFrameNanos, frameNanos,
                 )
                 previousFrameNanos = frameNanos
-                displayedFrame = renderFrame()
+                state.displayedFrame = renderFrame()
             } else {
                 previousFrameNanos = null
                 if (viewportSize.width > 0 && viewportSize.height > 0 &&
                     (renderedSize != viewportSize || renderedDensity != currentDensityDpi)
                 ) {
-                    displayedFrame = renderFrame()
+                    state.displayedFrame = renderFrame()
                 }
                 snapshotFlow { Triple(animationEnabled, viewportSize, currentDensityDpi) }
                     .first { (enabled, size, density) ->
@@ -215,7 +227,7 @@ internal fun DynamicFlowBackground(
             .clipToBounds()
             .onSizeChanged { viewportSize = it },
     ) {
-        displayedFrame?.let { frame ->
+        state.displayedFrame?.let { frame ->
             val image = remember(frame) { frame.asImageBitmap() }
             ComposeCanvas(modifier = Modifier.fillMaxSize()) {
                 // A reused Bitmap keeps its identity; observe writes to invalidate drawing.
