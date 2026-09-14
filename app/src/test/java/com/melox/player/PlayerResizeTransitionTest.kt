@@ -37,12 +37,9 @@ class PlayerResizeTransitionTest {
         assertTrue(state.sharedLayersReady)
         state.close()
         assertTrue(state.canSettle)
-        state.invalidateCollapsedFullPlayerEndpoint()
-        assertFalse(state.sharedLayersReady)
+        assertTrue(state.sharedLayersReady)
 
         state.open()
-        reportContainerBounds(state, portrait)
-        reportFrames(state, portrait)
         assertTrue(state.sharedLayersReady)
         assertFalse(state.separateArtworkOverlayReady)
     }
@@ -249,29 +246,20 @@ class PlayerResizeTransitionTest {
     }
 
     @Test
-    fun collapsedEndpointInvalidationRejectsStaleFullArtworkAndFrames() {
+    fun collapsedPlayerRetainsPreparedFullArtworkAndFrames() {
         val state = PlayerSheetTransitionState()
         state.updateWindowSize(portrait)
         reportBounds(state, portrait)
         reportFrames(state, portrait)
         assertTrue(state.sharedLayersReady)
 
-        state.invalidateCollapsedFullPlayerEndpoint()
-
-        assertFalse(state.sharedLayersReady)
-        assertEquals(Rect.Zero, state.fullPlayerBounds)
-        assertEquals(Rect.Zero, state.fullArtworkBounds)
-        assertTrue(state.miniArtworkBounds != Rect.Zero)
-
-        state.updateFullPlayerBounds(
-            Rect(0f, 0f, portrait.width.toFloat(), portrait.height.toFloat()),
-            portrait,
-        )
-        state.updateFullArtworkBounds(Rect(32f, 64f, 260f, 292f), portrait)
-        val generation = state.currentFrameRecordingGeneration
-        state.markFullFrameRecorded(portrait, generation, portrait)
+        state.open()
+        state.close()
 
         assertTrue(state.sharedLayersReady)
+        assertTrue(state.fullPlayerBounds != Rect.Zero)
+        assertTrue(state.fullArtworkBounds != Rect.Zero)
+        assertTrue(state.miniArtworkBounds != Rect.Zero)
     }
 
     @Test

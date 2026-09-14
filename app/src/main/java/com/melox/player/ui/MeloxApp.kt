@@ -579,16 +579,6 @@ fun MeloxApp(
         }
         playerTransition.animateToTarget()
     }
-    LaunchedEffect(
-        compactPlayback.currentItem?.contentUri,
-        compactPlayback.currentItem?.dateModifiedEpochSeconds,
-        compactPlayback.currentItem?.fileSizeBytes,
-        compactPlayback.playWhenReady,
-    ) {
-        if (!playerTransition.isMounted) {
-            playerTransition.invalidateCollapsedFullPlayerEndpoint()
-        }
-    }
     LaunchedEffect(hasCurrentItem) {
         if (!hasCurrentItem && playerTransition.targetOpen) {
             closePlayer()

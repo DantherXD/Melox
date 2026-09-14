@@ -2,7 +2,7 @@
 
 <img src="assets/Melox-icon.png" alt="Melox app icon" width="96"><br>
 
-# [MeiloX](https://github.com/NEORUAA/MeiloX)
+# [Melox](https://github.com/Inefy-03/Melox)
 
 #### An Android local music player based on <a href="https://github.com/compose-miuix-ui/miuix">Miuix</a>
 
@@ -17,7 +17,7 @@
 
 ## Overview
 
-MeiloX is an Android local music player built with Jetpack Compose, Miuix, and AndroidX Media3.
+Melox is an Android local music player built with Jetpack Compose, Miuix, and AndroidX Media3.
 
 ## Features
 
@@ -76,4 +76,4 @@ MeiloX is an Android local music player built with Jetpack Compose, Miuix, and A
 - [Miuix](https://github.com/compose-miuix-ui/miuix) - UI components and design system
 - [AndroidX Media3](https://developer.android.com/media/media3) - local playback and system media sessions
 
-MeiloX is under active development. Report issues through [Issues](https://github.com/Inefy-03/Melox/issues) or submit a [Pull Request](https://github.com/Inefy-03/Melox/pulls).
+Melox is under active development. Report issues through [Issues](https://github.com/Inefy-03/Melox/issues) or submit a [Pull Request](https://github.com/Inefy-03/Melox/pulls).

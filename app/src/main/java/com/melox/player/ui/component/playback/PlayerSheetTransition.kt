@@ -191,15 +191,6 @@ internal class PlayerSheetTransitionState(initialProgress: Float = 0f) {
         frozenArtworkBounds = null
     }
 
-    fun invalidateCollapsedFullPlayerEndpoint() {
-        if (isTransitionActive) return
-        fullPlayerBounds = Rect.Zero
-        fullArtworkBounds = Rect.Zero
-        fullBackgroundFrameReady = false
-        fullContentFrameReady = false
-        frozenArtworkBounds = null
-    }
-
     fun markMiniFrameRecorded(
         windowSize: IntSize,
         generation: Int,

@@ -3,7 +3,7 @@
 
 <img src="assets/Melox-icon.png" alt="Melox 应用图标" width="96"><br>
 
-# [MeiloX](https://github.com/NEORUAA/MeiloX)
+# [Melox](https://github.com/Inefy-03/Melox)
 
 #### 一个基于  <a href="https://github.com/compose-miuix-ui/miuix">Miuix</a> 的 Android 本地音乐播放器</strong>
 

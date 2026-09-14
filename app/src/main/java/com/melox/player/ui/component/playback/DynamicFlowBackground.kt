@@ -603,19 +603,19 @@ internal fun fillDynamicFlowMeshVertices(
     val phase = timeMillis.toDouble() / 30_000.0 * (PI * 2.0)
     val templateIndex =
         ((seed.toLong() and 0x7fffffffL) % DYNAMIC_FLOW_MESH_TEMPLATE_COUNT).toInt()
-    val templateSalt = DYNAMIC_FLOW_MESH_TEMPLATE_SALTS[templateIndex]
+    val templateSeed = DYNAMIC_FLOW_MESH_TEMPLATE_SEEDS[templateIndex]
     val segment = timeMillis.coerceAtLeast(0L) / 24_000L
     val fraction = (timeMillis.coerceAtLeast(0L) % 24_000L) / 24_000f
     val blend = fraction * fraction * (3f - 2f * fraction)
-    val fromSalt = DYNAMIC_FLOW_MESH_TEMPLATE_SALTS[
+    val fromSeed = DYNAMIC_FLOW_MESH_TEMPLATE_SEEDS[
         ((templateIndex + segment) % DYNAMIC_FLOW_MESH_TEMPLATE_COUNT).toInt()
     ]
-    val toSalt = DYNAMIC_FLOW_MESH_TEMPLATE_SALTS[
+    val toSeed = DYNAMIC_FLOW_MESH_TEMPLATE_SEEDS[
         ((templateIndex + segment + 1) % DYNAMIC_FLOW_MESH_TEMPLATE_COUNT).toInt()
     ]
     fun shapeNoise(column: Int, row: Int, axis: Int): Float {
-        val from = dynamicFlowMeshUnitNoise(seed, fromSalt, column, row, axis)
-        val to = dynamicFlowMeshUnitNoise(seed, toSalt, column, row, axis)
+        val from = dynamicFlowMeshUnitNoise(seed, fromSeed, column, row, axis)
+        val to = dynamicFlowMeshUnitNoise(seed, toSeed, column, row, axis)
         return from + (to - from) * blend
     }
     var index = 0
@@ -641,10 +641,10 @@ internal fun fillDynamicFlowMeshVertices(
             val staticHorizontal = localHorizontal * 0.68f + coarseHorizontal * 0.32f
             val staticVertical = localVertical * 0.68f + coarseVertical * 0.32f
 
-            val horizontalPhase = dynamicFlowMeshPhase(seed, templateSalt, column, row, axis = 4)
-            val verticalPhase = dynamicFlowMeshPhase(seed, templateSalt, column, row, axis = 5)
-            val horizontalSpeed = dynamicFlowMeshSpeed(seed, templateSalt, column, row, axis = 6)
-            val verticalSpeed = dynamicFlowMeshSpeed(seed, templateSalt, column, row, axis = 7)
+            val horizontalPhase = dynamicFlowMeshPhase(seed, templateSeed, column, row, axis = 4)
+            val verticalPhase = dynamicFlowMeshPhase(seed, templateSeed, column, row, axis = 5)
+            val horizontalSpeed = dynamicFlowMeshSpeed(seed, templateSeed, column, row, axis = 6)
+            val verticalSpeed = dynamicFlowMeshSpeed(seed, templateSeed, column, row, axis = 7)
             val horizontalDrift = sin(phase * horizontalSpeed + horizontalPhase).toFloat()
             val verticalDrift = cos(phase * verticalSpeed + verticalPhase).toFloat()
 
@@ -656,7 +656,7 @@ internal fun fillDynamicFlowMeshVertices(
     }
 }
 
-private val DYNAMIC_FLOW_MESH_TEMPLATE_SALTS = intArrayOf(
+private val DYNAMIC_FLOW_MESH_TEMPLATE_SEEDS = intArrayOf(
     0x13579BDF,
     0x2468ACE1,
     0x5A17C0DE,
@@ -667,12 +667,12 @@ private val DYNAMIC_FLOW_MESH_TEMPLATE_SALTS = intArrayOf(
 
 private fun dynamicFlowMeshHash(
     seed: Int,
-    templateSalt: Int,
+    templateSeed: Int,
     column: Int,
     row: Int,
     axis: Int,
 ): Int {
-    var value = seed xor templateSalt
+    var value = seed xor templateSeed
     value = value xor (column + 1) * 0x45D9F3B
     value = value xor (row + 1) * 0x119DE1F3
     value = value xor (axis + 1) * 0x27D4EB2D
@@ -683,34 +683,34 @@ private fun dynamicFlowMeshHash(
 
 private fun dynamicFlowMeshUnitNoise(
     seed: Int,
-    templateSalt: Int,
+    templateSeed: Int,
     column: Int,
     row: Int,
     axis: Int,
 ): Float {
-    val value = dynamicFlowMeshHash(seed, templateSalt, column, row, axis)
+    val value = dynamicFlowMeshHash(seed, templateSeed, column, row, axis)
     return ((value ushr 8) and 0xffff) / 32_767.5f - 1f
 }
 
 private fun dynamicFlowMeshPhase(
     seed: Int,
-    templateSalt: Int,
+    templateSeed: Int,
     column: Int,
     row: Int,
     axis: Int,
 ): Float {
-    val value = dynamicFlowMeshHash(seed, templateSalt, column, row, axis)
+    val value = dynamicFlowMeshHash(seed, templateSeed, column, row, axis)
     return ((value ushr 8) and 0xffff) / 65_535f * (PI * 2f).toFloat()
 }
 
 private fun dynamicFlowMeshSpeed(
     seed: Int,
-    templateSalt: Int,
+    templateSeed: Int,
     column: Int,
     row: Int,
     axis: Int,
 ): Float {
-    val value = dynamicFlowMeshHash(seed, templateSalt, column, row, axis)
+    val value = dynamicFlowMeshHash(seed, templateSeed, column, row, axis)
     return 0.42f + ((value ushr 8) and 0xffff) / 65_535f * 0.34f
 }
 
