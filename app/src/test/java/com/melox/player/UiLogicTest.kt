@@ -1782,16 +1782,16 @@ class UiLogicTest {
     }
 
     @Test
-    fun playbackArtworkShadowUsesRequestedSizeAndLowerOffset() {
+    fun playbackArtworkShadowUsesCenteredRequestedSize() {
         val shadowBounds = playbackArtworkShadowBounds(
             width = 300f,
             height = 200f,
         )
 
         assertEquals(15f, shadowBounds.left, 0.0001f)
-        assertEquals(20f, shadowBounds.top, 0.0001f)
+        assertEquals(10f, shadowBounds.top, 0.0001f)
         assertEquals(285f, shadowBounds.right, 0.0001f)
-        assertEquals(200f, shadowBounds.bottom, 0.0001f)
+        assertEquals(190f, shadowBounds.bottom, 0.0001f)
     }
 
     @Test

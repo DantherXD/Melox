@@ -37,6 +37,7 @@ import com.melox.player.ui.component.AdaptiveTopAppBar
 import com.melox.player.ui.component.BlurredBar
 import com.melox.player.ui.component.miuixBarColor
 import com.melox.player.ui.component.rememberBlurBackdrop
+import com.melox.player.ui.screen.library.MusicLibraryEmptyMessage
 import top.yukonga.miuix.kmp.basic.ButtonDefaults
 import top.yukonga.miuix.kmp.basic.Icon
 import top.yukonga.miuix.kmp.basic.IconButton
@@ -46,6 +47,7 @@ import top.yukonga.miuix.kmp.basic.Text
 import top.yukonga.miuix.kmp.basic.TextButton
 import top.yukonga.miuix.kmp.icon.MiuixIcons
 import top.yukonga.miuix.kmp.icon.extended.Back
+import top.yukonga.miuix.kmp.icon.extended.Folder
 import top.yukonga.miuix.kmp.blur.layerBackdrop
 import top.yukonga.miuix.kmp.overlay.OverlayDialog
 import top.yukonga.miuix.kmp.theme.MiuixTheme
@@ -111,9 +113,9 @@ fun BlockedFoldersScreen(
                 if (sortedPaths.isEmpty()) {
                     item {
                         Box(modifier = Modifier.fillParentMaxSize(), contentAlignment = Alignment.Center) {
-                            Text(
+                            MusicLibraryEmptyMessage(
+                                icon = MiuixIcons.Folder,
                                 text = stringResource(R.string.scan_blocked_folder_empty),
-                                color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
                             )
                         }
                     }
