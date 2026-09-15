@@ -1788,10 +1788,10 @@ class UiLogicTest {
             height = 200f,
         )
 
-        assertEquals(15f, shadowBounds.left, 0.0001f)
-        assertEquals(10f, shadowBounds.top, 0.0001f)
-        assertEquals(285f, shadowBounds.right, 0.0001f)
-        assertEquals(190f, shadowBounds.bottom, 0.0001f)
+        assertEquals(3f, shadowBounds.left, 0.0001f)
+        assertEquals(2f, shadowBounds.top, 0.0001f)
+        assertEquals(297f, shadowBounds.right, 0.0001f)
+        assertEquals(198f, shadowBounds.bottom, 0.0001f)
     }
 
     @Test

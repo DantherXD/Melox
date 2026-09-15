@@ -254,17 +254,29 @@ internal fun PlayerArtwork(
             },
         contentAlignment = Alignment.Center,
     ) {
-        artworkBlend.frames.forEach { frame ->
+        if (artworkBlend.frames.isEmpty()) {
             PlaybackArtworkFrame(
-                bitmap = frame.value,
+                bitmap = null,
                 size = artworkContentSize,
                 cornerRadius = cornerRadius,
                 modifier = Modifier,
                 contentScale = ContentScale.Fit,
                 useSquircleClip = true,
                 drawArtworkShadow = true,
-                artworkAlpha = frame.alpha,
             )
+        } else {
+            artworkBlend.frames.forEach { frame ->
+                PlaybackArtworkFrame(
+                    bitmap = frame.value,
+                    size = artworkContentSize,
+                    cornerRadius = cornerRadius,
+                    modifier = Modifier,
+                    contentScale = ContentScale.Fit,
+                    useSquircleClip = true,
+                    drawArtworkShadow = true,
+                    artworkAlpha = frame.alpha,
+                )
+            }
         }
     }
 }
