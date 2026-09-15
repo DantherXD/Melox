@@ -252,6 +252,7 @@ class LyricsRepository(context: Context) {
 
     private fun String?.isLyricsKey(): Boolean {
         val normalized = this?.uppercase(Locale.ROOT).orEmpty()
+            .substringAfterLast(':')
             .replace(" ", "")
             .replace("_", "")
         return normalized in LYRICS_KEYS || normalized.contains("LYRIC")
@@ -282,6 +283,10 @@ class LyricsRepository(context: Context) {
             "USLT",
             "LYRIC",
             "LYRICSENG",
+            "UNSYNCEDLYRICS",
+            "ITXT",
+            "ITEXT",
+            "LYRICIST",
         )
         private val SHARED_STORAGE_ROOTS = listOf(
             "/storage/emulated/0",

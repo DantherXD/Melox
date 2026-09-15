@@ -107,8 +107,14 @@ internal data class LocalAudioTags(
 internal fun parseAudioTagProperties(
     properties: Map<String, Array<String>>,
 ): LocalAudioTags {
-    val normalizedProperties = properties.entries.associate { (key, values) ->
-        key.uppercase(Locale.ROOT) to values
+    val normalizedProperties = buildMap<String, Array<String>> {
+        properties.forEach { (key, values) ->
+            val normalizedKey = key.uppercase(Locale.ROOT)
+            val shortKey = normalizedKey.substringAfterLast(':', missingDelimiterValue = normalizedKey)
+            listOf(normalizedKey, shortKey).distinct().forEach { candidate ->
+                put(candidate, (get(candidate)?.toList().orEmpty() + values.toList()).toTypedArray())
+            }
+        }
     }
 
     fun joinedValue(vararg keys: String): String? = keys.firstNotNullOfOrNull { key ->
@@ -135,18 +141,19 @@ internal fun parseAudioTagProperties(
         ?.takeIf { it > 0 }
 
     return LocalAudioTags(
-        title = joinedValue("TITLE"),
-        artist = joinedValue("ARTIST"),
-        album = joinedValue("ALBUM"),
+        title = joinedValue("TITLE", "INAM", "NAME"),
+        artist = joinedValue("ARTIST", "IART"),
+        album = joinedValue("ALBUM", "IPRD", "PRODUCT"),
         albumArtist = joinedValue(
             "ALBUMARTIST",
             "ALBUM ARTIST",
             "TPE2",
             "AART",
             "ALBUMARTISTSORT",
+            "IART",
         ),
         year = year,
-        trackNumber = indexedValue("TRACKNUMBER", "TRACK", "TRCK"),
+        trackNumber = indexedValue("TRACKNUMBER", "TRACK", "TRCK", "ITRK"),
         discNumber = indexedValue("DISCNUMBER", "DISC", "TPOS", "DISKNUMBER"),
     )
 }
