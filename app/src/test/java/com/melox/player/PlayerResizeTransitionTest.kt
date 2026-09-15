@@ -122,6 +122,60 @@ class PlayerResizeTransitionTest {
         assertTrue(state.fullPlayerHostMounted)
     }
 
+    @Test
+    fun firstUpwardDragRetainsFullHostAfterReleaseWithoutCallingOpen() {
+        val state = PlayerSheetTransitionState()
+        state.updateWindowSize(portrait)
+        assertFalse(state.fullPlayerHostMounted)
+
+        state.beginMiniPlayerDrag()
+        reportBounds(state, portrait)
+        reportFrames(state, portrait)
+        state.dragBy(-800f)
+        state.endDrag(velocityY = -900f)
+
+        assertTrue(state.targetOpen)
+        assertFalse(state.isDragging)
+        assertEquals(1f, state.progress, 0f)
+        assertFalse(state.isTransitionActive)
+        assertTrue(state.fullPlayerHostMounted)
+        assertTrue(state.fullPlayerDrawsInPlace)
+        assertTrue(state.fullPlayerAcceptsInput)
+        assertFalse(state.miniPlayerAcceptsInput)
+    }
+
+    @Test
+    fun firstShortUpwardDragRetainsHostDuringSpringSettlement() {
+        val state = PlayerSheetTransitionState()
+        state.updateWindowSize(portrait)
+        state.beginMiniPlayerDrag()
+        reportBounds(state, portrait)
+        reportFrames(state, portrait)
+        state.dragBy(-120f)
+        state.endDrag(velocityY = -900f)
+
+        assertTrue(state.targetOpen)
+        assertTrue(state.isTransitionActive)
+        assertTrue(state.fullPlayerHostMounted)
+        assertTrue(state.fullPlayerDrawsAboveRoot)
+    }
+
+    @Test
+    fun firstUpwardDragKeepsFullPlayerHostMountedAfterRelease() {
+        val state = PlayerSheetTransitionState()
+        state.updateWindowSize(portrait)
+        state.updateMiniPlayerBounds(Rect(0f, 736f, 300f, 800f), portrait)
+        state.updateFullPlayerBounds(Rect(0f, 0f, 400f, 800f), portrait)
+
+        state.beginMiniPlayerDrag()
+        state.dragBy(-800f)
+        state.endDrag(velocityY = -900f)
+
+        assertTrue(state.targetOpen)
+        assertFalse(state.isDragging)
+        assertTrue(state.fullPlayerHostMounted)
+    }
+
     private val portrait = IntSize(400, 800)
     private val landscape = IntSize(800, 400)
 
