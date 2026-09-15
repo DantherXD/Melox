@@ -1,6 +1,5 @@
 package com.melox.player.ui.component.playback
 
-import android.content.Context
 import android.graphics.Bitmap
 import android.graphics.Canvas
 import android.graphics.ColorMatrix
@@ -33,13 +32,10 @@ import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.painter.BitmapPainter
 import androidx.compose.ui.layout.ContentScale
-import androidx.compose.ui.platform.LocalContext
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import com.melox.player.ui.component.library.createArtworkCacheKey
 import com.melox.player.ui.component.library.canRetainArtworkInMemory
-import com.melox.player.ui.component.library.loadArtworkBitmap
-import com.melox.player.ui.component.library.loadCachedArtworkDerivative
 import java.util.LinkedHashMap
 import java.util.WeakHashMap
 import kotlin.math.PI
@@ -89,19 +85,20 @@ internal data class KenBurnsFrame(
 
 @Composable
 internal fun BlurredArtworkBackground(
-    contentUri: String,
-    dateModifiedEpochSeconds: Long,
-    fileSizeBytes: Long,
+    resource: PlaybackArtworkResource,
     animate: Boolean,
+    modifier: Modifier = Modifier,
     animateArtworkTransition: Boolean = true,
     onStatusBarBackgroundDarkChanged: (Boolean) -> Unit = {},
-    modifier: Modifier = Modifier,
 ) {
-    val targetLayer = rememberBlurredArtworkLayer(
-        contentUri = contentUri,
-        dateModifiedEpochSeconds = dateModifiedEpochSeconds,
-        fileSizeBytes = fileSizeBytes,
-    )
+    val targetLayer = remember(resource.blurredCacheKey, resource.blurredArtwork) {
+        resource.blurredArtwork?.let { bitmap ->
+            BlurredArtworkLayer(
+                key = resource.blurredCacheKey,
+                blurredArtwork = bitmap,
+            ).also(::cacheBlurredArtworkLayer)
+        }
+    }
     val layerBlend = rememberBlurredArtworkLayerBlend(
         targetLayer = targetLayer,
         animateTransition = animateArtworkTransition,
@@ -212,84 +209,7 @@ private fun MovingArtworkImage(
     )
 }
 
-@Composable
-private fun rememberBlurredArtworkLayer(
-    contentUri: String,
-    dateModifiedEpochSeconds: Long,
-    fileSizeBytes: Long,
-): BlurredArtworkLayer? {
-    val context = LocalContext.current.applicationContext
-    var layer by remember { mutableStateOf<BlurredArtworkLayer?>(null) }
-    val layerKey = remember(contentUri, dateModifiedEpochSeconds, fileSizeBytes) {
-        createBlurredArtworkLayerKey(
-            contentUri = contentUri,
-            dateModifiedEpochSeconds = dateModifiedEpochSeconds,
-            fileSizeBytes = fileSizeBytes,
-        )
-    }
-    val cachedLayer = remember(layerKey) {
-        getCachedBlurredArtworkLayer(layerKey)
-    }
-
-    LaunchedEffect(layerKey) {
-        layer = cachedLayer ?: loadBlurredArtworkLayer(
-            context = context,
-            contentUri = contentUri,
-            dateModifiedEpochSeconds = dateModifiedEpochSeconds,
-            fileSizeBytes = fileSizeBytes,
-        )
-    }
-
-    return cachedLayer ?: layer
-}
-
-internal suspend fun prefetchBlurredArtworkBackground(
-    context: Context,
-    contentUri: String,
-    dateModifiedEpochSeconds: Long,
-    fileSizeBytes: Long,
-) {
-    loadBlurredArtworkLayer(
-        context = context.applicationContext,
-        contentUri = contentUri,
-        dateModifiedEpochSeconds = dateModifiedEpochSeconds,
-        fileSizeBytes = fileSizeBytes,
-    )
-}
-
-private suspend fun loadBlurredArtworkLayer(
-    context: Context,
-    contentUri: String,
-    dateModifiedEpochSeconds: Long,
-    fileSizeBytes: Long,
-): BlurredArtworkLayer? {
-    if (contentUri.isBlank()) return null
-    val layerKey = createBlurredArtworkLayerKey(
-        contentUri = contentUri,
-        dateModifiedEpochSeconds = dateModifiedEpochSeconds,
-        fileSizeBytes = fileSizeBytes,
-    )
-    getCachedBlurredArtworkLayer(layerKey)?.let { return it }
-    val blurSource = loadArtworkBitmap(
-        context = context,
-        contentUri = contentUri,
-        dateModifiedEpochSeconds = dateModifiedEpochSeconds,
-        fileSizeBytes = fileSizeBytes,
-        targetSizePx = PLAYBACK_BACKGROUND_BLUR_SIZE_PX,
-    ) ?: return null
-    val blurredArtwork = loadCachedArtworkDerivative(
-        context = context,
-        cacheKey = layerKey,
-    ) {
-        createBlurredArtwork(blurSource)
-    } ?: return null
-    return BlurredArtworkLayer(
-        key = layerKey,
-        blurredArtwork = blurredArtwork,
-    ).also(::cacheBlurredArtworkLayer)
-}
-
-private fun createBlurredArtworkLayerKey(
+internal fun createBlurredArtworkLayerKey(
     contentUri: String,
     dateModifiedEpochSeconds: Long,
     fileSizeBytes: Long,
@@ -372,7 +292,7 @@ private fun rememberBlurredArtworkLayerBlend(
     )
 }
 
-private fun createBlurredArtwork(source: Bitmap): Bitmap {
+internal fun createBlurredArtwork(source: Bitmap): Bitmap {
     synchronized(blurredArtworkMemoryCache) {
         blurredArtworkMemoryCache[source]
     }?.let { return it }

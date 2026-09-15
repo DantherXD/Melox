@@ -41,11 +41,11 @@ class DynamicFlowPerformanceTest {
     @Test
     fun pacingIncludesRenderingTimeAndDoesNotCatchUpAfterSlowFrames() {
         assertTrue(shouldRenderDynamicFlowFrame(null, 0L))
-        assertFalse(shouldRenderDynamicFlowFrame(0L, 8_333_333L))
-        assertTrue(shouldRenderDynamicFlowFrame(0L, 16_666_666L))
+        assertFalse(shouldRenderDynamicFlowFrame(0L, 16_666_666L))
+        assertTrue(shouldRenderDynamicFlowFrame(0L, 33_333_333L))
         assertTrue(shouldRenderDynamicFlowFrame(0L, 100_000_000L))
-        assertFalse(shouldRenderDynamicFlowFrame(100_000_000L, 108_333_333L))
-        assertTrue(shouldRenderDynamicFlowFrame(100_000_000L, 116_666_666L))
+        assertFalse(shouldRenderDynamicFlowFrame(100_000_000L, 116_666_666L))
+        assertTrue(shouldRenderDynamicFlowFrame(100_000_000L, 133_333_333L))
     }
 
     @Test
@@ -60,8 +60,7 @@ class DynamicFlowPerformanceTest {
                     rendered++
                 }
             }
-            // A 90 Hz display needs two refresh intervals with start-based pacing.
-            org.junit.Assert.assertEquals(if (refreshRate == 90) 45 else 60, rendered)
+            org.junit.Assert.assertEquals(30, rendered)
         }
     }
 

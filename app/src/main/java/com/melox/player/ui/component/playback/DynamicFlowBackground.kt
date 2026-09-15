@@ -51,7 +51,7 @@ import kotlin.math.roundToInt
 import kotlin.math.sin
 import kotlin.math.sqrt
 
-private const val DYNAMIC_FLOW_FRAME_INTERVAL_NANOS = 1_000_000_000L / 60
+private const val DYNAMIC_FLOW_FRAME_INTERVAL_NANOS = 1_000_000_000L / 30
 internal const val DYNAMIC_FLOW_DEFAULT_SPEED_TENTHS = 10
 private const val DYNAMIC_FLOW_DEFAULT_BLUR = 60f
 private const val DYNAMIC_FLOW_FRAME_BUFFER_COUNT = 3
@@ -71,8 +71,19 @@ private val DynamicFlowFallbackColor = Color(0xFF242424)
 
 @Stable
 internal class DynamicFlowBackgroundState {
-    internal var displayedFrame by mutableStateOf<Bitmap?>(null)
-    internal var elapsedMillis by mutableLongStateOf(0L)
+    internal var displayedFrame: Bitmap? = null
+        private set
+    internal var displayedImage = displayedFrame?.asImageBitmap()
+        private set
+    internal var elapsedMillis: Long = 0L
+    internal var frameRevision by mutableIntStateOf(0)
+        private set
+
+    internal fun publishFrame(frame: Bitmap) {
+        displayedFrame = frame
+        displayedImage = frame.asImageBitmap()
+        frameRevision += 1
+    }
 }
 
 @Composable
@@ -88,6 +99,7 @@ internal fun DynamicFlowBackground(
     modifier: Modifier = Modifier,
     onStatusBarBackgroundDarkChanged: (Boolean) -> Unit = {},
     artworkLoading: Boolean = false,
+    backgroundColor: Color? = null,
     onFrameReady: () -> Unit = {},
 ) {
     val densityDpi = LocalContext.current.resources.displayMetrics.densityDpi
@@ -96,18 +108,17 @@ internal fun DynamicFlowBackground(
         animate && lifecycleState.isAtLeast(Lifecycle.State.RESUMED),
     )
     var viewportSize by remember { mutableStateOf(IntSize.Zero) }
-    var frameRevision by remember { mutableIntStateOf(0) }
     val currentDensityDpi by rememberUpdatedState(densityDpi)
     val frameBufferPool = remember { DynamicFlowFrameBufferPool() }
 
-    LaunchedEffect(artwork, artworkLoading) {
+    LaunchedEffect(artwork, artworkLoading, backgroundColor) {
         if (artworkLoading) return@LaunchedEffect
         frameBufferPool.resetHistory()
         snapshotFlow { viewportSize }.first { it.width > 0 && it.height > 0 }
         val cover = withContext(Dispatchers.Default) { artwork?.scaledForDynamicFlowSource() }
         val meshSeed = withContext(Dispatchers.Default) { cover?.dynamicFlowMeshSeed() ?: 0 }
-        val backgroundColor = withContext(Dispatchers.Default) {
-            dynamicFlowBackgroundColor(artwork)
+        val resolvedBackgroundColor = withContext(Dispatchers.Default) {
+            backgroundColor ?: dynamicFlowBackgroundColor(artwork)
         }
         var renderedSize = IntSize.Zero
         var renderedDensity = 0
@@ -118,7 +129,7 @@ internal fun DynamicFlowBackground(
             val frame = withContext(Dispatchers.Default) {
                 if (cover == null) {
                     Bitmap.createBitmap(1, 1, Bitmap.Config.ARGB_8888).apply {
-                        eraseColor(backgroundColor.toArgb())
+                        eraseColor(resolvedBackgroundColor.toArgb())
                     }
                 } else {
                     createDynamicFlowFrameBitmap(
@@ -134,10 +145,10 @@ internal fun DynamicFlowBackground(
                         densityDpi = density,
                         blur = DYNAMIC_FLOW_DEFAULT_BLUR,
                         washPrimaryArgb = blendDynamicFlowColors(
-                            backgroundColor, Color.Black, 0.24f,
+                            resolvedBackgroundColor, Color.Black, 0.24f,
                         ).copy(alpha = 0.24f).toArgb(),
                         washSecondaryArgb = Color(0xFF121316).copy(alpha = 0.16f).toArgb(),
-                        backgroundArgb = backgroundColor.toArgb(),
+                        backgroundArgb = resolvedBackgroundColor.toArgb(),
                     )
                 }
             }
@@ -176,17 +187,16 @@ internal fun DynamicFlowBackground(
             ) {
                 interpolateDynamicFlowPixels(fromPixels, toPixels, pixels, value)
                 transitionFrame.setPixels(pixels, 0, width, 0, 0, width, height)
-                state.displayedFrame = transitionFrame
-                frameRevision += 1
+                state.publishFrame(transitionFrame)
             }
         }
-        state.displayedFrame = if (
+        state.publishFrame(if (
             renderedSize != viewportSize || renderedDensity != currentDensityDpi
         ) {
             renderFrame()
         } else {
             target
-        }
+        })
         onFrameReady()
         if (cover == null) return@LaunchedEffect
 
@@ -200,13 +210,13 @@ internal fun DynamicFlowBackground(
                     state.elapsedMillis, previousFrameNanos, frameNanos,
                 )
                 previousFrameNanos = frameNanos
-                state.displayedFrame = renderFrame()
+                state.publishFrame(renderFrame())
             } else {
                 previousFrameNanos = null
                 if (viewportSize.width > 0 && viewportSize.height > 0 &&
                     (renderedSize != viewportSize || renderedDensity != currentDensityDpi)
                 ) {
-                    state.displayedFrame = renderFrame()
+                    state.publishFrame(renderFrame())
                 }
                 snapshotFlow { Triple(animationEnabled, viewportSize, currentDensityDpi) }
                     .first { (enabled, size, density) ->
@@ -227,11 +237,11 @@ internal fun DynamicFlowBackground(
             .clipToBounds()
             .onSizeChanged { viewportSize = it },
     ) {
-        state.displayedFrame?.let { frame ->
-            val image = remember(frame) { frame.asImageBitmap() }
-            ComposeCanvas(modifier = Modifier.fillMaxSize()) {
-                // A reused Bitmap keeps its identity; observe writes to invalidate drawing.
-                frameRevision
+        ComposeCanvas(modifier = Modifier.fillMaxSize()) {
+            // Snapshot observation stays in the draw phase, so frame publication
+            // invalidates only this background node.
+            state.frameRevision
+            state.displayedImage?.let { image ->
                 drawImage(
                     image = image,
                     dstSize = IntSize(size.width.roundToInt(), size.height.roundToInt()),
@@ -919,7 +929,7 @@ private fun dynamicFlowArgbPixel(pixel: Long): Int {
 
 private fun defaultDynamicFlowBackgroundColor(): Color = Color(0xFF0B0B0D)
 
-private fun dynamicFlowBackgroundColor(bitmap: Bitmap?): Color {
+internal fun dynamicFlowBackgroundColor(bitmap: Bitmap?): Color {
     val representative = representativeDynamicFlowAccent(bitmap)
         ?: return if (bitmap == null) {
             DynamicFlowFallbackColor

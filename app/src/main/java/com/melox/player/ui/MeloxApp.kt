@@ -126,7 +126,6 @@ import com.melox.player.ui.component.library.MusicSortButton
 import com.melox.player.ui.component.library.SelectionActionsAnimatedContent
 import com.melox.player.ui.component.library.SelectionNavigationIconAnimatedContent
 import com.melox.player.ui.component.library.TrackSelectionActions
-import com.melox.player.ui.component.library.prefetchArtwork
 import com.melox.player.ui.component.library.extractArtworkColor
 import com.melox.player.ui.component.library.rememberArtworkBitmap
 import com.melox.player.ui.component.library.AlphabetSections
@@ -146,7 +145,7 @@ import com.melox.player.ui.component.playback.PlayerSheetContentOverlay
 import com.melox.player.ui.component.playback.sharedArtworkTargetIsOnscreen
 import com.melox.player.ui.component.playback.playerSheetUsesFullPlayerStatusBar
 import com.melox.player.ui.component.playback.playerSheetResidentHostTranslationY
-import com.melox.player.ui.component.playback.prefetchBlurredArtworkBackground
+import com.melox.player.ui.component.playback.prefetchPlaybackArtworkResource
 import com.melox.player.ui.component.playback.rememberDynamicFlowBackgroundState
 import com.melox.player.ui.component.playback.rememberPlayerSheetTransitionState
 import com.melox.player.ui.navigation.PredictiveNavDisplay
@@ -337,10 +336,7 @@ fun MeloxApp(
         ThemeMode.DARK -> true
     }
     val dynamicFlowBackgroundState = rememberDynamicFlowBackgroundState()
-    PlaybackArtworkPrefetchEffect(
-        viewModel = viewModel,
-        playbackBackgroundStyle = settings.playbackBackgroundStyle,
-    )
+    PlaybackArtworkPrefetchEffect(viewModel = viewModel)
     // API level alone is insufficient: liquid glass also needs RuntimeShader support at runtime.
     val liquidGlassSupported = Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
         isRuntimeShaderSupported()
@@ -1963,8 +1959,7 @@ fun MeloxApp(
                             frameRecordingGeneration = frameRecordingGeneration,
                             interactionEnabled = playerTransition.fullPlayerAcceptsInput &&
                                 playerTransition.progress > 0f,
-                            blockUnderlyingInput = playerTransition.fullPlayerDrawsAboveRoot &&
-                                !playerTransition.miniPlayerAcceptsInput,
+                            blockUnderlyingInput = playerTransition.blocksUnderlyingInput,
                             lyricsPagingEnabled = playerTransition.isFullyExpanded,
                             drawInPlace = playerTransition.fullPlayerDrawsInPlace,
                             sharedArtworkVisible =
@@ -2295,7 +2290,6 @@ private fun playerSheetArtworkIsOffscreen(
 @Composable
 private fun PlaybackArtworkPrefetchEffect(
     viewModel: MeloxViewModel,
-    playbackBackgroundStyle: PlaybackBackgroundStyle,
 ) {
     val playback by viewModel.compactPlaybackState.collectAsStateWithLifecycle()
     val applicationContext = LocalContext.current.applicationContext
@@ -2306,7 +2300,6 @@ private fun PlaybackArtworkPrefetchEffect(
         playback.currentIndex,
         playback.queue,
         artworkPrefetchSizePx,
-        playbackBackgroundStyle,
     ) {
         if (playback.queue.isEmpty() || playback.currentIndex !in playback.queue.indices) {
             return@LaunchedEffect
@@ -2317,28 +2310,16 @@ private fun PlaybackArtworkPrefetchEffect(
             (playback.currentIndex - 1 + playback.queue.size) % playback.queue.size,
         ).distinct().forEach { index ->
             val item = playback.queue[index]
-            prefetchArtwork(
+            prefetchPlaybackArtworkResource(
                 context = applicationContext,
                 contentUri = item.contentUri,
                 dateModifiedEpochSeconds = item.dateModifiedEpochSeconds,
                 fileSizeBytes = item.fileSizeBytes,
                 targetSizePx = artworkPrefetchSizePx,
             )
-            when (playbackBackgroundStyle) {
-                PlaybackBackgroundStyle.DYNAMIC_FLOW -> Unit
-
-                PlaybackBackgroundStyle.BLURRED_ARTWORK -> {
-                    prefetchBlurredArtworkBackground(
-                        context = applicationContext,
-                        contentUri = item.contentUri,
-                        dateModifiedEpochSeconds = item.dateModifiedEpochSeconds,
-                        fileSizeBytes = item.fileSizeBytes,
-                    )
-                    }
-                }
-            }
         }
     }
+}
 
 @Composable
 private fun QueueSheetHost(
