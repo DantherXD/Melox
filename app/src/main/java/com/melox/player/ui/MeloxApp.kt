@@ -70,6 +70,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.layer.GraphicsLayer
+import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.graphics.rememberGraphicsLayer
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
@@ -558,9 +559,6 @@ fun MeloxApp(
     ) {
         selectedSongUris = emptySet()
         songsSelectionMode = false
-    }
-    BackHandler(enabled = playerTransition.isMounted) {
-        closePlayer()
     }
     LaunchedEffect(
         playerTransition.animationRequest,
@@ -1574,6 +1572,7 @@ fun MeloxApp(
                                     backStack = navBackStack,
                                     predictiveBackEnabled =
                                         settings.predictiveBackEnabled && !showQueue,
+                                    backEnabled = !playerTransition.isMounted,
                                     transitionStyle = settings.navigationTransitionStyle,
                                     isDark = isDark,
                                     onBack = navigateBack,
@@ -1927,6 +1926,9 @@ fun MeloxApp(
                                     }
                                 }
                         }
+                    BackHandler(enabled = playerTransition.isMounted) {
+                        closePlayer()
+                    }
                     if (playerTransition.fullPlayerHostMounted) {
                         val fullPlayerHostTranslationY = playerSheetResidentHostTranslationY(
                             miniPlayerAcceptsInput = playerTransition.miniPlayerAcceptsInput,
@@ -2296,10 +2298,16 @@ private fun PlaybackArtworkPrefetchEffect(
     val artworkPrefetchSizePx = with(LocalDensity.current) {
         PLAYER_FULL_ARTWORK_REQUEST_SIZE.roundToPx()
     }
+    val placeholderArtworkResId = if (MiuixTheme.colorScheme.surface.luminance() < 0.5f) {
+        R.drawable.ic_album_placeholder_dark
+    } else {
+        R.drawable.ic_album_placeholder_light
+    }
     LaunchedEffect(
         playback.currentIndex,
         playback.queue,
         artworkPrefetchSizePx,
+        placeholderArtworkResId,
     ) {
         if (playback.queue.isEmpty() || playback.currentIndex !in playback.queue.indices) {
             return@LaunchedEffect
@@ -2316,6 +2324,7 @@ private fun PlaybackArtworkPrefetchEffect(
                 dateModifiedEpochSeconds = item.dateModifiedEpochSeconds,
                 fileSizeBytes = item.fileSizeBytes,
                 targetSizePx = artworkPrefetchSizePx,
+                placeholderArtworkResId = placeholderArtworkResId,
             )
         }
     }

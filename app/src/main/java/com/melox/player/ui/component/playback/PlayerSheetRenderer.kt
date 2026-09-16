@@ -54,6 +54,7 @@ import com.melox.player.ui.component.library.PlaybackArtworkFrame
 import com.melox.player.ui.component.library.playbackArtworkShadow
 import com.melox.player.ui.component.library.playbackArtworkCornerRadius
 import com.melox.player.ui.component.library.rememberArtworkBitmap
+import com.melox.player.ui.component.library.rememberPlaceholderArtworkBitmap
 import com.melox.player.ui.component.liquid.miuixFloatingBarShadow
 import com.melox.player.ui.component.liquid.miniPlayerSurface
 import kotlin.math.abs
@@ -334,11 +335,14 @@ internal fun PlayerSheetArtworkOverlay(
 ) {
     val item = playback.currentItem ?: return
     val progress = transition.progress
-    val bitmap = rememberArtworkBitmap(
+    val artworkBitmap = rememberArtworkBitmap(
         contentUri = item.contentUri,
         dateModifiedEpochSeconds = item.dateModifiedEpochSeconds,
         fileSizeBytes = item.fileSizeBytes,
         size = PLAYER_FULL_ARTWORK_REQUEST_SIZE,
+    )
+    val bitmap = artworkBitmap ?: rememberPlaceholderArtworkBitmap(
+        PLAYER_FULL_ARTWORK_REQUEST_SIZE,
     )
     val density = LocalDensity.current
     if (!enabled || !transition.separateArtworkOverlayReady || !transition.isTransitionActive) return

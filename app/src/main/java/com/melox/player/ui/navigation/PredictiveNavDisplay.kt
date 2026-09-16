@@ -34,6 +34,7 @@ fun PredictiveNavDisplay(
     isDark: Boolean,
     onBack: () -> Unit,
     modifier: Modifier = Modifier,
+    backEnabled: Boolean = true,
     content: NavEntryBuilder.() -> Unit,
 ) {
     val hasPreviousEntries = backStack.size > 1
@@ -74,12 +75,15 @@ fun PredictiveNavDisplay(
                 NavigationEventDispatcher().also { it.isEnabled = false }
         }
     }
-    val activeDispatcherOwner = dispatcherOwner.takeIf { predictiveBackEnabled }
+    val activeDispatcherOwner = dispatcherOwner.takeIf {
+        backEnabled && predictiveBackEnabled
+    }
         ?: disabledDispatcherOwner
     BackHandler(
         enabled = ordinaryBackHandlerEnabled(
             predictiveBackEnabled = predictiveBackEnabled,
             hasPreviousEntries = hasPreviousEntries,
+            backEnabled = backEnabled,
         ),
         onBack = onBack,
     )
@@ -112,9 +116,11 @@ internal fun navigationTransitionCornerRadius(
 internal fun predictiveBackHandlerEnabled(
     predictiveBackEnabled: Boolean,
     hasPreviousEntries: Boolean,
-): Boolean = predictiveBackEnabled && hasPreviousEntries
+    backEnabled: Boolean = true,
+): Boolean = backEnabled && predictiveBackEnabled && hasPreviousEntries
 
 internal fun ordinaryBackHandlerEnabled(
     predictiveBackEnabled: Boolean,
     hasPreviousEntries: Boolean,
-): Boolean = !predictiveBackEnabled && hasPreviousEntries
+    backEnabled: Boolean = true,
+): Boolean = backEnabled && !predictiveBackEnabled && hasPreviousEntries

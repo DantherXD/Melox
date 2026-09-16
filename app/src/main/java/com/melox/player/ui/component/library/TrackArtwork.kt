@@ -35,6 +35,7 @@ import androidx.compose.ui.graphics.FilterQuality
 import androidx.compose.ui.graphics.Paint
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.graphics.drawscope.drawIntoCanvas
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.nativePaint
@@ -43,10 +44,13 @@ import androidx.compose.ui.layout.boundsInParent
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.res.painterResource
+import com.melox.player.R
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.DpSize
 import androidx.compose.ui.unit.dp
 import androidx.core.net.toUri
+import com.melox.player.data.library.readEmbeddedArtworkData
 import java.io.File
 import java.io.IOException
 import java.security.MessageDigest
@@ -62,17 +66,14 @@ import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.async
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.launch
-import top.yukonga.miuix.kmp.basic.Icon
-import top.yukonga.miuix.kmp.icon.MiuixIcons
-import top.yukonga.miuix.kmp.icon.extended.Music
 import top.yukonga.miuix.kmp.squircle.addSquircleRect
 import top.yukonga.miuix.kmp.squircle.isSquircleEnabled
-import top.yukonga.miuix.kmp.squircle.squircleBackground
 import top.yukonga.miuix.kmp.squircle.squircleClip
 import top.yukonga.miuix.kmp.theme.MiuixTheme
 
 private val ArtworkSize = 48.dp
 private val ArtworkCornerRadius = 6.dp
+internal val PLACEHOLDER_ARTWORK_REQUEST_SIZE = 420.dp
 
 /** Displays a bounded cached thumbnail without blocking the Compose thread. */
 @Composable
@@ -84,6 +85,7 @@ fun TrackArtwork(
     size: Dp = ArtworkSize,
     cornerRadius: Dp = ArtworkCornerRadius,
 ) {
+    val placeholderArtworkResId = currentPlaceholderArtworkResId()
     val bitmap = rememberArtworkBitmap(
         contentUri = contentUri,
         dateModifiedEpochSeconds = dateModifiedEpochSeconds,
@@ -102,23 +104,14 @@ fun TrackArtwork(
             filterQuality = FilterQuality.High,
         )
     } else {
-        Box(
+        Image(
+            painter = painterResource(placeholderArtworkResId),
+            contentDescription = null,
             modifier = modifier
                 .size(size)
-                .squircleBackground(
-                    color = MiuixTheme.colorScheme.secondaryContainer,
-                    cornerRadius = cornerRadius,
-                ),
-            contentAlignment = Alignment.Center,
-        ) {
-            Icon(
-                imageVector = MiuixIcons.Music,
-                contentDescription = null,
-                modifier = Modifier.size(size / 2f),
-                tint = MiuixTheme.colorScheme.onSecondaryContainer
-                    .copy(alpha = 0.3f),
-            )
-        }
+                .squircleClip(cornerRadius),
+            contentScale = ContentScale.Crop,
+        )
     }
 }
 
@@ -137,11 +130,14 @@ fun PlaybackArtwork(
     bitmapCrossfadeEasing: Easing = LinearEasing,
     rectangularCornerRadiusReduction: Dp = 0.dp,
 ) {
-    val bitmap = rememberArtworkBitmap(
+    val artworkBitmap = rememberArtworkBitmap(
         contentUri = contentUri,
         dateModifiedEpochSeconds = dateModifiedEpochSeconds,
         fileSizeBytes = fileSizeBytes,
         size = requestSize,
+    )
+    val bitmap = artworkBitmap ?: rememberPlaceholderArtworkBitmap(
+        PLACEHOLDER_ARTWORK_REQUEST_SIZE,
     )
     if (bitmapCrossfadeDurationMillis > 0) {
         PlaybackArtworkStackedFade(
@@ -324,6 +320,7 @@ internal fun PlaybackArtworkFrame(
             )
         }
     } else {
+        val placeholderArtworkResId = currentPlaceholderArtworkResId()
         val placeholderModifier = if (drawArtworkShadow) {
             modifier.size(size)
                 .playbackArtworkShadow(
@@ -340,14 +337,22 @@ internal fun PlaybackArtworkFrame(
         } else {
             placeholderModifier
         }
-        Box(
-            modifier = fadedPlaceholderModifier
-                .squircleBackground(
-                    color = MiuixTheme.colorScheme.secondaryContainer,
-                    cornerRadius = cornerRadius,
-                ),
+        Image(
+            painter = painterResource(placeholderArtworkResId),
+            contentDescription = null,
+            modifier = fadedPlaceholderModifier.squircleClip(cornerRadius),
+            contentScale = ContentScale.Crop,
         )
     }
+}
+
+@Composable
+internal fun currentPlaceholderArtworkResId(): Int = if (
+    MiuixTheme.colorScheme.surface.luminance() < 0.5f
+) {
+    R.drawable.ic_album_placeholder_dark
+} else {
+    R.drawable.ic_album_placeholder_light
 }
 
 @Composable
@@ -584,6 +589,106 @@ internal suspend fun loadCachedArtworkDerivative(
     }
 }.getOrNull()
 
+@Composable
+internal fun rememberPlaceholderArtworkBitmap(size: Dp): Bitmap? {
+    val context = LocalContext.current.applicationContext
+    val drawableResId = currentPlaceholderArtworkResId()
+    val targetSizePx = normalizeArtworkTargetSize(
+        with(LocalDensity.current) { size.roundToPx() },
+    )
+    val cacheKey = placeholderArtworkCacheKey(drawableResId, targetSizePx)
+    val initialResult = remember(cacheKey) {
+        ArtworkCache.getCached(
+            context = context,
+            key = cacheKey,
+            includeDisk = false,
+        )
+    }
+    val result = produceState<ArtworkResult?>(
+        initialValue = initialResult,
+        key1 = cacheKey,
+    ) {
+        value = loadPlaceholderArtworkBitmap(
+            context = context,
+            drawableResId = drawableResId,
+            targetSizePx = targetSizePx,
+        )?.let { bitmap -> ArtworkResult.Loaded(bitmap) } ?: ArtworkResult.Missing
+    }.value
+    return (result as? ArtworkResult.Loaded)?.bitmap
+}
+
+internal suspend fun loadPlaceholderArtworkBitmap(
+    context: Context,
+    drawableResId: Int,
+    targetSizePx: Int,
+): Bitmap? = loadCachedArtworkDerivative(
+    context = context,
+    cacheKey = placeholderArtworkCacheKey(
+        drawableResId = drawableResId,
+        targetSizePx = normalizeArtworkTargetSize(targetSizePx),
+    ),
+) {
+    decodePlaceholderArtwork(
+        context = context,
+        drawableResId = drawableResId,
+        targetSizePx = normalizeArtworkTargetSize(targetSizePx),
+    )
+}
+
+private fun placeholderArtworkCacheKey(
+    drawableResId: Int,
+    targetSizePx: Int,
+): String = "album-placeholder-v2-$drawableResId-$targetSizePx"
+
+private fun decodePlaceholderArtwork(
+    context: Context,
+    drawableResId: Int,
+    targetSizePx: Int,
+): Bitmap? {
+    val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+    BitmapFactory.decodeResource(context.resources, drawableResId, bounds)
+    if (bounds.outWidth <= 0 || bounds.outHeight <= 0) return null
+
+    val decoded = BitmapFactory.decodeResource(
+        context.resources,
+        drawableResId,
+        BitmapFactory.Options().apply {
+            inSampleSize = placeholderArtworkSampleSize(
+                width = bounds.outWidth,
+                height = bounds.outHeight,
+                targetSizePx = targetSizePx,
+            )
+            inPreferredConfig = Bitmap.Config.ARGB_8888
+        },
+    ) ?: return null
+    val longestEdge = maxOf(decoded.width, decoded.height)
+    if (longestEdge <= targetSizePx) return decoded
+    val scale = targetSizePx.toFloat() / longestEdge
+    val resized = Bitmap.createScaledBitmap(
+        decoded,
+        (decoded.width * scale).toInt().coerceAtLeast(1),
+        (decoded.height * scale).toInt().coerceAtLeast(1),
+        true,
+    )
+    decoded.recycle()
+    return resized
+}
+
+private fun placeholderArtworkSampleSize(
+    width: Int,
+    height: Int,
+    targetSizePx: Int,
+): Int {
+    var sampleSize = 1
+    while (
+        width / (sampleSize * 2) >= targetSizePx &&
+            height / (sampleSize * 2) >= targetSizePx
+    ) {
+        sampleSize *= 2
+    }
+    return sampleSize
+}
+
 internal fun normalizeArtworkTargetSize(targetSizePx: Int): Int {
     val requested = targetSizePx.coerceAtLeast(1)
     return ARTWORK_SIZE_BUCKETS.firstOrNull { it >= requested }
@@ -613,8 +718,11 @@ private fun loadArtworkThumbnail(
 
     val retriever = MediaMetadataRetriever()
     return try {
-        retriever.setDataSource(context, uri)
-        val artworkData = retriever.embeddedPicture
+        val artworkData = runCatching {
+            retriever.setDataSource(context, uri)
+            retriever.embeddedPicture
+        }.getOrNull()
+            ?: readEmbeddedArtworkData(context, contentUri)
             ?: return ArtworkExtractionResult.Missing
         decodeSampledBitmap(artworkData, thumbnailSizePx)
             ?.let(ArtworkExtractionResult::Loaded)
@@ -970,7 +1078,7 @@ private object ArtworkDiskCache {
     }
 }
 
-private const val ARTWORK_CACHE_SCHEMA_VERSION = 3
+private const val ARTWORK_CACHE_SCHEMA_VERSION = 4
 private const val ARTWORK_DISK_CACHE_DIRECTORY = "artwork_thumbnails_v2"
 private const val MAX_MEMORY_MISSING_ENTRIES = 10_000
 private const val MAX_DISK_CACHE_ENTRIES = 20_000

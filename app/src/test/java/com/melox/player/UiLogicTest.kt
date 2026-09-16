@@ -1238,6 +1238,25 @@ class UiLogicTest {
     }
 
     @Test
+    fun mountedPlayerDisablesBothNavigationBackPaths() {
+        for (predictiveEnabled in listOf(false, true)) {
+            for (hasPreviousEntries in listOf(false, true)) {
+                assertFalse(
+                    predictiveBackHandlerEnabled(predictiveEnabled, hasPreviousEntries, false),
+                )
+                assertFalse(
+                    ordinaryBackHandlerEnabled(predictiveEnabled, hasPreviousEntries, false),
+                )
+                assertEquals(
+                    hasPreviousEntries,
+                    predictiveBackHandlerEnabled(predictiveEnabled, hasPreviousEntries, true) ||
+                        ordinaryBackHandlerEnabled(predictiveEnabled, hasPreviousEntries, true),
+                )
+            }
+        }
+    }
+
+    @Test
     fun themeSettingsMapToExpectedMiuixModes() {
         val expected = mapOf(
             AppSettings(ThemeMode.SYSTEM, false) to ColorSchemeMode.System,
@@ -3134,6 +3153,36 @@ class UiLogicTest {
                     "DISCNUMBER" to arrayOf("2/2"),
                 ),
             ),
+        )
+    }
+
+    @Test
+    fun tagLibPropertyMapResolvesWavAndId3Aliases() {
+        assertEquals(
+            com.melox.player.data.library.LocalAudioTags(
+                title = "WAV title",
+                artist = "WAV artist",
+                album = "WAV album",
+                albumArtist = "Album artist",
+                year = 2025,
+                trackNumber = 4,
+                discNumber = 1,
+            ),
+            parseAudioTagProperties(
+                mapOf(
+                    "INAM" to arrayOf("WAV title"),
+                    "IART" to arrayOf("WAV artist"),
+                    "IPRD" to arrayOf("WAV album"),
+                    "TPE2" to arrayOf("Album artist"),
+                    "DATE" to arrayOf("2025"),
+                    "ITRK" to arrayOf("4/10"),
+                    "DISKNUMBER" to arrayOf("1/1"),
+                ),
+            ),
+        )
+        assertEquals(
+            "ID3 title",
+            parseAudioTagProperties(mapOf("TIT2" to arrayOf("ID3 title"))).title,
         )
     }
 

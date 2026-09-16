@@ -12,9 +12,11 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.Dp
+import com.melox.player.ui.component.library.currentPlaceholderArtworkResId
 import com.melox.player.ui.component.library.createArtworkCacheKey
 import com.melox.player.ui.component.library.loadArtworkBitmap
 import com.melox.player.ui.component.library.loadCachedArtworkDerivative
+import com.melox.player.ui.component.library.loadPlaceholderArtworkBitmap
 import com.melox.player.ui.component.library.normalizeArtworkTargetSize
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -39,6 +41,7 @@ internal fun rememberPlaybackArtworkResource(
     val targetSizePx = normalizeArtworkTargetSize(
         with(LocalDensity.current) { requestSize.roundToPx() },
     )
+    val placeholderArtworkResId = currentPlaceholderArtworkResId()
     val cacheKey = remember(contentUri, dateModifiedEpochSeconds, fileSizeBytes, targetSizePx) {
         createArtworkCacheKey(
             contentUri = contentUri,
@@ -67,7 +70,7 @@ internal fun rememberPlaybackArtworkResource(
         )
     }
 
-    LaunchedEffect(cacheKey, blurredCacheKey) {
+    LaunchedEffect(cacheKey, blurredCacheKey, placeholderArtworkResId) {
         if (contentUri.isBlank()) {
             resource = PlaybackArtworkResource(
                 cacheKey = cacheKey,
@@ -86,6 +89,7 @@ internal fun rememberPlaybackArtworkResource(
             dateModifiedEpochSeconds = dateModifiedEpochSeconds,
             fileSizeBytes = fileSizeBytes,
             targetSizePx = targetSizePx,
+            placeholderArtworkResId = placeholderArtworkResId,
         )
     }
 
@@ -98,12 +102,14 @@ internal suspend fun prefetchPlaybackArtworkResource(
     dateModifiedEpochSeconds: Long,
     fileSizeBytes: Long,
     targetSizePx: Int,
+    placeholderArtworkResId: Int,
 ): PlaybackArtworkResource = loadPlaybackArtworkResource(
     context = context.applicationContext,
     contentUri = contentUri,
     dateModifiedEpochSeconds = dateModifiedEpochSeconds,
     fileSizeBytes = fileSizeBytes,
     targetSizePx = targetSizePx,
+    placeholderArtworkResId = placeholderArtworkResId,
 )
 
 private suspend fun loadPlaybackArtworkResource(
@@ -112,6 +118,7 @@ private suspend fun loadPlaybackArtworkResource(
     dateModifiedEpochSeconds: Long,
     fileSizeBytes: Long,
     targetSizePx: Int,
+    placeholderArtworkResId: Int,
 ): PlaybackArtworkResource {
     val normalizedTargetSizePx = normalizeArtworkTargetSize(targetSizePx)
     val cacheKey = createArtworkCacheKey(
@@ -120,18 +127,29 @@ private suspend fun loadPlaybackArtworkResource(
         fileSizeBytes = fileSizeBytes,
         targetSizePx = normalizedTargetSizePx,
     )
-    val blurredCacheKey = createBlurredArtworkLayerKey(
+    val baseBlurredCacheKey = createBlurredArtworkLayerKey(
         contentUri = contentUri,
         dateModifiedEpochSeconds = dateModifiedEpochSeconds,
         fileSizeBytes = fileSizeBytes,
     )
-    val artwork = loadArtworkBitmap(
+    val embeddedArtwork = loadArtworkBitmap(
         context = context,
         contentUri = contentUri,
         dateModifiedEpochSeconds = dateModifiedEpochSeconds,
         fileSizeBytes = fileSizeBytes,
         targetSizePx = normalizedTargetSizePx,
     )
+    val usesPlaceholderArtwork = embeddedArtwork == null
+    val artwork = embeddedArtwork ?: loadPlaceholderArtwork(
+        context = context,
+        drawableResId = placeholderArtworkResId,
+        targetSizePx = normalizedTargetSizePx,
+    )
+    val blurredCacheKey = if (usesPlaceholderArtwork) {
+        "$baseBlurredCacheKey-placeholder-$placeholderArtworkResId"
+    } else {
+        baseBlurredCacheKey
+    }
     val backgroundColor = withContext(Dispatchers.Default) {
         dynamicFlowBackgroundColor(artwork)
     }
@@ -150,6 +168,18 @@ private suspend fun loadPlaybackArtworkResource(
         blurredArtwork = blurredArtwork,
         backgroundColor = backgroundColor,
         isLoading = false,
+    )
+}
+
+private suspend fun loadPlaceholderArtwork(
+    context: Context,
+    drawableResId: Int,
+    targetSizePx: Int,
+): Bitmap? = withContext(Dispatchers.IO) {
+    loadPlaceholderArtworkBitmap(
+        context = context,
+        drawableResId = drawableResId,
+        targetSizePx = targetSizePx,
     )
 }
 
