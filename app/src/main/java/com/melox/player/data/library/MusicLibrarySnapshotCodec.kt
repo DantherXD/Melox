@@ -15,7 +15,7 @@ import java.util.zip.CheckedOutputStream
 /** Compact, versioned encoding for the last successful local-library snapshot. */
 internal object MusicLibrarySnapshotCodec {
     private const val MAGIC = 0x5549584D
-    private const val VERSION = 8
+    private const val VERSION = 9
     private const val MIN_SUPPORTED_VERSION = 1
     private const val MAX_TRACK_COUNT = 100_000
     private const val MAX_STRING_BYTES = 1_048_576
@@ -135,7 +135,8 @@ internal object MusicLibrarySnapshotCodec {
                 sampleRateHz = sampleRateHz,
                 channelCount = channelCount,
                 bitDepth = bitDepth,
-                audioPropertiesScanned = version >= 7 && completedLegacyRead,
+                audioPropertiesScanned = version >= 7 && completedLegacyRead &&
+                    (version >= 9 || !isWavSource(fileName, mimeType)),
             )
         }
         val actualChecksum = checksum.value
@@ -175,3 +176,7 @@ internal object MusicLibrarySnapshotCodec {
             .toString(Charsets.UTF_8)
     }
 }
+
+internal fun isWavSource(fileName: String?, mimeType: String?): Boolean =
+    fileName?.endsWith(".wav", ignoreCase = true) == true ||
+        mimeType?.lowercase() in setOf("audio/wav", "audio/wave", "audio/x-wav", "audio/vnd.wave")

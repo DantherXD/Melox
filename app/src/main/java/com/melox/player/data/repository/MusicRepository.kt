@@ -13,6 +13,7 @@ import com.melox.player.data.library.AudioPropertiesReader
 import com.melox.player.data.library.MusicLibrarySnapshotCodec
 import com.melox.player.data.library.createMusicSortKeys
 import com.melox.player.data.library.hasReusableAudioProperties
+import com.melox.player.data.library.isWavSource
 import com.melox.player.data.library.normalizeMusicFolderPath
 import com.melox.player.model.MusicTrack
 import java.io.IOException
@@ -41,7 +42,14 @@ class MusicRepository(context: Context) {
             return@withContext null
         }
         try {
-            snapshotFile.openRead().use(MusicLibrarySnapshotCodec::read)
+            val cached = snapshotFile.openRead().use(MusicLibrarySnapshotCodec::read)
+            val refreshed = cached.map { track ->
+                if (!track.audioPropertiesScanned && isWavSource(track.fileName, track.mimeType)) {
+                    enrichTrack(track)
+                } else track
+            }
+            if (refreshed != cached) cacheMusic(refreshed)
+            refreshed
         } catch (exception: IOException) {
             Log.w(TAG, "Ignoring unreadable music snapshot", exception)
             snapshotFile.delete()
@@ -307,7 +315,7 @@ class MusicRepository(context: Context) {
             sampleRateHz = audioProperties?.sampleRateHz,
             channelCount = audioProperties?.channelCount,
             bitDepth = audioProperties?.bitDepth,
-            audioPropertiesScanned = true,
+            audioPropertiesScanned = audioProperties != null,
         )
     }
 

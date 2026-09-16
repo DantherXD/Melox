@@ -31,7 +31,21 @@ internal data class LocalAudioProperties(
 internal class AudioPropertiesReader(
     private val contentResolver: ContentResolver,
 ) {
-    fun read(contentUri: String): LocalAudioProperties? = try {
+    fun read(contentUri: String): LocalAudioProperties? {
+        val properties = readNativeProperties(contentUri)
+        val wav = contentResolver.readWavMetadata(contentUri) ?: return properties
+        return (properties ?: LocalAudioProperties(null, null, null, null)).copy(
+            title = wav.tags.title ?: properties?.title,
+            artist = wav.tags.artist ?: properties?.artist,
+            album = wav.tags.album ?: properties?.album,
+            albumArtist = wav.tags.albumArtist ?: properties?.albumArtist,
+            year = wav.tags.year ?: properties?.year,
+            trackNumber = wav.tags.trackNumber ?: properties?.trackNumber,
+            discNumber = wav.tags.discNumber ?: properties?.discNumber,
+        )
+    }
+
+    private fun readNativeProperties(contentUri: String): LocalAudioProperties? = try {
         contentResolver.openFileDescriptor(contentUri.toUri(), "r")?.use { descriptor ->
             val properties = TagLib.getAudioProperties(descriptor.dup().detachFd())
             val tagProperties = TagLib.getMetadata(
@@ -122,6 +136,8 @@ internal fun parseAudioTagProperties(
             ?.asSequence()
             ?.map(String::trim)
             ?.filter(String::isNotEmpty)
+            ?.filterNot { it.contains('�') }
+            ?.distinct()
             ?.toList()
             ?.takeIf(List<String>::isNotEmpty)
             ?.joinToString("/")
@@ -133,7 +149,7 @@ internal fun parseAudioTagProperties(
         ?.toIntOrNull()
         ?.takeIf { it > 0 }
 
-    val rawDate = joinedValue("DATE", "YEAR")
+    val rawDate = joinedValue("DATE", "YEAR", "TDRC", "TYER", "ICRD")
     val year = rawDate
         ?.let(YEAR_PATTERN::find)
         ?.value
@@ -141,16 +157,15 @@ internal fun parseAudioTagProperties(
         ?.takeIf { it > 0 }
 
     return LocalAudioTags(
-        title = joinedValue("TITLE", "INAM", "NAME"),
-        artist = joinedValue("ARTIST", "IART"),
-        album = joinedValue("ALBUM", "IPRD", "PRODUCT"),
+        title = joinedValue("TITLE", "TIT2", "\u00A9NAM", "INAM", "NAME"),
+        artist = joinedValue("ARTIST", "TPE1", "\u00A9ART", "IART"),
+        album = joinedValue("ALBUM", "TALB", "\u00A9ALB", "IPRD", "PRODUCT"),
         albumArtist = joinedValue(
             "ALBUMARTIST",
             "ALBUM ARTIST",
             "TPE2",
             "AART",
             "ALBUMARTISTSORT",
-            "IART",
         ),
         year = year,
         trackNumber = indexedValue("TRACKNUMBER", "TRACK", "TRCK", "ITRK"),

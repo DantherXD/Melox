@@ -25,6 +25,7 @@ import com.melox.player.model.LyricsDocument
 import com.melox.player.model.LyricsFormat
 import com.melox.player.model.LyricsSource
 import com.melox.player.playback.PlaybackExtractorsFactory
+import com.kyant.taglib.TagLib
 import java.io.ByteArrayOutputStream
 import java.io.File
 import java.io.InputStream
@@ -153,8 +154,9 @@ class LyricsRepository(context: Context) {
             ).build().use { retriever ->
                 retriever.retrieveTrackGroups().get(METADATA_TIMEOUT_SECONDS, TimeUnit.SECONDS)
             }
-        }.getOrNull() ?: return emptyList()
-        return buildList {
+        }.getOrNull()
+        if (groups == null) return readTagLibLyrics(contentUri)
+        val metadataCandidates = buildList {
             for (groupIndex in 0 until groups.length) {
                 val group = groups[groupIndex]
                 for (formatIndex in 0 until group.length) {
@@ -169,7 +171,24 @@ class LyricsRepository(context: Context) {
                 }
             }
         }
+        if (metadataCandidates.isNotEmpty()) return metadataCandidates
+        return readTagLibLyrics(contentUri)
     }
+
+    private fun readTagLibLyrics(contentUri: String): List<String> = runCatching {
+        contentResolver.openFileDescriptor(Uri.parse(contentUri), "r")?.use { descriptor ->
+            val properties = TagLib.getMetadata(descriptor.dup().detachFd(), false)?.propertyMap.orEmpty()
+            properties.entries.asSequence()
+                .filter { (key, _) -> key.isLyricsKey() }
+                .flatMap { (_, values) -> values.asSequence() }
+                .map(String::trim)
+                .filter(String::isNotBlank)
+                .filterNot { it.contains('�') }
+                .map { it.take(MAX_EMBEDDED_CHARS) }
+                .distinct()
+                .toList()
+        }.orEmpty()
+    }.getOrDefault(emptyList())
 
     @OptIn(UnstableApi::class)
     private fun extractLyricsText(entry: Any): String? = when (entry) {

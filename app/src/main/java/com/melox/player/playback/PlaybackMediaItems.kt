@@ -8,6 +8,7 @@ import android.provider.OpenableColumns
 import androidx.core.net.toUri
 import androidx.media3.common.MediaItem
 import androidx.media3.common.MediaMetadata
+import com.melox.player.data.library.AudioPropertiesReader
 import com.melox.player.R
 import com.melox.player.model.MusicTrack
 import com.melox.player.model.PlaybackQueueItem
@@ -41,7 +42,8 @@ internal fun MusicTrack.toPlaybackQueueItem(
     )
 
 internal fun Uri.toExternalPlaybackQueueItem(context: Context): PlaybackQueueItem {
-    val metadata = context.queryExternalAudioMetadata(this)
+    val mediaStoreMetadata = context.queryExternalAudioMetadata(this)
+    val tagMetadata = AudioPropertiesReader(context.contentResolver).read(toString())
     val fallbackName = lastPathSegment
         ?.substringAfterLast('/')
         ?.takeIf(String::isNotBlank)
@@ -49,15 +51,16 @@ internal fun Uri.toExternalPlaybackQueueItem(context: Context): PlaybackQueueIte
         mediaId = "external:$this",
         trackId = null,
         contentUri = toString(),
-        title = metadata?.title
-            ?: metadata?.displayName?.substringBeforeLast('.', metadata.displayName)
+        title = tagMetadata?.title
+            ?: mediaStoreMetadata?.title
+            ?: mediaStoreMetadata?.displayName?.substringBeforeLast('.', mediaStoreMetadata.displayName)
             ?: fallbackName
             ?: context.getString(R.string.music_unknown_title),
-        artist = metadata?.artist,
-        album = metadata?.album,
-        durationMs = metadata?.durationMs ?: 0L,
-        dateModifiedEpochSeconds = metadata?.dateModifiedEpochSeconds ?: 0L,
-        fileSizeBytes = metadata?.fileSizeBytes ?: 0L,
+        artist = tagMetadata?.artist ?: mediaStoreMetadata?.artist,
+        album = tagMetadata?.album ?: mediaStoreMetadata?.album,
+        durationMs = tagMetadata?.durationMs ?: mediaStoreMetadata?.durationMs ?: 0L,
+        dateModifiedEpochSeconds = mediaStoreMetadata?.dateModifiedEpochSeconds ?: 0L,
+        fileSizeBytes = mediaStoreMetadata?.fileSizeBytes ?: 0L,
         sourceOrder = 0.0,
         playbackMode = PlaybackMode.ORDER,
     )

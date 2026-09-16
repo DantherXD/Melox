@@ -1,6 +1,7 @@
 package com.melox.player.playback
 
 import android.content.Context
+import android.content.res.Configuration
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.media.MediaMetadataRetriever
@@ -9,6 +10,8 @@ import android.util.Size
 import androidx.core.net.toUri
 import androidx.media3.common.MediaItem
 import androidx.media3.common.MediaMetadata
+import com.melox.player.R
+import com.melox.player.data.library.readEmbeddedArtworkData
 import com.melox.player.model.PlaybackQueueItem
 import java.io.ByteArrayOutputStream
 import kotlin.math.roundToInt
@@ -56,16 +59,36 @@ internal fun Context.loadPlaybackArtworkData(contentUri: String): ByteArray? {
     } ?: run {
         val retriever = MediaMetadataRetriever()
         try {
-            retriever.setDataSource(this, uri)
-            retriever.embeddedPicture
+            runCatching {
+                retriever.setDataSource(this, uri)
+                retriever.embeddedPicture
+            }.getOrNull()
                 ?.let(::decodePlaybackArtwork)
+                ?: readEmbeddedArtworkData(this, contentUri)
+                    ?.let(::decodePlaybackArtwork)
         } catch (_: Exception) {
-            null
+            readEmbeddedArtworkData(this, contentUri)?.let(::decodePlaybackArtwork)
         } finally {
             runCatching(retriever::release)
         }
     }
-    return runCatching { bitmap?.toArtworkData() }.getOrNull()
+    return runCatching {
+        bitmap?.toArtworkData()
+            ?: decodePlaceholderArtworkData()
+    }.getOrNull()
+}
+
+private fun Context.decodePlaceholderArtworkData(): ByteArray? {
+    val drawableResId = if (
+        resources.configuration.uiMode and Configuration.UI_MODE_NIGHT_MASK ==
+            Configuration.UI_MODE_NIGHT_YES
+    ) {
+        R.drawable.ic_album_placeholder_dark
+    } else {
+        R.drawable.ic_album_placeholder_light
+    }
+    return BitmapFactory.decodeResource(resources, drawableResId)
+        ?.toArtworkData()
 }
 
 private fun decodePlaybackArtwork(data: ByteArray): Bitmap? {
