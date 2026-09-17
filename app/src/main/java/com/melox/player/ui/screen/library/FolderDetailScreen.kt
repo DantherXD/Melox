@@ -1,5 +1,6 @@
 package com.melox.player.ui.screen.library
 
+import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.RowScope
@@ -8,12 +9,12 @@ import androidx.compose.foundation.layout.calculateStartPadding
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
@@ -35,30 +36,37 @@ import com.melox.player.model.MusicTrack
 import com.melox.player.model.ScanStatus
 import com.melox.player.ui.LibrarySearchBar
 import com.melox.player.ui.LibrarySearchButton
-import com.melox.player.ui.component.MiuixBlurredBar
+import com.melox.player.ui.component.AdaptiveTopAppBar
+import com.melox.player.ui.component.BlurredBar
 import com.melox.player.ui.component.library.MusicSortButton
+import com.melox.player.ui.component.library.SelectionActionsAnimatedContent
+import com.melox.player.ui.component.library.SelectionNavigationIconAnimatedContent
+import com.melox.player.ui.component.library.TrackSelectionActions
+import com.melox.player.ui.component.library.selectedItemsInDisplayedOrder
+import com.melox.player.ui.component.library.toggleAllTrackSelection
 import com.melox.player.ui.component.miuixBarColor
-import com.melox.player.ui.component.rememberMiuixBlurBackdrop
+import com.melox.player.ui.component.rememberBlurBackdrop
 import top.yukonga.miuix.kmp.basic.Icon
 import top.yukonga.miuix.kmp.basic.IconButton
 import top.yukonga.miuix.kmp.basic.MiuixScrollBehavior
 import top.yukonga.miuix.kmp.basic.Scaffold
-import top.yukonga.miuix.kmp.basic.TopAppBar
 import top.yukonga.miuix.kmp.blur.layerBackdrop
 import top.yukonga.miuix.kmp.icon.MiuixIcons
 import top.yukonga.miuix.kmp.icon.extended.Back
-import kotlinx.coroutines.launch
 
 @Composable
 fun FolderDetailScreen(
     folder: FolderGroup,
     currentTrackId: Long?,
-    blurEnabled: Boolean,
     bottomContentPadding: Dp,
     onBack: () -> Unit,
+    selectionExitRequest: Int,
+    onSelectionModeChange: (Boolean) -> Unit,
     onTrackClick: (List<MusicTrack>, Int) -> Unit,
     onPlayNext: (MusicTrack) -> Unit,
     onAppendToQueue: (MusicTrack) -> Unit,
+    onAddToPlaylist: (MusicTrack) -> Unit,
+    onAddTracksToPlaylist: (List<MusicTrack>, () -> Unit) -> Unit,
     onGoToAlbum: (MusicTrack) -> Unit,
     artistGroups: List<ArtistGroup>,
     onGoToArtist: (ArtistGroup) -> Unit,
@@ -67,6 +75,10 @@ fun FolderDetailScreen(
     var query by rememberSaveable(folder.key) { mutableStateOf("") }
     var searchVisible by rememberSaveable(folder.key) { mutableStateOf(false) }
     var searchFocused by remember(folder.key) { mutableStateOf(false) }
+    var selectedTrackUris by remember(folder.key) {
+        mutableStateOf<Set<String>>(emptySet())
+    }
+    var selectionMode by remember(folder.key) { mutableStateOf(false) }
     var sortFieldOrdinal by rememberSaveable(folder.key) {
         mutableIntStateOf(MusicSortField.TITLE.ordinal)
     }
@@ -79,8 +91,7 @@ fun FolderDetailScreen(
     )
     val scrollBehavior = MiuixScrollBehavior()
     val listState = rememberLazyListState()
-    val scope = rememberCoroutineScope()
-    val backdrop = rememberMiuixBlurBackdrop(blurEnabled)
+    val backdrop = rememberBlurBackdrop()
     val layoutDirection = LocalLayoutDirection.current
     val density = LocalDensity.current
     var bottomContentHeightPx by remember { mutableIntStateOf(0) }
@@ -101,42 +112,103 @@ fun FolderDetailScreen(
             }
         }
     }
+    val displayedKeys = displayedTracks.map(MusicTrack::contentUri)
+    BackHandler(enabled = selectionMode) {
+        selectedTrackUris = emptySet()
+        selectionMode = false
+    }
+    LaunchedEffect(selectionMode) {
+        onSelectionModeChange(selectionMode)
+    }
+    LaunchedEffect(selectionExitRequest) {
+        if (selectionMode) {
+            selectedTrackUris = emptySet()
+            selectionMode = false
+        }
+    }
 
     Scaffold(
-        topBar = {
-            MiuixBlurredBar(backdrop) {
-                TopAppBar(
-                    title = folder.name ?: stringResource(R.string.folder_unknown),
+            topBar = {
+            BlurredBar(
+                backdrop = backdrop,
+                blurEnabled = backdrop != null,
+                scrollBehavior = scrollBehavior,
+            ) {
+                AdaptiveTopAppBar(
+                    title = if (selectionMode) {
+                        if (selectedTrackUris.isEmpty()) {
+                            stringResource(R.string.selection_choose_songs)
+                        } else {
+                            stringResource(
+                                R.string.selection_selected_count,
+                                selectedTrackUris.size,
+                            )
+                        }
+                    } else {
+                        folder.name ?: stringResource(R.string.folder_unknown)
+                    },
                     color = backdrop.miuixBarColor(),
                     scrollBehavior = scrollBehavior,
                     navigationIcon = {
-                        IconButton(onClick = onBack) {
-                            Icon(
-                                imageVector = MiuixIcons.Back,
-                                contentDescription = stringResource(R.string.back),
-                            )
-                        }
+                        SelectionNavigationIconAnimatedContent(
+                            selectionMode = selectionMode,
+                            onCloseSelection = {
+                                selectedTrackUris = emptySet()
+                                selectionMode = false
+                            },
+                            defaultNavigationIcon = {
+                                IconButton(onClick = onBack) {
+                                    Icon(
+                                        imageVector = MiuixIcons.Back,
+                                        contentDescription = stringResource(R.string.back),
+                                    )
+                                }
+                            },
+                        )
                     },
                     actions = {
-                        FolderDetailActions(
-                            searchVisible = searchVisible,
-                            sortConfig = sortConfig,
-                            onSearchVisibleChange = { visible ->
-                                searchVisible = visible
-                                searchFocused = visible
-                                if (!visible) query = ""
+                        SelectionActionsAnimatedContent(
+                            selectionMode = selectionMode,
+                            selectionActions = {
+                                TrackSelectionActions(
+                                    allSelected = displayedKeys.isNotEmpty() &&
+                                        selectedTrackUris.containsAll(displayedKeys),
+                                    actionEnabled = selectedTrackUris.isNotEmpty(),
+                                    onToggleAll = {
+                                        selectedTrackUris = toggleAllTrackSelection(
+                                            selectedTrackUris,
+                                            displayedKeys,
+                                        )
+                                    },
+                                    onAction = {
+                                        val tracks = selectedItemsInDisplayedOrder(
+                                            displayedTracks,
+                                            selectedTrackUris,
+                                            MusicTrack::contentUri,
+                                        )
+                                        if (tracks.isNotEmpty()) {
+                                            onAddTracksToPlaylist(tracks) {
+                                                selectedTrackUris = emptySet()
+                                                selectionMode = false
+                                            }
+                                        }
+                                    },
+                                )
                             },
-                            onSortConfigChange = { config ->
-                                val changed = config != sortConfig
-                                sortFieldOrdinal = config.field.ordinal
-                                sortDescending = config.descending
-                                if (changed) {
-                                    scope.launch {
-                                        listState.scrollToItem(0)
-                                        scrollBehavior.state.heightOffset = 0f
-                                        scrollBehavior.state.contentOffset = 0f
-                                    }
-                                }
+                            defaultActions = {
+                                FolderDetailActions(
+                                searchVisible = searchVisible,
+                                sortConfig = sortConfig,
+                                onSearchVisibleChange = { visible ->
+                                    searchVisible = visible
+                                    searchFocused = visible
+                                    if (!visible) query = ""
+                                },
+                                onSortConfigChange = { config ->
+                                    sortFieldOrdinal = config.field.ordinal
+                                    sortDescending = config.descending
+                                },
+                                )
                             },
                         )
                     },
@@ -166,7 +238,7 @@ fun FolderDetailScreen(
                 )
             }
         },
-    ) { padding ->
+        ) { padding ->
         val bottomContentHeight = with(density) { bottomContentHeightPx.toDp() }
         val currentBarPadding =
             (padding.calculateTopPadding() - bottomContentHeight).coerceAtLeast(0.dp)
@@ -200,6 +272,7 @@ fun FolderDetailScreen(
                 sortConfig = sortConfig,
                 onPlayNext = onPlayNext,
                 onAppendToQueue = onAppendToQueue,
+                onAddToPlaylist = onAddToPlaylist,
                 onGoToAlbum = onGoToAlbum,
                 artistGroups = artistGroups,
                 onGoToArtist = onGoToArtist,
@@ -216,6 +289,10 @@ fun FolderDetailScreen(
                         bottomContentPadding,
                     ),
                 ),
+                selectionMode = selectionMode,
+                selectedTrackUris = selectedTrackUris,
+                onSelectionChange = { selectedTrackUris = it },
+                onSelectionModeChange = { selectionMode = it },
             )
         }
     }

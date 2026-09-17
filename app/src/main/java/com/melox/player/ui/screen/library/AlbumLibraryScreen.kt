@@ -7,11 +7,14 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.calculateEndPadding
+import androidx.compose.foundation.layout.calculateStartPadding
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.grid.GridCells
+import androidx.compose.foundation.lazy.grid.GridItemSpan
 import androidx.compose.foundation.lazy.grid.LazyGridState
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
@@ -26,6 +29,7 @@ import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.platform.LocalLayoutDirection
 import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.Dp
@@ -35,13 +39,17 @@ import com.melox.player.data.library.AlbumGroup
 import com.melox.player.data.library.AlbumGridStyle
 import com.melox.player.data.library.AlbumSortConfig
 import com.melox.player.data.library.AlbumSortField
+import com.melox.player.model.ScanStatus
 import com.melox.player.ui.component.library.AlphabetSections
 import com.melox.player.ui.component.library.AlphabetSideBar
 import com.melox.player.ui.component.library.PlaybackArtwork
+import com.melox.player.ui.component.library.responsiveGridColumnCount
 import top.yukonga.miuix.kmp.basic.Card
 import top.yukonga.miuix.kmp.basic.CardDefaults
 import top.yukonga.miuix.kmp.basic.ScrollBehavior
 import top.yukonga.miuix.kmp.basic.Text
+import top.yukonga.miuix.kmp.icon.MiuixIcons
+import top.yukonga.miuix.kmp.icon.extended.Album
 import top.yukonga.miuix.kmp.theme.MiuixTheme
 import top.yukonga.miuix.kmp.utils.PressFeedbackType
 import top.yukonga.miuix.kmp.utils.overScrollVertical
@@ -52,6 +60,7 @@ fun AlbumLibraryScreen(
     displayedAlbums: List<AlbumGroup>,
     sectionIndexMap: Map<String, Int>,
     query: String,
+    scanStatus: ScanStatus,
     sortConfig: AlbumSortConfig,
     onAlbumClick: (AlbumGroup) -> Unit,
     scrollBehavior: ScrollBehavior,
@@ -61,6 +70,8 @@ fun AlbumLibraryScreen(
     contentPadding: PaddingValues = PaddingValues(),
     showIndex: Boolean = true,
     indexBottomSpacing: Dp = 12.dp,
+    landscape: Boolean = false,
+    navigationRailExpanded: Boolean = false,
 ) {
     val layoutDirection = LocalLayoutDirection.current
     val supportsIndex = sortConfig.field == AlbumSortField.ALBUM ||
@@ -72,34 +83,60 @@ fun AlbumLibraryScreen(
         derivedStateOf { scrollBehavior.state.collapsedFraction > 0.01f }
     }
 
-    Box(modifier = modifier.fillMaxSize()) {
-        if (displayedAlbums.isEmpty()) {
-            Text(
-                text = stringResource(
-                    if (query.isBlank()) R.string.album_empty else R.string.album_no_search_results,
+    BoxWithConstraints(modifier = modifier.fillMaxSize()) {
+        val gridContentPadding = PaddingValues(
+            start = contentPadding.calculateStartPadding(layoutDirection) + 20.dp,
+            top = contentPadding.calculateTopPadding() + 12.dp,
+            end = contentPadding.calculateEndPadding(layoutDirection) + 20.dp,
+            bottom = contentPadding.calculateBottomPadding() + 12.dp,
+        )
+        LazyVerticalGrid(
+            columns = GridCells.Fixed(
+                albumGridColumnCount(
+                    gridStyle = sortConfig.gridStyle,
+                    landscape = landscape,
+                    navigationRailExpanded = navigationRailExpanded,
+                    availableWidth = maxWidth,
                 ),
-                modifier = Modifier.align(Alignment.Center),
-                color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
-            )
-        } else {
-            LazyVerticalGrid(
-                columns = GridCells.Fixed(sortConfig.gridStyle.columns),
-                modifier = Modifier
-                    .fillMaxSize()
-                    .scrollEndHaptic()
-                    .overScrollVertical()
-                    .nestedScroll(scrollBehavior.nestedScrollConnection),
-                state = gridState,
-                contentPadding = PaddingValues(
-                    start = 20.dp,
-                    top = contentPadding.calculateTopPadding() + 12.dp,
-                    end = 20.dp,
-                    bottom = contentPadding.calculateBottomPadding() + 12.dp,
-                ),
-                horizontalArrangement = Arrangement.spacedBy(12.dp),
-                verticalArrangement = Arrangement.spacedBy(12.dp),
-                overscrollEffect = null,
-            ) {
+            ),
+            modifier = Modifier
+                .fillMaxSize()
+                .scrollEndHaptic()
+                .overScrollVertical()
+                .nestedScroll(scrollBehavior.nestedScrollConnection),
+            state = gridState,
+            contentPadding = gridContentPadding,
+            horizontalArrangement = Arrangement.spacedBy(12.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp),
+            overscrollEffect = null,
+        ) {
+            if (displayedAlbums.isEmpty()) {
+                item(
+                    key = "empty_album",
+                    span = { GridItemSpan(maxLineSpan) },
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(
+                                (
+                                    maxHeight -
+                                        gridContentPadding.calculateTopPadding() -
+                                        gridContentPadding.calculateBottomPadding()
+                                    ).coerceAtLeast(1.dp),
+                            ),
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        MusicLibraryEmptyState(
+                            scanStatus = scanStatus,
+                            query = query,
+                            emptyMessageRes = R.string.album_empty,
+                            noSearchResultsRes = R.string.album_no_search_results,
+                            icon = MiuixIcons.Album,
+                        )
+                    }
+                }
+            } else {
                 items(
                     items = displayedAlbums,
                     key = AlbumGroup::key,
@@ -147,6 +184,31 @@ fun AlbumLibraryScreen(
             )
         }
     }
+}
+
+internal fun albumGridColumnCount(
+    gridStyle: AlbumGridStyle,
+    landscape: Boolean,
+    navigationRailExpanded: Boolean,
+    availableWidth: Dp,
+): Int {
+    if (!landscape) return gridStyle.columns
+
+    val maximumColumns = when {
+        gridStyle == AlbumGridStyle.THREE -> 6
+        else -> 5
+    }
+    val minimumCellWidth = when (gridStyle) {
+        AlbumGridStyle.TWO_SMALL -> 140.dp
+        AlbumGridStyle.THREE -> 120.dp
+    }
+    return responsiveGridColumnCount(
+        availableWidth = availableWidth,
+        horizontalPadding = 40.dp,
+        minimumCellWidth = minimumCellWidth,
+        minimumColumns = gridStyle.columns,
+        maximumColumns = maximumColumns,
+    )
 }
 
 @Composable
@@ -236,12 +298,20 @@ private fun AlbumGridLabels(
                 Modifier
             },
             style = MiuixTheme.textStyles.body2,
+            fontWeight = FontWeight.Medium,
             maxLines = 1,
             overflow = TextOverflow.Ellipsis,
         )
         Text(
-            text = pluralStringResource(
-                R.plurals.album_song_count,
+            text = album.year?.takeIf { it > 0 }?.let { year ->
+                pluralStringResource(
+                    R.plurals.album_grid_song_count_with_year,
+                    album.tracks.size,
+                    album.tracks.size,
+                    year,
+                )
+            } ?: pluralStringResource(
+                R.plurals.album_grid_song_count,
                 album.tracks.size,
                 album.tracks.size,
             ),

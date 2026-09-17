@@ -1,6 +1,5 @@
 package com.melox.player.ui.component.playback
 
-import android.content.Context
 import android.graphics.Bitmap
 import android.graphics.Canvas
 import android.graphics.ColorMatrix
@@ -33,12 +32,10 @@ import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.painter.BitmapPainter
 import androidx.compose.ui.layout.ContentScale
-import androidx.compose.ui.platform.LocalContext
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import com.melox.player.ui.component.library.createArtworkCacheKey
-import com.melox.player.ui.component.library.loadArtworkBitmap
-import com.melox.player.ui.component.library.loadCachedArtworkDerivative
+import com.melox.player.ui.component.library.canRetainArtworkInMemory
 import java.util.LinkedHashMap
 import java.util.WeakHashMap
 import kotlin.math.PI
@@ -51,7 +48,6 @@ import kotlin.random.Random
 
 private const val PLAYBACK_BACKGROUND_BLUR_SIZE_PX = 128
 private const val PLAYBACK_BACKGROUND_BLUR_RADIUS = 25
-private const val PLAYBACK_BACKGROUND_TRANSITION_DURATION_MILLIS = 640
 private const val KEN_BURNS_TRANSITION_DURATION_MILLIS = 12_000
 private const val BLURRED_ARTWORK_CACHE_SCHEMA_VERSION = 2
 private const val BLURRED_ARTWORK_LAYER_MEMORY_CACHE_MAX_ENTRIES = 3
@@ -71,11 +67,14 @@ private data class BlurredArtworkLayer(
     val blurredArtwork: Bitmap,
 )
 
+internal fun trimBlurredArtworkMemoryCache() {
+    synchronized(blurredArtworkMemoryCache) { blurredArtworkMemoryCache.clear() }
+    synchronized(blurredArtworkLayerMemoryCache) { blurredArtworkLayerMemoryCache.clear() }
+}
+
 private data class BlurredArtworkLayerBlend(
-    val previousLayer: BlurredArtworkLayer?,
+    val frames: List<WeightedCrossfadeFrame<BlurredArtworkLayer>>,
     val currentLayer: BlurredArtworkLayer?,
-    val progress: Float,
-    val hasPreviousLayer: Boolean,
 )
 
 internal data class KenBurnsFrame(
@@ -86,19 +85,20 @@ internal data class KenBurnsFrame(
 
 @Composable
 internal fun BlurredArtworkBackground(
-    contentUri: String,
-    dateModifiedEpochSeconds: Long,
-    fileSizeBytes: Long,
+    resource: PlaybackArtworkResource,
     animate: Boolean,
+    modifier: Modifier = Modifier,
     animateArtworkTransition: Boolean = true,
     onStatusBarBackgroundDarkChanged: (Boolean) -> Unit = {},
-    modifier: Modifier = Modifier,
 ) {
-    val targetLayer = rememberBlurredArtworkLayer(
-        contentUri = contentUri,
-        dateModifiedEpochSeconds = dateModifiedEpochSeconds,
-        fileSizeBytes = fileSizeBytes,
-    )
+    val targetLayer = remember(resource.blurredCacheKey, resource.blurredArtwork) {
+        resource.blurredArtwork?.let { bitmap ->
+            BlurredArtworkLayer(
+                key = resource.blurredCacheKey,
+                blurredArtwork = bitmap,
+            ).also(::cacheBlurredArtworkLayer)
+        }
+    }
     val layerBlend = rememberBlurredArtworkLayerBlend(
         targetLayer = targetLayer,
         animateTransition = animateArtworkTransition,
@@ -130,7 +130,7 @@ private fun MovingBlurredArtworkLayer(
     animate: Boolean,
     modifier: Modifier = Modifier,
 ) {
-    val animationKey = layerBlend.currentLayer?.key ?: layerBlend.previousLayer?.key
+    val animationKey = layerBlend.currentLayer?.key ?: layerBlend.frames.lastOrNull()?.value?.key
     val lifecycleState by LocalLifecycleOwner.current.lifecycle.currentStateFlow.collectAsState()
     val animationEnabled = animate &&
         animationKey != null &&
@@ -169,22 +169,13 @@ private fun MovingBlurredArtworkLayer(
         progress = accelerateDecelerate(phase.value),
     )
 
+    val layerAlphas = sourceOverAlphas(layerBlend.frames.map { it.alpha })
     Box(modifier = modifier) {
-        if (layerBlend.hasPreviousLayer) {
-            layerBlend.previousLayer?.let { layer ->
-                MovingArtworkImage(
-                    bitmap = layer.blurredArtwork,
-                    frame = frame,
-                    alpha = 1f - layerBlend.progress,
-                    modifier = Modifier.fillMaxSize(),
-                )
-            }
-        }
-        layerBlend.currentLayer?.let { layer ->
+        layerBlend.frames.forEachIndexed { index, blendFrame ->
             MovingArtworkImage(
-                bitmap = layer.blurredArtwork,
+                bitmap = blendFrame.value.blurredArtwork,
                 frame = frame,
-                alpha = layerBlend.progress,
+                alpha = layerAlphas[index],
                 modifier = Modifier.fillMaxSize(),
             )
         }
@@ -218,84 +209,7 @@ private fun MovingArtworkImage(
     )
 }
 
-@Composable
-private fun rememberBlurredArtworkLayer(
-    contentUri: String,
-    dateModifiedEpochSeconds: Long,
-    fileSizeBytes: Long,
-): BlurredArtworkLayer? {
-    val context = LocalContext.current.applicationContext
-    var layer by remember { mutableStateOf<BlurredArtworkLayer?>(null) }
-    val layerKey = remember(contentUri, dateModifiedEpochSeconds, fileSizeBytes) {
-        createBlurredArtworkLayerKey(
-            contentUri = contentUri,
-            dateModifiedEpochSeconds = dateModifiedEpochSeconds,
-            fileSizeBytes = fileSizeBytes,
-        )
-    }
-    val cachedLayer = remember(layerKey) {
-        getCachedBlurredArtworkLayer(layerKey)
-    }
-
-    LaunchedEffect(layerKey) {
-        layer = cachedLayer ?: loadBlurredArtworkLayer(
-            context = context,
-            contentUri = contentUri,
-            dateModifiedEpochSeconds = dateModifiedEpochSeconds,
-            fileSizeBytes = fileSizeBytes,
-        )
-    }
-
-    return cachedLayer ?: layer
-}
-
-internal suspend fun prefetchBlurredArtworkBackground(
-    context: Context,
-    contentUri: String,
-    dateModifiedEpochSeconds: Long,
-    fileSizeBytes: Long,
-) {
-    loadBlurredArtworkLayer(
-        context = context.applicationContext,
-        contentUri = contentUri,
-        dateModifiedEpochSeconds = dateModifiedEpochSeconds,
-        fileSizeBytes = fileSizeBytes,
-    )
-}
-
-private suspend fun loadBlurredArtworkLayer(
-    context: Context,
-    contentUri: String,
-    dateModifiedEpochSeconds: Long,
-    fileSizeBytes: Long,
-): BlurredArtworkLayer? {
-    if (contentUri.isBlank()) return null
-    val layerKey = createBlurredArtworkLayerKey(
-        contentUri = contentUri,
-        dateModifiedEpochSeconds = dateModifiedEpochSeconds,
-        fileSizeBytes = fileSizeBytes,
-    )
-    getCachedBlurredArtworkLayer(layerKey)?.let { return it }
-    val blurSource = loadArtworkBitmap(
-        context = context,
-        contentUri = contentUri,
-        dateModifiedEpochSeconds = dateModifiedEpochSeconds,
-        fileSizeBytes = fileSizeBytes,
-        targetSizePx = PLAYBACK_BACKGROUND_BLUR_SIZE_PX,
-    ) ?: return null
-    val blurredArtwork = loadCachedArtworkDerivative(
-        context = context,
-        cacheKey = layerKey,
-    ) {
-        createBlurredArtwork(blurSource)
-    } ?: return null
-    return BlurredArtworkLayer(
-        key = layerKey,
-        blurredArtwork = blurredArtwork,
-    ).also(::cacheBlurredArtworkLayer)
-}
-
-private fun createBlurredArtworkLayerKey(
+internal fun createBlurredArtworkLayerKey(
     contentUri: String,
     dateModifiedEpochSeconds: Long,
     fileSizeBytes: Long,
@@ -324,7 +238,7 @@ private fun getCachedBlurredArtworkLayer(key: String): BlurredArtworkLayer? =
 
 private fun cacheBlurredArtworkLayer(layer: BlurredArtworkLayer) {
     synchronized(blurredArtworkLayerMemoryCache) {
-        blurredArtworkLayerMemoryCache[layer.key] = layer
+        if (canRetainArtworkInMemory()) blurredArtworkLayerMemoryCache[layer.key] = layer
     }
 }
 
@@ -333,29 +247,29 @@ private fun rememberBlurredArtworkLayerBlend(
     targetLayer: BlurredArtworkLayer?,
     animateTransition: Boolean,
 ): BlurredArtworkLayerBlend {
-    var previousLayer by remember { mutableStateOf<BlurredArtworkLayer?>(null) }
+    var startingFrames by remember {
+        mutableStateOf<List<WeightedCrossfadeFrame<BlurredArtworkLayer>>>(emptyList())
+    }
     var currentLayer by remember { mutableStateOf(targetLayer) }
-    var hasPreviousLayer by remember { mutableStateOf(false) }
     val progress = remember { Animatable(1f) }
 
     LaunchedEffect(targetLayer?.key, animateTransition) {
-        if (targetLayer?.key == currentLayer?.key && !hasPreviousLayer) {
+        if (targetLayer?.key == currentLayer?.key && progress.value >= 1f) {
             return@LaunchedEffect
         }
-        if (!animateTransition || currentLayer == null && !hasPreviousLayer) {
-            previousLayer = null
+        if (!animateTransition || currentLayer == null && startingFrames.isEmpty()) {
+            startingFrames = emptyList()
             currentLayer = targetLayer
-            hasPreviousLayer = false
             progress.snapTo(1f)
             return@LaunchedEffect
         }
-        previousLayer = if (progress.value < 0.5f && hasPreviousLayer) {
-            previousLayer
-        } else {
-            currentLayer
-        }
+        startingFrames = weightedCrossfadeFrames(
+            startingFrames = startingFrames,
+            currentValue = currentLayer,
+            progress = progress.value,
+            sameValue = { first, second -> first.key == second.key },
+        )
         currentLayer = targetLayer
-        hasPreviousLayer = true
         progress.snapTo(0f)
         progress.animateTo(
             targetValue = 1f,
@@ -364,19 +278,21 @@ private fun rememberBlurredArtworkLayerBlend(
                 easing = PLAYER_TRACK_ARTWORK_CROSSFADE_EASING,
             ),
         )
-        hasPreviousLayer = false
-        previousLayer = null
+        startingFrames = emptyList()
     }
 
     return BlurredArtworkLayerBlend(
-        previousLayer = previousLayer,
+        frames = weightedCrossfadeFrames(
+            startingFrames = startingFrames,
+            currentValue = currentLayer,
+            progress = progress.value,
+            sameValue = { first, second -> first.key == second.key },
+        ),
         currentLayer = currentLayer,
-        progress = progress.value,
-        hasPreviousLayer = hasPreviousLayer,
     )
 }
 
-private fun createBlurredArtwork(source: Bitmap): Bitmap {
+internal fun createBlurredArtwork(source: Bitmap): Bitmap {
     synchronized(blurredArtworkMemoryCache) {
         blurredArtworkMemoryCache[source]
     }?.let { return it }
@@ -417,7 +333,7 @@ private fun createBlurredArtwork(source: Bitmap): Bitmap {
     )
     sampled.recycle()
     synchronized(blurredArtworkMemoryCache) {
-        blurredArtworkMemoryCache[source] = blurred
+        if (canRetainArtworkInMemory()) blurredArtworkMemoryCache[source] = blurred
     }
     return blurred
 }

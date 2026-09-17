@@ -26,12 +26,26 @@ internal data class LocalAudioProperties(
 )
 
 /**
- * Reads stream properties through a duplicated descriptor, following Lyrico's TagLib scan path.
+ * Reads stream properties through a duplicated descriptor so metadata scanning keeps ownership local.
  */
 internal class AudioPropertiesReader(
     private val contentResolver: ContentResolver,
 ) {
-    fun read(contentUri: String): LocalAudioProperties? = try {
+    fun read(contentUri: String): LocalAudioProperties? {
+        val properties = readNativeProperties(contentUri)
+        val wav = contentResolver.readWavMetadata(contentUri) ?: return properties
+        return (properties ?: LocalAudioProperties(null, null, null, null)).copy(
+            title = wav.tags.title ?: properties?.title,
+            artist = wav.tags.artist ?: properties?.artist,
+            album = wav.tags.album ?: properties?.album,
+            albumArtist = wav.tags.albumArtist ?: properties?.albumArtist,
+            year = wav.tags.year ?: properties?.year,
+            trackNumber = wav.tags.trackNumber ?: properties?.trackNumber,
+            discNumber = wav.tags.discNumber ?: properties?.discNumber,
+        )
+    }
+
+    private fun readNativeProperties(contentUri: String): LocalAudioProperties? = try {
         contentResolver.openFileDescriptor(contentUri.toUri(), "r")?.use { descriptor ->
             val properties = TagLib.getAudioProperties(descriptor.dup().detachFd())
             val tagProperties = TagLib.getMetadata(
@@ -57,9 +71,35 @@ internal class AudioPropertiesReader(
         }
     } catch (exception: Exception) {
         Log.w(TAG, "Unable to read audio properties for $contentUri", exception)
-        null
+        readPlatformProperties(contentUri)
     } catch (error: LinkageError) {
         Log.e(TAG, "TagLib is unavailable for $contentUri", error)
+        readPlatformProperties(contentUri)
+    }
+
+    private fun readPlatformProperties(contentUri: String): LocalAudioProperties? = try {
+        val retriever = MediaMetadataRetriever()
+        try {
+            contentResolver.openFileDescriptor(contentUri.toUri(), "r")?.use { descriptor ->
+                retriever.setDataSource(descriptor.fileDescriptor)
+                LocalAudioProperties(
+                    durationMs = retriever
+                        .extractMetadata(MediaMetadataRetriever.METADATA_KEY_DURATION)
+                        ?.toLongOrNull()
+                        ?.takeIf { it > 0L },
+                    bitrateBitsPerSecond = retriever
+                        .extractMetadata(MediaMetadataRetriever.METADATA_KEY_BITRATE)
+                        ?.toIntOrNull()
+                        ?.takeIf { it > 0 },
+                    sampleRateHz = null,
+                    channelCount = null,
+                )
+            }
+        } finally {
+            retriever.release()
+        }
+    } catch (exception: Exception) {
+        Log.w(TAG, "Unable to read platform audio properties for $contentUri", exception)
         null
     }
 
@@ -81,8 +121,14 @@ internal data class LocalAudioTags(
 internal fun parseAudioTagProperties(
     properties: Map<String, Array<String>>,
 ): LocalAudioTags {
-    val normalizedProperties = properties.entries.associate { (key, values) ->
-        key.uppercase(Locale.ROOT) to values
+    val normalizedProperties = buildMap<String, Array<String>> {
+        properties.forEach { (key, values) ->
+            val normalizedKey = key.uppercase(Locale.ROOT)
+            val shortKey = normalizedKey.substringAfterLast(':', missingDelimiterValue = normalizedKey)
+            listOf(normalizedKey, shortKey).distinct().forEach { candidate ->
+                put(candidate, (get(candidate)?.toList().orEmpty() + values.toList()).toTypedArray())
+            }
+        }
     }
 
     fun joinedValue(vararg keys: String): String? = keys.firstNotNullOfOrNull { key ->
@@ -90,6 +136,8 @@ internal fun parseAudioTagProperties(
             ?.asSequence()
             ?.map(String::trim)
             ?.filter(String::isNotEmpty)
+            ?.filterNot { it.contains('�') }
+            ?.distinct()
             ?.toList()
             ?.takeIf(List<String>::isNotEmpty)
             ?.joinToString("/")
@@ -101,7 +149,7 @@ internal fun parseAudioTagProperties(
         ?.toIntOrNull()
         ?.takeIf { it > 0 }
 
-    val rawDate = joinedValue("DATE", "YEAR")
+    val rawDate = joinedValue("DATE", "YEAR", "TDRC", "TYER", "ICRD")
     val year = rawDate
         ?.let(YEAR_PATTERN::find)
         ?.value
@@ -109,9 +157,9 @@ internal fun parseAudioTagProperties(
         ?.takeIf { it > 0 }
 
     return LocalAudioTags(
-        title = joinedValue("TITLE"),
-        artist = joinedValue("ARTIST"),
-        album = joinedValue("ALBUM"),
+        title = joinedValue("TITLE", "TIT2", "\u00A9NAM", "INAM", "NAME"),
+        artist = joinedValue("ARTIST", "TPE1", "\u00A9ART", "IART"),
+        album = joinedValue("ALBUM", "TALB", "\u00A9ALB", "IPRD", "PRODUCT"),
         albumArtist = joinedValue(
             "ALBUMARTIST",
             "ALBUM ARTIST",
@@ -120,7 +168,7 @@ internal fun parseAudioTagProperties(
             "ALBUMARTISTSORT",
         ),
         year = year,
-        trackNumber = indexedValue("TRACKNUMBER", "TRACK", "TRCK"),
+        trackNumber = indexedValue("TRACKNUMBER", "TRACK", "TRCK", "ITRK"),
         discNumber = indexedValue("DISCNUMBER", "DISC", "TPOS", "DISKNUMBER"),
     )
 }

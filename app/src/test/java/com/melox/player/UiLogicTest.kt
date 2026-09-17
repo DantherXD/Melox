@@ -6,7 +6,6 @@ import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
-import com.materialkolor.hct.Hct
 import com.melox.player.data.library.AlbumGridStyle
 import com.melox.player.data.library.AlbumSortConfig
 import com.melox.player.data.library.AlbumSortField
@@ -19,6 +18,7 @@ import com.melox.player.data.library.MusicLibrarySnapshotCodec
 import com.melox.player.data.library.MusicSortConfig
 import com.melox.player.data.library.MusicSortField
 import com.melox.player.data.library.buildAlbumGroups
+import com.melox.player.data.library.buildAlbumDiscSections
 import com.melox.player.data.library.buildArtistGroups
 import com.melox.player.data.library.buildFolderGroups
 import com.melox.player.data.library.createMusicSortKeys
@@ -29,6 +29,7 @@ import com.melox.player.data.library.filterFolders
 import com.melox.player.data.library.filterMusicTracks
 import com.melox.player.data.library.folderDisplayPath
 import com.melox.player.data.library.hasReusableAudioProperties
+import com.melox.player.data.library.japaneseKanaToRomaji
 import com.melox.player.data.library.normalizeAudioProperties
 import com.melox.player.data.library.parseAudioTagProperties
 import com.melox.player.data.library.normalizeMusicFolderPath
@@ -48,6 +49,11 @@ import com.melox.player.model.AudioQuality
 import com.melox.player.model.BottomBarStyle
 import com.melox.player.model.DynamicColorSource
 import com.melox.player.model.MusicTrack
+import com.melox.player.model.NavigationTransitionStyle
+import com.melox.player.model.LyricLine
+import com.melox.player.model.LyricsDocument
+import com.melox.player.model.LyricsFormat
+import com.melox.player.model.LyricsSource
 import com.melox.player.model.PlaybackMode
 import com.melox.player.model.PlaybackBackgroundStyle
 import com.melox.player.model.PlaybackQueueItem
@@ -55,17 +61,17 @@ import com.melox.player.model.PlaybackSnapshot
 import com.melox.player.model.PlaybackUiState
 import com.melox.player.model.ScanStatus
 import com.melox.player.model.ThemeMode
-import com.melox.player.model.LyricLine
-import com.melox.player.model.LyricTransition
-import com.melox.player.model.LyricsRenderItem
 import com.melox.player.model.resolveAudioQuality
 import com.melox.player.model.withTrackMetadata
 import com.melox.player.playback.isValidQueueIndex
 import com.melox.player.playback.buildHomeRecommendationPlaybackQueue
+import com.melox.player.playback.displayedPlaybackMode
 import com.melox.player.playback.hasSameQueueSlots
+import com.melox.player.playback.isValidQueueMove
 import com.melox.player.playback.nextPlaybackMode
 import com.melox.player.playback.nextQueueInsertionIndex
 import com.melox.player.playback.playbackQueueReplacement
+import com.melox.player.playback.queueRemovalIndicesForContentUris
 import com.melox.player.playback.reorderQueueForPlaybackMode
 import com.melox.player.playback.reconcileValidatedPlaybackSnapshot
 import com.melox.player.playback.sourceOrderForPlayNext
@@ -81,45 +87,72 @@ import com.melox.player.ui.component.library.audioFormatLabel
 import com.melox.player.ui.component.library.displayFileLocation
 import com.melox.player.ui.component.library.participatingArtistGroups
 import com.melox.player.ui.component.library.playbackArtworkCornerRadius
+import com.melox.player.ui.component.library.responsiveGridColumnCount
 import com.melox.player.ui.component.library.snapshotArtworkDiskCacheEntries
 import com.melox.player.ui.component.playback.hasDifferentMetadataSwipeTarget
+import com.melox.player.ui.component.playback.hasExpectedMiniMetadataSwipeTarget
 import com.melox.player.ui.component.playback.KenBurnsFrame
+import com.melox.player.ui.component.playback.DYNAMIC_FLOW_ARTWORK_SATURATION
+import com.melox.player.ui.component.playback.DYNAMIC_FLOW_BACKGROUND_DARKEN_AMOUNT
+import com.melox.player.ui.component.playback.advanceDynamicFlowClockMillis
 import com.melox.player.ui.component.playback.createRenderScriptBlurBoxSizes
-import com.melox.player.ui.component.playback.interpolateArtworkBackgroundField
+import com.melox.player.ui.component.playback.dynamicFlowDownsampleFactor
 import com.melox.player.ui.component.playback.interpolateKenBurnsFrame
 import com.melox.player.ui.component.playback.miniMetadataSwipeThresholdDirection
 import com.melox.player.ui.component.playback.shouldTriggerMiniMetadataSwipeThresholdHaptic
+import com.melox.player.ui.component.liquid.floatingNavigationBarBottomPadding
 import com.melox.player.ui.shouldClearSearchFocusAfterImeDismissed
+import com.melox.player.ui.floatingBottomBarBottomPadding
+import com.melox.player.ui.floatingMiniPlayerBottomPaddingWhenNavigationIsHidden
 import com.melox.player.ui.component.playback.PLAYER_LAYER_HANDOFF_END_PROGRESS
+import com.melox.player.ui.component.playback.PLAYER_MINI_CONTENT_FADE_END_PROGRESS
+import com.melox.player.ui.component.playback.PLAYER_CONTENT_APPEAR_START_PROGRESS
+import com.melox.player.ui.component.playback.PLAYER_CONTENT_APPEAR_END_PROGRESS
 import com.melox.player.ui.component.playback.playerSheetBarAlpha
+import com.melox.player.ui.component.playback.playerSheetMiniContentAlpha
+import com.melox.player.ui.component.playback.playerSheetBackgroundAlpha
 import com.melox.player.ui.component.playback.playerSheetDragProgress
 import com.melox.player.ui.component.playback.playerSheetDragTarget
+import com.melox.player.ui.component.playback.playerSheetVerticalTravel
 import com.melox.player.ui.component.playback.playerSheetGlassVisible
 import com.melox.player.ui.component.playback.playerSheetMiniPlayerAcceptsInput
+import com.melox.player.ui.component.playback.playerSheetResidentHostTranslationY
+import com.melox.player.ui.component.playback.scaledDynamicFlowTimeMs
 import com.melox.player.ui.component.playback.playerSheetPageAlpha
-import com.melox.player.ui.component.playback.artworkBackgroundUsesLightStatusBarIcons
 import com.melox.player.ui.component.playback.playerSheetUsesFullPlayerStatusBar
 import com.melox.player.ui.component.playback.playerWindowUsesPhysicalScreenCorners
-import com.melox.player.ui.component.playback.resolveArtworkColorFieldPixel
-import com.melox.player.ui.component.playback.resolveArtworkBackgroundColorRotation
-import com.melox.player.ui.component.playback.resolveArtworkOrbitColors
-import com.melox.player.ui.component.playback.resolveArtworkOrbitProgress
 import com.melox.player.ui.component.playback.fittedArtworkRect
 import com.melox.player.ui.component.playback.artworkInsetRect
 import com.melox.player.ui.component.playback.sharedArtworkRect
 import com.melox.player.ui.component.playback.sharedArtworkTargetIsOnscreen
 import com.melox.player.ui.component.playback.sharedContainerContentOffset
 import com.melox.player.ui.component.playback.sharedContainerCornerRadius
+import com.melox.player.ui.component.playback.sharedContainerCornerRadii
 import com.melox.player.ui.component.playback.sharedContainerRect
 import com.melox.player.ui.component.playback.sharedContainerRenderRect
+import com.melox.player.ui.component.playback.sharedMiniPlayerContentOffset
+import com.melox.player.ui.component.playback.sharedMiniPlayerControlsTranslationX
+import com.melox.player.ui.component.playback.SharedContainerCornerRadii
+import com.melox.player.ui.component.playlist.PlaylistArtworkLayout
+import com.melox.player.ui.component.playlist.playlistArtworkLayout
+import com.melox.player.ui.floatingBottomBarAvailableWidth
 import com.melox.player.ui.component.playback.PlayerSheetTransitionState
 import com.melox.player.ui.navigation.predictiveBackHandlerEnabled
+import com.melox.player.ui.navigation.ordinaryBackHandlerEnabled
+import com.melox.player.ui.navigation.navigationTransitionCornerRadius
+import com.melox.player.ui.isMiuixWideLayout
 import com.melox.player.ui.requiredAudioPermission
 import com.melox.player.ui.resolveBottomBarStyle
 import com.melox.player.ui.rootPagerUserScrollEnabled
-import com.melox.player.ui.screen.home.buildHomeRecentlyAddedTracks
+import com.melox.player.ui.shouldUseNavigationRail
+import com.melox.player.ui.shouldShowNavigation
+import com.melox.player.ui.usesNormalMiniPlayerChrome
+import com.melox.player.ui.screen.home.homePlaylistGridColumnCount
+import com.melox.player.ui.screen.home.homeInitialRecommendationCount
 import com.melox.player.ui.screen.home.selectHomeRecommendations
+import com.melox.player.ui.screen.library.albumGridColumnCount
 import com.melox.player.ui.screen.library.MusicLibraryPlaceholder
+import com.melox.player.ui.screen.library.albumDetailHeaderCoverSize
 import com.melox.player.ui.screen.library.resolveMusicPlaybackSelection
 import com.melox.player.ui.screen.library.toMusicLibraryPlaceholder
 import com.melox.player.ui.screen.playback.LYRIC_INACTIVE_TEXT_ALPHA
@@ -132,32 +165,47 @@ import com.melox.player.ui.screen.playback.LYRIC_TRANSLATION_LINE_HEIGHT_SP
 import com.melox.player.ui.screen.playback.LYRICS_MANUAL_FOLLOW_RESUME_DELAY_MS
 import com.melox.player.ui.screen.playback.characterMotion
 import com.melox.player.ui.screen.playback.characterProgress
-import com.melox.player.ui.screen.playback.buildLyricsRenderIndexMap
 import com.melox.player.ui.screen.playback.shouldUseWordAnimation
-import com.melox.player.ui.screen.playback.simpleFloatOffset
 import com.melox.player.ui.screen.playback.wordMotion
 import com.melox.player.ui.screen.playback.forcedLyricRowProgress
 import com.melox.player.ui.screen.playback.lyricBlurRadiusTarget
 import com.melox.player.ui.screen.playback.lyricBlurShouldDisableForBrowsing
 import com.melox.player.ui.screen.playback.lyricCenterScrollDelta
-import com.melox.player.ui.screen.playback.lyricClockStartPosition
 import com.melox.player.ui.screen.playback.lyricDisplayedPositionMs
+import com.melox.player.ui.screen.playback.lyricLineRenderPositionMs
+import com.melox.player.ui.screen.playback.lyricLineLayerAlpha
+import com.melox.player.ui.screen.playback.lyricOutgoingSeekCanClear
 import com.melox.player.ui.screen.playback.lyricEdgeFadeHeights
 import com.melox.player.ui.screen.playback.lyricIntervalProgress
 import com.melox.player.ui.screen.playback.lyricLineVerticalPaddingDp
 import com.melox.player.ui.screen.playback.lyricOffscreenTranslationDistance
+import com.melox.player.ui.screen.playback.lyricPlaybackPositionMs
 import com.melox.player.ui.screen.playback.lyricProgrammaticTranslationStart
+import com.melox.player.ui.screen.playback.lyricRowRenderMode
 import com.melox.player.ui.screen.playback.lyricCenteringSpringStiffness
 import com.melox.player.ui.screen.playback.lyricScrollIsManual
 import com.melox.player.ui.screen.playback.lyricSeekUsesAnimatedCentering
 import com.melox.player.ui.screen.playback.lyricSeekPositionIsApplied
+import com.melox.player.ui.screen.playback.lyricSeekRequestIsAcknowledged
+import com.melox.player.ui.screen.playback.stabilizedLyricPlaybackPositionMs
 import com.melox.player.ui.screen.playback.lyricTargetScrollOffset
-import com.melox.player.ui.screen.playback.lyricTransitionVerticalPaddingDp
+import com.melox.player.ui.screen.playback.lyricTranslationAlpha
+import com.melox.player.ui.screen.playback.lyricWordProgressActiveAlpha
 import com.melox.player.ui.screen.playback.lyricVerticalDragExceedsTouchSlop
+import com.melox.player.ui.screen.playback.LyricRowRenderMode
 import com.melox.player.ui.screen.playback.progressGestureIsDrag
 import com.melox.player.ui.screen.playback.playerHeaderArtistText
+import com.melox.player.ui.screen.playback.fitPlayerArtworkSize
+import com.melox.player.ui.screen.playback.hiddenLyricsCenterOffsetY
 import com.melox.player.ui.screen.playback.queueListHeight
-import com.melox.player.ui.screen.playback.shouldAcceptPublishedLyricPosition
+import com.melox.player.ui.screen.playback.queueLocationAnchorHeight
+import com.melox.player.ui.screen.playback.moveQueueListItem
+import com.melox.player.ui.screen.playback.queueMoveTargetAfterCurrent
+import com.melox.player.ui.screen.playback.queueOffscreenExitAlpha
+import com.melox.player.ui.screen.playback.queueOffscreenExitTranslation
+import com.melox.player.ui.screen.playback.queuePlayNextPeerTranslation
+import com.melox.player.ui.screen.playback.queueShowsPlayNextAction
+import com.melox.player.ui.screen.playback.sliderValueAtPosition
 import com.melox.player.ui.theme.toColorSchemeMode
 import com.melox.player.ui.theme.resolveDynamicColorSeed
 import java.io.ByteArrayInputStream
@@ -178,140 +226,100 @@ import org.junit.Assert.assertThrows
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import top.yukonga.miuix.kmp.theme.ColorSchemeMode
-import kotlin.math.abs
 import kotlin.random.Random
 
 class UiLogicTest {
     @Test
-    fun artworkColorFieldCapsChromaAndUsesThemeTone() {
-        val sourceColor = 0xFFFF1744.toInt()
-        val source = Hct.fromInt(sourceColor)
-        val light = Hct.fromInt(resolveArtworkColorFieldPixel(sourceColor, isDark = false))
-        val dark = Hct.fromInt(resolveArtworkColorFieldPixel(sourceColor, isDark = true))
-        val lightHueDelta = abs(source.hue - light.hue).let { minOf(it, 360.0 - it) }
-        val darkHueDelta = abs(source.hue - dark.hue).let { minOf(it, 360.0 - it) }
-
-        assertTrue(light.chroma <= 32.01)
-        assertTrue(dark.chroma <= 32.01)
-        // HCT may shift the realized hue slightly when the requested tone and
-        // chroma sit near the target gamut boundary.
-        assertTrue(lightHueDelta <= 5.0)
-        assertTrue(darkHueDelta <= 5.0)
-        assertEquals(64.0, light.tone, 0.5)
-        assertEquals(32.0, dark.tone, 0.5)
-    }
-
-    @Test
-    fun artworkOrbitStartsFromTheCenterFourByFour() {
-        val fieldPixels = IntArray(8 * 8) { index -> 0xFF000000.toInt() or index }
-        val outputPixels = IntArray(4 * 4)
-
-        resolveArtworkOrbitColors(fieldPixels, cycleProgress = 0f, outputPixels)
-
-        for (outputY in 0 until 4) {
-            for (outputX in 0 until 4) {
-                val sourceIndex = (outputY + 2) * 8 + outputX + 2
-                assertEquals(fieldPixels[sourceIndex], outputPixels[outputY * 4 + outputX])
-            }
-        }
-    }
-
-    @Test
-    fun artworkOrbitMovesSidewaysBeforeTheOuterCorners() {
-        val fieldPixels = IntArray(8 * 8) { index -> 0xFF000000.toInt() or index }
-        val outputPixels = IntArray(4 * 4)
-
-        resolveArtworkOrbitColors(
-            fieldPixels,
-            cycleProgress = 6_000f / 42_000f,
-            outputPixels,
-        )
-        assertEquals(fieldPixels[2 * 8], outputPixels[0])
-        assertEquals(fieldPixels[5 * 8 + 7], outputPixels[3 * 4 + 3])
-
-        resolveArtworkOrbitColors(
-            fieldPixels,
-            cycleProgress = 4_500f / 42_000f,
-            outputPixels,
-        )
-        assertEquals(fieldPixels[2 * 8 + 7], outputPixels[3])
-        assertEquals(fieldPixels[5 * 8], outputPixels[3 * 4])
-    }
-
-    @Test
-    fun artworkOrbitAlternatesTwentyFourAndEighteenSecondLaps() {
-        assertEquals(0.25f, resolveArtworkOrbitProgress(6_000f, 24_000f, 18_000f), 0f)
-        assertEquals(1f, resolveArtworkOrbitProgress(24_000f, 24_000f, 18_000f), 0f)
-        assertEquals(1.25f, resolveArtworkOrbitProgress(28_500f, 24_000f, 18_000f), 0f)
-        assertEquals(0.25f, resolveArtworkOrbitProgress(4_500f, 18_000f, 24_000f), 0f)
-        assertEquals(1f, resolveArtworkOrbitProgress(18_000f, 18_000f, 24_000f), 0f)
-        assertEquals(2f, resolveArtworkOrbitProgress(42_000f, 18_000f, 24_000f), 0f)
-    }
-
-    @Test
-    fun artworkBackgroundRotatesTheWholeGridWithoutBreakingAdjacency() {
-        val sourcePixels = IntArray(4 * 4) { index -> 0xFF000000.toInt() or index }
-        val outputPixels = IntArray(4 * 4)
-
-        resolveArtworkBackgroundColorRotation(sourcePixels, 0f, outputPixels)
-        assertTrue(sourcePixels.contentEquals(outputPixels))
-
-        resolveArtworkBackgroundColorRotation(sourcePixels, 0.25f, outputPixels)
-        assertArrayEquals(
-            intArrayOf(12, 8, 4, 0, 13, 9, 5, 1, 14, 10, 6, 2, 15, 11, 7, 3)
-                .map { 0xFF000000.toInt() or it }
-                .toIntArray(),
-            outputPixels,
-        )
-
-        resolveArtworkBackgroundColorRotation(sourcePixels, 0.5f, outputPixels)
-        assertArrayEquals(sourcePixels.reversedArray(), outputPixels)
-
-        resolveArtworkBackgroundColorRotation(sourcePixels, 0.75f, outputPixels)
-        assertArrayEquals(
-            intArrayOf(3, 7, 11, 15, 2, 6, 10, 14, 1, 5, 9, 13, 0, 4, 8, 12)
-                .map { 0xFF000000.toInt() or it }
-                .toIntArray(),
-            outputPixels,
-        )
-
-        resolveArtworkBackgroundColorRotation(sourcePixels, 1f, outputPixels)
-        assertTrue(sourcePixels.contentEquals(outputPixels))
-    }
-
-    @Test
-    fun artworkBackgroundInterpolatesBetweenWholeGridRotations() {
-        val sourcePixels = IntArray(4 * 4) { index -> 0xFF000000.toInt() or index }
-        val outputPixels = IntArray(4 * 4)
-
-        resolveArtworkBackgroundColorRotation(sourcePixels, 0.125f, outputPixels)
-
-        assertEquals(0xFF000006.toInt(), outputPixels[0])
-        assertEquals(0xFF000009.toInt(), outputPixels[15])
-    }
-
-    @Test
-    fun artworkBackgroundColorTransitionInterpolatesAtTheFieldLevel() {
-        val startPixels = IntArray(8 * 8) { 0xFF000000.toInt() }
-        val endPixels = IntArray(8 * 8) { 0xFFFFFFFF.toInt() }
-
-        val midpoint = requireNotNull(
-            interpolateArtworkBackgroundField(
-                startFieldPixels = startPixels,
-                endFieldPixels = endPixels,
-                fraction = 0.5f,
+    fun sliderTapUsesTrackBoundsStepsKeyPointsAndLayoutDirection() {
+        assertEquals(
+            0.85f,
+            sliderValueAtPosition(
+                positionX = 82.5f,
+                width = 300,
+                height = 30,
+                valueRange = 0.7f..1.3f,
+                steps = 0,
+                keyPoints = listOf(0.7f, 1f, 1.3f),
+                magnetThreshold = 0.02f,
+                reverseDirection = false,
             ),
+            0.0001f,
+        )
+        assertEquals(
+            1f,
+            sliderValueAtPosition(
+                positionX = 150f,
+                width = 300,
+                height = 30,
+                valueRange = 0.7f..1.3f,
+                steps = 0,
+                keyPoints = listOf(0.7f, 1f, 1.3f),
+                magnetThreshold = 0.02f,
+                reverseDirection = false,
+            ),
+            0f,
+        )
+        assertEquals(
+            700f,
+            sliderValueAtPosition(
+                positionX = 215f,
+                width = 300,
+                height = 30,
+                valueRange = 100f..900f,
+                steps = 7,
+                keyPoints = null,
+                magnetThreshold = 0.02f,
+                reverseDirection = false,
+            ),
+            0f,
+        )
+        assertEquals(
+            0.75f,
+            sliderValueAtPosition(
+                positionX = 82.5f,
+                width = 300,
+                height = 30,
+                valueRange = 0f..1f,
+                steps = 0,
+                keyPoints = null,
+                magnetThreshold = 0.02f,
+                reverseDirection = true,
+            ),
+            0.0001f,
+        )
+    }
+
+    @Test
+    fun dynamicFlowUsesConfiguredVisualValuesAndAdaptiveDownsampling() {
+        assertEquals(2.5f, DYNAMIC_FLOW_ARTWORK_SATURATION, 0f)
+        assertEquals(0.25f, DYNAMIC_FLOW_BACKGROUND_DARKEN_AMOUNT, 0f)
+        assertEquals(16f, dynamicFlowDownsampleFactor(419), 0f)
+        assertEquals(20f, dynamicFlowDownsampleFactor(420), 0f)
+        assertEquals(10_000L, scaledDynamicFlowTimeMs(10_000L, 10))
+    }
+
+    @Test
+    fun dynamicFlowClockStartsAndResumesWithoutJumpingToAbsoluteFrameTime() {
+        val absoluteFrameNanos = 987_654_321_000_000L
+        val initial = advanceDynamicFlowClockMillis(
+            elapsedMillis = 0L,
+            previousFrameNanos = null,
+            frameNanos = absoluteFrameNanos,
+        )
+        val advanced = advanceDynamicFlowClockMillis(
+            elapsedMillis = initial,
+            previousFrameNanos = absoluteFrameNanos,
+            frameNanos = absoluteFrameNanos + 42_000_000L,
+        )
+        val resumed = advanceDynamicFlowClockMillis(
+            elapsedMillis = advanced,
+            previousFrameNanos = null,
+            frameNanos = absoluteFrameNanos + 5_000_000_000L,
         )
 
-        assertTrue(midpoint.all { it == 0xFF808080.toInt() })
-        assertTrue(
-            requireNotNull(interpolateArtworkBackgroundField(startPixels, endPixels, 0f))
-                .contentEquals(startPixels),
-        )
-        assertTrue(
-            requireNotNull(interpolateArtworkBackgroundField(startPixels, endPixels, 1f))
-                .contentEquals(endPixels),
-        )
+        assertEquals(0L, initial)
+        assertEquals(42L, advanced)
+        assertEquals(42L, resumed)
     }
 
     @Test
@@ -371,9 +379,15 @@ class UiLogicTest {
         )
         assertEquals(400, settings.lyricFontWeight)
         assertFalse(settings.centerLyrics)
+        assertFalse(settings.leftAlignPlayerTitle)
         assertTrue(settings.showLyricsTranslation)
         assertEquals(true, settings.blurEnabled)
+        assertFalse(settings.progressiveTopBarBlurEnabled)
+        assertFalse(settings.hideBottomBar)
         assertEquals(true, settings.predictiveBackEnabled)
+        assertEquals(NavigationTransitionStyle.MIUIX, settings.navigationTransitionStyle)
+        assertFalse(settings.refreshLibraryOnStart)
+        assertFalse(settings.skipShortAudio)
         assertEquals(BottomBarStyle.NORMAL, settings.bottomBarStyle)
     }
 
@@ -394,6 +408,37 @@ class UiLogicTest {
     @Test
     fun hiddenLyricsControlsRemoveOnlyTheBottomEdgeFade() {
         assertEquals(100f to 0f, lyricEdgeFadeHeights(showBottomFade = false))
+    }
+
+    @Test
+    fun lyricTranslationKeepsItsInactiveColorWhenLineFocusChanges() {
+        assertEquals(1f, lyricTranslationAlpha(0.4f), 0f)
+        assertEquals(0.4f, lyricTranslationAlpha(1f), 0f)
+        assertEquals(0.4f, lyricTranslationAlpha(0.8f) * 0.8f, 0.0001f)
+    }
+
+    @Test
+    fun wordProgressUsesOneAlphaChannelWithoutCompoundingInactiveColor() {
+        assertEquals(1f, lyricLineLayerAlpha(0.4f, usesWordProgress = true), 0f)
+        assertEquals(0.4f, lyricWordProgressActiveAlpha(0.4f, usesWordProgress = true), 0f)
+        assertEquals(1f, lyricLineLayerAlpha(1f, usesWordProgress = true), 0f)
+        assertEquals(1f, lyricWordProgressActiveAlpha(1f, usesWordProgress = true), 0f)
+
+        assertEquals(0.4f, lyricLineLayerAlpha(0.4f, usesWordProgress = false), 0f)
+        assertEquals(1f, lyricWordProgressActiveAlpha(0.4f, usesWordProgress = false), 0f)
+    }
+
+    @Test
+    fun hiddenLyricsFocusesAtFortyPercentOfThePageHeight() {
+        assertEquals(
+            (-132).dp,
+            hiddenLyricsCenterOffsetY(
+                pageHeight = 800.dp,
+                headerTopPadding = 40.dp,
+                headerContentHeight = 52.dp,
+                headerSpacing = 12.dp,
+            ),
+        )
     }
 
     @Test
@@ -482,9 +527,27 @@ class UiLogicTest {
     }
 
     @Test
-    fun primaryOnlyLyricSpacingMatchesHiddenTranslationSpacing() {
+    fun lyricsUseTwelveDpSpacingWhenTranslationIsVisible() {
         assertEquals(
-            10f,
+            12f,
+            lyricLineVerticalPaddingDp(
+                hasTimedWords = true,
+                hasTranslation = true,
+                showLyricsTranslation = true,
+            ),
+            0f,
+        )
+        assertEquals(
+            12f,
+            lyricLineVerticalPaddingDp(
+                hasTimedWords = false,
+                hasTranslation = true,
+                showLyricsTranslation = true,
+            ),
+            0f,
+        )
+        assertEquals(
+            16f,
             lyricLineVerticalPaddingDp(
                 hasTimedWords = true,
                 hasTranslation = false,
@@ -493,7 +556,7 @@ class UiLogicTest {
             0f,
         )
         assertEquals(
-            10f,
+            16f,
             lyricLineVerticalPaddingDp(
                 hasTimedWords = true,
                 hasTranslation = true,
@@ -502,7 +565,7 @@ class UiLogicTest {
             0f,
         )
         assertEquals(
-            14f,
+            16f,
             lyricLineVerticalPaddingDp(
                 hasTimedWords = false,
                 hasTranslation = false,
@@ -511,7 +574,7 @@ class UiLogicTest {
             0f,
         )
         assertEquals(
-            14f,
+            16f,
             lyricLineVerticalPaddingDp(
                 hasTimedWords = false,
                 hasTranslation = true,
@@ -524,31 +587,6 @@ class UiLogicTest {
     @Test
     fun unrevealedWordByWordTextMatchesInactiveLyricStrength() {
         assertEquals(0.4f, LYRIC_INACTIVE_TEXT_ALPHA, 0f)
-    }
-
-    @Test
-    fun middleLyricCountdownUsesNormalLineSpacing() {
-        assertEquals(5f, lyricTransitionVerticalPaddingDp(-1), 0f)
-        assertEquals(10f, lyricTransitionVerticalPaddingDp(0), 0f)
-        assertEquals(10f, lyricTransitionVerticalPaddingDp(8), 0f)
-    }
-
-    @Test
-    fun lyricSeekIgnoresOldPositionUpdatesUntilPlayerReachesTarget() {
-        assertFalse(
-            shouldAcceptPublishedLyricPosition(
-                publishedPositionMs = 10_200L,
-                seekPositionMs = 50_000L,
-                positionAtSeekRequestMs = 10_000L,
-            ),
-        )
-        assertTrue(
-            shouldAcceptPublishedLyricPosition(
-                publishedPositionMs = 49_900L,
-                seekPositionMs = 50_000L,
-                positionAtSeekRequestMs = 10_000L,
-            ),
-        )
     }
 
     @Test
@@ -568,44 +606,225 @@ class UiLogicTest {
     }
 
     @Test
-    fun pausingAfterPlaybackAdvancesKeepsTheSmoothCurrentPosition() {
-        assertEquals(
-            20_100L,
-            lyricClockStartPosition(
-                currentSmoothPositionMs = 20_100L,
-                publishedPositionMs = 20_100L,
-                seekPositionMs = 10_000L,
-                seekRequestKey = 3,
-                seekRequestChanged = false,
-                isPlaying = false,
-            ),
-        )
-        assertEquals(
-            50_000L,
-            lyricClockStartPosition(
-                currentSmoothPositionMs = 10_000L,
-                publishedPositionMs = 10_000L,
+    fun lyricSeekTargetWaitsForAFreshPlaybackSample() {
+        assertFalse(
+            lyricSeekRequestIsAcknowledged(
+                requestKey = 1,
+                positionUpdateAnchorElapsedRealtimeMs = 2_000L,
+                positionUpdateElapsedRealtimeMs = 1_900L,
+                currentPositionMs = 50_000L,
                 seekPositionMs = 50_000L,
-                seekRequestKey = 4,
-                seekRequestChanged = true,
-                isPlaying = false,
             ),
         )
-        assertEquals(
-            3_000L,
-            lyricClockStartPosition(
-                currentSmoothPositionMs = 80_000L,
-                publishedPositionMs = 3_000L,
-                seekPositionMs = 80_000L,
-                seekRequestKey = 0,
-                seekRequestChanged = true,
-                isPlaying = false,
+        assertTrue(
+            lyricSeekRequestIsAcknowledged(
+                requestKey = 1,
+                positionUpdateAnchorElapsedRealtimeMs = 2_000L,
+                positionUpdateElapsedRealtimeMs = 2_100L,
+                currentPositionMs = 49_900L,
+                seekPositionMs = 50_000L,
             ),
         )
     }
 
     @Test
-    fun lyricTapAndProgressSeekKeepAnimatedCenteringAfterInitialPlacement() {
+    fun lyricClockStaysMonotonicAcrossOrdinaryBackwardSamples() {
+        assertEquals(
+            10_116.666667,
+            stabilizedLyricPlaybackPositionMs(
+                previousPositionMs = 10_100.0,
+                sampledPositionMs = 10_000L,
+                frameAdvanceNanos = 16_666_667L,
+                playbackSpeed = 1f,
+            ),
+            0.000001,
+        )
+        assertEquals(
+            10_116.666667,
+            stabilizedLyricPlaybackPositionMs(
+                previousPositionMs = 10_100.0,
+                sampledPositionMs = 5_000L,
+                frameAdvanceNanos = 16_666_667L,
+                playbackSpeed = 1f,
+            ),
+            0.000001,
+        )
+        assertEquals(
+            10_200.0,
+            stabilizedLyricPlaybackPositionMs(
+                previousPositionMs = 10_100.0,
+                sampledPositionMs = 10_200L,
+                frameAdvanceNanos = 16_666_667L,
+                playbackSpeed = 1f,
+            ),
+            0.0,
+        )
+    }
+
+    @Test
+    fun lyricClockPreservesSubMillisecondFrameTimeAcrossRefreshRates() {
+        var sixtyHertzPositionMs = 10_000.0
+        repeat(60) {
+            sixtyHertzPositionMs = stabilizedLyricPlaybackPositionMs(
+                previousPositionMs = sixtyHertzPositionMs,
+                sampledPositionMs = 10_000L,
+                frameAdvanceNanos = 16_666_667L,
+                playbackSpeed = 1f,
+            )
+        }
+        assertEquals(11_000.00002, sixtyHertzPositionMs, 0.000001)
+
+        var oneTwentyHertzPositionMs = 10_000.0
+        repeat(120) {
+            oneTwentyHertzPositionMs = stabilizedLyricPlaybackPositionMs(
+                previousPositionMs = oneTwentyHertzPositionMs,
+                sampledPositionMs = 10_000L,
+                frameAdvanceNanos = 8_333_333L,
+                playbackSpeed = 1f,
+            )
+        }
+        assertEquals(10_999.99996, oneTwentyHertzPositionMs, 0.000001)
+    }
+
+    @Test
+    fun lyricPlaybackStateEndsBeforeTheNextLineBecomesActive() {
+        val document = LyricsDocument(
+            lines = listOf(
+                LyricLine(
+                    agent = "main",
+                    startTimeMs = 1_000L,
+                    endTimeMs = 2_000L,
+                    text = "First",
+                    words = emptyList(),
+                    translation = null,
+                ),
+                LyricLine(
+                    agent = "main",
+                    startTimeMs = 4_000L,
+                    endTimeMs = 5_000L,
+                    text = "Second",
+                    words = emptyList(),
+                    translation = null,
+                ),
+            ),
+            format = LyricsFormat.TTML,
+            source = LyricsSource.SIDECAR,
+        )
+
+        assertEquals(0, document.visualLineIndex(3_500L))
+        assertEquals(1, document.focusLineIndex(3_500L))
+        assertEquals(-1, document.currentLineIndex(3_500L))
+        assertEquals(0, document.currentLineIndex(1_999L))
+        assertEquals(-1, document.currentLineIndex(2_000L))
+        assertEquals(1, document.currentLineIndex(4_000L))
+    }
+
+    @Test
+    fun lyricSeekKeepsTheOutgoingLineAtItsCapturedProgress() {
+        assertEquals(
+            12_345L,
+            lyricLineRenderPositionMs(
+                lineIndex = 2,
+                displayedPositionMs = 40_000L,
+                outgoingSeekLineIndex = 2,
+                outgoingSeekPositionMs = 12_345L,
+            ),
+        )
+        assertEquals(
+            40_000L,
+            lyricLineRenderPositionMs(
+                lineIndex = 5,
+                displayedPositionMs = 40_000L,
+                outgoingSeekLineIndex = 2,
+                outgoingSeekPositionMs = 12_345L,
+            ),
+        )
+    }
+
+    @Test
+    fun lyricSeekClearsTheOutgoingLineOnlyAfterItsFadeSettles() {
+        assertFalse(
+            lyricOutgoingSeekCanClear(
+                lineIndex = 2,
+                outgoingSeekLineIndex = 2,
+                currentLineIndex = 5,
+                settledAlpha = 0.5f,
+            ),
+        )
+        assertTrue(
+            lyricOutgoingSeekCanClear(
+                lineIndex = 2,
+                outgoingSeekLineIndex = 2,
+                currentLineIndex = 5,
+                settledAlpha = 0.4f,
+            ),
+        )
+    }
+
+    @Test
+    fun lyricClockUsesTheMonotonicSampleAnchorWithoutDroppingLongFrames() {
+        assertEquals(
+            20_000L,
+            lyricPlaybackPositionMs(
+                positionMs = 10_000L,
+                positionUpdateElapsedRealtimeMs = 1_000L,
+                nowElapsedRealtimeMs = 11_000L,
+                isPlaying = true,
+                playbackSpeed = 1f,
+            ),
+        )
+        assertEquals(
+            11_000L,
+            lyricPlaybackPositionMs(
+                positionMs = 10_000L,
+                positionUpdateElapsedRealtimeMs = 1_000L,
+                nowElapsedRealtimeMs = 1_500L,
+                isPlaying = true,
+                playbackSpeed = 2f,
+            ),
+        )
+        assertEquals(
+            10_000L,
+            lyricPlaybackPositionMs(
+                positionMs = 10_000L,
+                positionUpdateElapsedRealtimeMs = 1_000L,
+                nowElapsedRealtimeMs = 11_000L,
+                isPlaying = false,
+                playbackSpeed = 1f,
+            ),
+        )
+    }
+
+    @Test
+    fun lyricRowsOnlyMaskWhileTheirWordTimingIsActive() {
+        assertEquals(
+            LyricRowRenderMode.BEFORE,
+            lyricRowRenderMode(
+                positionMs = 999L,
+                firstStartTimeMs = 1_000L,
+                lastEndTimeMs = 2_000L,
+            ),
+        )
+        assertEquals(
+            LyricRowRenderMode.ACTIVE,
+            lyricRowRenderMode(
+                positionMs = 1_500L,
+                firstStartTimeMs = 1_000L,
+                lastEndTimeMs = 2_000L,
+            ),
+        )
+        assertEquals(
+            LyricRowRenderMode.COMPLETE,
+            lyricRowRenderMode(
+                positionMs = 2_000L,
+                firstStartTimeMs = 1_000L,
+                lastEndTimeMs = 2_000L,
+            ),
+        )
+    }
+
+    @Test
+    fun lyricPlaybackAndTapUseCenteringButPreviewSnapsToTheTarget() {
         assertTrue(lyricSeekUsesAnimatedCentering(true, centerOffsetUnchanged = true))
         assertFalse(lyricSeekUsesAnimatedCentering(true, centerOffsetUnchanged = false))
         assertFalse(lyricSeekUsesAnimatedCentering(false, centerOffsetUnchanged = true))
@@ -734,35 +953,6 @@ class UiLogicTest {
             ),
             0f,
         )
-    }
-
-    @Test
-    fun lyricRenderIndicesAreBuiltInOnePass() {
-        val line = LyricLine(
-            agent = "default",
-            startTimeMs = 0L,
-            endTimeMs = 1_000L,
-            text = "line",
-            words = emptyList(),
-            translation = null,
-        )
-        val transition = LyricTransition(
-            afterLineIndex = 0,
-            startTimeMs = 1_000L,
-            endTimeMs = 6_000L,
-        )
-        val map = buildLyricsRenderIndexMap(
-            renderItems = listOf(
-                LyricsRenderItem.Line(lineIndex = 0, line = line),
-                LyricsRenderItem.Transition(transitionIndex = 0, transition = transition),
-                LyricsRenderItem.Line(lineIndex = 1, line = line.copy(startTimeMs = 6_000L)),
-            ),
-            lineCount = 2,
-            transitionCount = 1,
-        )
-
-        assertArrayEquals(intArrayOf(0, 2), map.lineRenderIndices)
-        assertArrayEquals(intArrayOf(1), map.transitionRenderIndices)
     }
 
     @Test
@@ -936,31 +1126,16 @@ class UiLogicTest {
     }
 
     @Test
-    fun wordMotionReturnsToRestAtBothEndpoints() {
-        val start = wordMotion(
-            progress = 0f,
-            durationMs = 2_000L,
-            characterCount = 4,
-        )
-        val middle = wordMotion(
-            progress = 0.5f,
-            durationMs = 2_000L,
-            characterCount = 4,
-        )
-        val end = wordMotion(
-            progress = 1f,
-            durationMs = 2_000L,
-            characterCount = 4,
-        )
+    fun wordMotionProvidesScaleOffsetAndGlow() {
+        val start = wordMotion(progress = 0f, durationMs = 2_000L, characterCount = 4)
+        val middle = wordMotion(progress = 0.5f, durationMs = 2_000L, characterCount = 4)
+        val end = wordMotion(progress = 1f, durationMs = 2_000L, characterCount = 4)
 
-        assertEquals(1f, start.scale, 0f)
-        assertEquals(4f, start.offsetYPx, 0f)
-        assertEquals(0f, start.glowRadius, 0f)
+        assertTrue(start.scale >= 1f)
         assertTrue(middle.scale > 1f)
-        assertTrue(middle.offsetYPx < 0f)
+        assertTrue(start.offsetYPx > 0f)
+        assertTrue(middle.offsetYPx < start.offsetYPx)
         assertTrue(middle.glowRadius > 0f)
-        assertEquals(1f, end.scale, 0.000001f)
-        assertEquals(0f, end.offsetYPx, 0.000001f)
         assertEquals(0f, end.glowRadius, 0.000001f)
     }
 
@@ -1006,13 +1181,11 @@ class UiLogicTest {
             characterIndex = 2,
             characterCount = 3,
         )
-        assertEquals(1f, finalMotion.scale, 0.000001f)
-        assertEquals(0f, finalMotion.offsetYPx, 0.000001f)
         assertEquals(0f, finalMotion.glowRadius, 0.000001f)
     }
 
     @Test
-    fun simpleFloatIsUsedForCjkAndFastWords() {
+    fun wordAnimationEligibilityDistinguishesCjkAndFastWords() {
         assertFalse(
             shouldUseWordAnimation(
                 content = "中文",
@@ -1031,8 +1204,6 @@ class UiLogicTest {
                 durationMs = 2_000L,
             ),
         )
-        assertEquals(4f, simpleFloatOffset(1_000L, 1_000L), 0f)
-        assertEquals(0f, simpleFloatOffset(1_700L, 1_000L), 0.000001f)
     }
 
     @Test
@@ -1061,6 +1232,28 @@ class UiLogicTest {
         assertEquals(true, predictiveBackHandlerEnabled(true, true))
         assertFalse(predictiveBackHandlerEnabled(true, false))
         assertFalse(predictiveBackHandlerEnabled(false, true))
+        assertEquals(true, ordinaryBackHandlerEnabled(false, true))
+        assertFalse(ordinaryBackHandlerEnabled(true, true))
+        assertFalse(ordinaryBackHandlerEnabled(false, false))
+    }
+
+    @Test
+    fun mountedPlayerDisablesBothNavigationBackPaths() {
+        for (predictiveEnabled in listOf(false, true)) {
+            for (hasPreviousEntries in listOf(false, true)) {
+                assertFalse(
+                    predictiveBackHandlerEnabled(predictiveEnabled, hasPreviousEntries, false),
+                )
+                assertFalse(
+                    ordinaryBackHandlerEnabled(predictiveEnabled, hasPreviousEntries, false),
+                )
+                assertEquals(
+                    hasPreviousEntries,
+                    predictiveBackHandlerEnabled(predictiveEnabled, hasPreviousEntries, true) ||
+                        ordinaryBackHandlerEnabled(predictiveEnabled, hasPreviousEntries, true),
+                )
+            }
+        }
     }
 
     @Test
@@ -1162,6 +1355,134 @@ class UiLogicTest {
     }
 
     @Test
+    fun floatingStyleOverridesTheWideScreenNavigationRail() {
+        assertFalse(
+            shouldUseNavigationRail(
+                windowWidth = 800.dp,
+                windowHeight = 1200.dp,
+                effectiveStyle = BottomBarStyle.FLOATING,
+            ),
+        )
+        assertFalse(
+            usesNormalMiniPlayerChrome(
+                renderedBottomBarStyle = BottomBarStyle.FLOATING,
+                liquidGlassSupported = true,
+            ),
+        )
+        assertFalse(
+            shouldUseNavigationRail(
+                windowWidth = 840.dp,
+                windowHeight = 1200.dp,
+                effectiveStyle = BottomBarStyle.FLOATING,
+            ),
+        )
+        assertFalse(
+            usesNormalMiniPlayerChrome(
+                renderedBottomBarStyle = BottomBarStyle.FLOATING,
+                liquidGlassSupported = true,
+            ),
+        )
+        assertFalse(
+            usesNormalMiniPlayerChrome(
+                renderedBottomBarStyle = BottomBarStyle.FLOATING,
+                liquidGlassSupported = true,
+            ),
+        )
+        assertTrue(
+            shouldShowNavigation(
+                currentRouteIsRoot = true,
+                hideBottomBar = false,
+                landscape = false,
+                requestedBottomBarStyle = BottomBarStyle.FLOATING,
+            ),
+        )
+        assertTrue(
+            shouldShowNavigation(
+                currentRouteIsRoot = true,
+                hideBottomBar = false,
+                landscape = true,
+                requestedBottomBarStyle = BottomBarStyle.FLOATING,
+            ),
+        )
+        assertFalse(
+            shouldShowNavigation(
+                currentRouteIsRoot = true,
+                hideBottomBar = false,
+                landscape = true,
+                requestedBottomBarStyle = BottomBarStyle.FLOATING,
+                renderedBottomBarStyle = BottomBarStyle.NORMAL,
+            ),
+        )
+    }
+
+    @Test
+    fun adaptiveLayoutMatchesTheOfficialMiuixBreakpoints() {
+        assertFalse(isMiuixWideLayout(windowWidth = 599.dp, windowHeight = 400.dp))
+        assertTrue(isMiuixWideLayout(windowWidth = 600.dp, windowHeight = 500.dp))
+        assertFalse(isMiuixWideLayout(windowWidth = 600.dp, windowHeight = 720.dp))
+        assertTrue(isMiuixWideLayout(windowWidth = 840.dp, windowHeight = 1200.dp))
+    }
+
+    @Test
+    fun miuixLandscapeSecondaryTransitionHasNoCornerClip() {
+        assertEquals(
+            0.dp,
+            navigationTransitionCornerRadius(
+                windowWidth = 1200.dp,
+                windowHeight = 800.dp,
+                transitionStyle = NavigationTransitionStyle.MIUIX,
+                systemCornerRadius = 24.dp,
+            ),
+        )
+        assertEquals(
+            24.dp,
+            navigationTransitionCornerRadius(
+                windowWidth = 800.dp,
+                windowHeight = 1200.dp,
+                transitionStyle = NavigationTransitionStyle.MIUIX,
+                systemCornerRadius = 24.dp,
+            ),
+        )
+    }
+
+    @Test
+    fun aospCornerFallbackRemainsUnchanged() {
+        assertEquals(
+            32.dp,
+            navigationTransitionCornerRadius(
+                windowWidth = 1200.dp,
+                windowHeight = 800.dp,
+                transitionStyle = NavigationTransitionStyle.AOSP,
+                systemCornerRadius = 0.dp,
+            ),
+        )
+    }
+
+    @Test
+    fun floatingStyleUsesTheFloatingPathOnAllScreenOrientations() {
+        assertFalse(
+            shouldUseNavigationRail(
+                windowWidth = 1200.dp,
+                windowHeight = 800.dp,
+                effectiveStyle = BottomBarStyle.FLOATING,
+            ),
+        )
+        assertTrue(
+            shouldUseNavigationRail(
+                windowWidth = 1200.dp,
+                windowHeight = 800.dp,
+                effectiveStyle = BottomBarStyle.NORMAL,
+            ),
+        )
+        assertFalse(
+            usesNormalMiniPlayerChrome(
+                renderedBottomBarStyle = BottomBarStyle.FLOATING,
+                liquidGlassSupported = true,
+            ),
+        )
+    }
+
+    @Test
     fun sharedPlayerContainerReachesBothMeasuredEndpoints() {
         val miniPlayer = Rect(16f, 700f, 384f, 768f)
         val fullPlayer = Rect(0f, 0f, 400f, 800f)
@@ -1170,10 +1491,100 @@ class UiLogicTest {
         assertEquals(fullPlayer, sharedContainerRect(miniPlayer, fullPlayer, 1f))
 
         val midpoint = sharedContainerRect(miniPlayer, fullPlayer, 0.5f)
-        assertEquals(372f, midpoint.width, 0.0001f)
+        assertEquals(384f, midpoint.width, 0.0001f)
         assertEquals(434f, midpoint.height, 0.0001f)
         assertEquals(200f, midpoint.center.x, 0.0001f)
         assertEquals(567f, midpoint.center.y, 0.0001f)
+        assertEquals(8f, midpoint.left, 0.0001f)
+        assertEquals(350f, midpoint.top, 0.0001f)
+        assertEquals(392f, midpoint.right, 0.0001f)
+        assertEquals(784f, midpoint.bottom, 0.0001f)
+    }
+
+    @Test
+    fun sharedPlayerContainerInterpolatesEveryEdgeInLandscape() {
+        val miniPlayer = Rect(420f, 700f, 780f, 764f)
+        val fullPlayer = Rect(0f, 0f, 1200f, 800f)
+
+        val midpoint = sharedContainerRect(miniPlayer, fullPlayer, 0.5f)
+
+        assertEquals(780f, midpoint.width, 0.0001f)
+        assertEquals(600f, midpoint.center.x, 0.0001f)
+        assertEquals(210f, midpoint.left, 0.0001f)
+        assertEquals(350f, midpoint.top, 0.0001f)
+        assertEquals(990f, midpoint.right, 0.0001f)
+        assertEquals(782f, midpoint.bottom, 0.0001f)
+    }
+
+    @Test
+    fun sharedMiniPlayerControlsStayBoundToTheAnimatedRightInset() {
+        val source = Rect(16f, 700f, 384f, 768f)
+        val controls = Rect(294f, 714f, 374f, 754f)
+        val animated = Rect(0f, 500f, 800f, 768f)
+
+        val translation = sharedMiniPlayerControlsTranslationX(
+            sourcePlayerBounds = source,
+            animatedPlayerBounds = animated,
+            controlsBounds = controls,
+        )
+
+        assertEquals(10f, source.right - controls.right, 0.0001f)
+        assertEquals(10f, animated.right - (controls.left + translation + controls.width), 0.0001f)
+        assertEquals(416f, translation, 0.0001f)
+    }
+
+    @Test
+    fun sharedMiniPlayerContentKeepsItsScreenXAndTopInset() {
+        val source = Rect(16f, 700f, 384f, 768f)
+        val content = Rect(22f, 706f, 374f, 762f)
+
+        assertEquals(
+            Offset(6f, 6f),
+            sharedMiniPlayerContentOffset(
+                sourcePlayerBounds = source,
+                animatedPlayerBounds = source,
+                contentBounds = content,
+            ),
+        )
+        assertEquals(
+            Offset(22f, 6f),
+            sharedMiniPlayerContentOffset(
+                sourcePlayerBounds = source,
+                animatedPlayerBounds = Rect(0f, 0f, 800f, 768f),
+                contentBounds = content,
+            ),
+        )
+    }
+
+    @Test
+    fun landscapeFloatingBarUsesTheFullHorizontalContentWidth() {
+        assertEquals(
+            1152.dp,
+            floatingBottomBarAvailableWidth(
+                windowWidth = 1200.dp,
+                windowHeight = 800.dp,
+                contentMaxWidth = 1152.dp,
+                portraitReferenceWidth = 800.dp,
+            ),
+        )
+        assertEquals(
+            752.dp,
+            floatingBottomBarAvailableWidth(
+                windowWidth = 800.dp,
+                windowHeight = 1200.dp,
+                contentMaxWidth = 752.dp,
+                portraitReferenceWidth = 800.dp,
+            ),
+        )
+        assertEquals(
+            352.dp,
+            floatingBottomBarAvailableWidth(
+                windowWidth = 599.dp,
+                windowHeight = 400.dp,
+                contentMaxWidth = 551.dp,
+                portraitReferenceWidth = 400.dp,
+            ),
+        )
     }
 
     @Test
@@ -1228,17 +1639,34 @@ class UiLogicTest {
 
     @Test
     fun sharedPlayerContainerTargetsTheAvailableScreenCornerRadius() {
-        assertEquals(18f, sharedContainerCornerRadius(18f, 46f, 0f, 0f), 0f)
-        assertEquals(46f, sharedContainerCornerRadius(18f, 46f, 1f, 0f), 0f)
-        assertEquals(0f, sharedContainerCornerRadius(18f, 46f, 1f, 1f), 0f)
-        assertEquals(0f, sharedContainerCornerRadius(18f, 0f, 1f, 0f), 0f)
+        assertEquals(18f, sharedContainerCornerRadius(18f, 46f, 0f), 0f)
+        assertEquals(0f, sharedContainerCornerRadius(18f, 46f, 1f), 0f)
+        assertEquals(0f, sharedContainerCornerRadius(18f, 0f, 1f), 0f)
     }
 
     @Test
-    fun sharedPlayerContainerIgnoresStaleCornerExpansionBeforeFullBounds() {
-        assertEquals(32f, sharedContainerCornerRadius(18f, 46f, 0.5f, 1f), 0f)
-        assertEquals(46f, sharedContainerCornerRadius(18f, 46f, 1f, 0f), 0f)
-        assertEquals(23f, sharedContainerCornerRadius(18f, 46f, 1f, 0.5f), 0f)
+    fun sharedPlayerContainerInterpolatesEverySmoothCornerIndependently() {
+        assertEquals(
+            SharedContainerCornerRadii(
+                topStart = 15f,
+                topEnd = 21f,
+                bottomEnd = 27f,
+                bottomStart = 33f,
+            ),
+            sharedContainerCornerRadii(
+                source = SharedContainerCornerRadii(12f, 18f, 24f, 30f),
+                target = SharedContainerCornerRadii(18f, 24f, 30f, 36f),
+                progress = 0.5f,
+            ),
+        )
+        assertEquals(
+            SharedContainerCornerRadii(0f, 0f, 0f, 0f),
+            sharedContainerCornerRadii(
+                source = SharedContainerCornerRadii(12f, 18f, 24f, 30f),
+                target = SharedContainerCornerRadii(18f, 24f, 30f, 36f),
+                progress = 1f,
+            ),
+        )
     }
 
     @Test
@@ -1304,25 +1732,15 @@ class UiLogicTest {
     }
 
     @Test
-    fun sharedArtworkPathMovesRightAndUpThroughoutWithStagedAxisEmphasis() {
+    fun sharedArtworkPathUsesTheOriginalEasedCenterTrajectory() {
         val thumbnail = Rect(16f, 708f, 64f, 756f)
         val albumArt = Rect(28f, 120f, 372f, 464f)
-        val initial = sharedArtworkRect(thumbnail, albumArt, 0.1f)
-        val quarter = sharedArtworkRect(thumbnail, albumArt, 0.25f)
         val midpoint = sharedArtworkRect(thumbnail, albumArt, 0.5f)
 
-        val firstHalfHorizontalDistance = midpoint.center.x - thumbnail.center.x
-        val firstHalfVerticalDistance = thumbnail.center.y - midpoint.center.y
-        val secondHalfHorizontalDistance = albumArt.center.x - midpoint.center.x
-        val secondHalfVerticalDistance = midpoint.center.y - albumArt.center.y
-
-        assertTrue(initial.bottom < thumbnail.bottom)
-        assertTrue(quarter.center.x > thumbnail.center.x)
-        assertTrue(quarter.center.y < thumbnail.center.y)
-        assertTrue(firstHalfHorizontalDistance > firstHalfVerticalDistance)
-        assertTrue(secondHalfVerticalDistance > secondHalfHorizontalDistance)
-        assertEquals(albumArt.center.x, sharedArtworkRect(thumbnail, albumArt, 1f).center.x, 0f)
-        assertEquals(albumArt.center.y, sharedArtworkRect(thumbnail, albumArt, 1f).center.y, 0f)
+        assertEquals(82f, midpoint.left, 0.0001f)
+        assertEquals(513f, midpoint.top, 0.0001f)
+        assertEquals(278f, midpoint.right, 0.0001f)
+        assertEquals(709f, midpoint.bottom, 0.0001f)
     }
 
     @Test
@@ -1383,16 +1801,24 @@ class UiLogicTest {
     }
 
     @Test
-    fun playbackArtworkShadowUsesRequestedSizeAndLowerOffset() {
+    fun playbackArtworkShadowUsesCenteredRequestedSize() {
         val shadowBounds = playbackArtworkShadowBounds(
             width = 300f,
             height = 200f,
         )
 
-        assertEquals(0f, shadowBounds.left, 0.0001f)
-        assertEquals(20f, shadowBounds.top, 0.0001f)
-        assertEquals(270f, shadowBounds.right, 0.0001f)
-        assertEquals(200f, shadowBounds.bottom, 0.0001f)
+        assertEquals(3f, shadowBounds.left, 0.0001f)
+        assertEquals(2f, shadowBounds.top, 0.0001f)
+        assertEquals(297f, shadowBounds.right, 0.0001f)
+        assertEquals(198f, shadowBounds.bottom, 0.0001f)
+    }
+
+    @Test
+    fun portraitArtworkFitsAvailableHeightIncludingItsShadow() {
+        assertEquals(268.dp, fitPlayerArtworkSize(344.dp, 300.dp))
+        assertEquals(344.dp, fitPlayerArtworkSize(344.dp, 700.dp))
+        assertEquals(244.dp, fitPlayerArtworkSize(244.dp, 800.dp))
+        assertEquals(0.dp, fitPlayerArtworkSize(244.dp, 20.dp))
     }
 
     @Test
@@ -1437,15 +1863,31 @@ class UiLogicTest {
     }
 
     @Test
-    fun sharedPlayerLayersHandOffOnOneProgress() {
+    fun sharedPlayerLayersKeepThePlaybackBarTransitionUnchanged() {
+        assertEquals(0.2f, PLAYER_LAYER_HANDOFF_END_PROGRESS, 0f)
         assertEquals(1f, playerSheetBarAlpha(0f), 0f)
-        assertEquals(0f, playerSheetPageAlpha(0f), 0f)
+        assertEquals(0f, playerSheetBackgroundAlpha(0f), 0f)
         assertTrue(playerSheetBarAlpha(0.2f) in 0f..1f)
-        assertTrue(playerSheetPageAlpha(0.2f) in 0f..1f)
+        assertTrue(playerSheetBackgroundAlpha(0.2f) in 0f..1f)
         assertEquals(0f, playerSheetBarAlpha(PLAYER_LAYER_HANDOFF_END_PROGRESS), 0f)
-        assertEquals(1f, playerSheetPageAlpha(PLAYER_LAYER_HANDOFF_END_PROGRESS), 0f)
+        assertEquals(1f, playerSheetBackgroundAlpha(PLAYER_LAYER_HANDOFF_END_PROGRESS), 0f)
         assertEquals(0f, playerSheetBarAlpha(1f), 0f)
-        assertEquals(1f, playerSheetPageAlpha(1f), 0f)
+        assertEquals(1f, playerSheetBackgroundAlpha(1f), 0f)
+    }
+
+    @Test
+    fun miniPlayerContentFadesOutBeforeTheBarSurfaceHandoffCompletes() {
+        assertEquals(1f, playerSheetMiniContentAlpha(0f), 0f)
+        assertTrue(playerSheetMiniContentAlpha(0.1f) in 0f..1f)
+        assertEquals(0f, playerSheetMiniContentAlpha(PLAYER_MINI_CONTENT_FADE_END_PROGRESS), 0f)
+        assertEquals(0f, playerSheetMiniContentAlpha(1f), 0f)
+    }
+
+    @Test
+    fun fullPlayerContentAppearsAfterBackgroundHandoff() {
+        assertEquals(0f, playerSheetPageAlpha(PLAYER_CONTENT_APPEAR_START_PROGRESS), 0f)
+        assertEquals(1f, playerSheetPageAlpha(PLAYER_CONTENT_APPEAR_END_PROGRESS), 0f)
+        assertTrue(playerSheetPageAlpha(0.55f) in 0f..1f)
     }
 
     @Test
@@ -1495,6 +1937,75 @@ class UiLogicTest {
     }
 
     @Test
+    fun residentFullPlayerMovesOffscreenWhileTheMiniPlayerOwnsInput() {
+        assertEquals(800f, playerSheetResidentHostTranslationY(true, 800), 0f)
+        assertEquals(0f, playerSheetResidentHostTranslationY(false, 800), 0f)
+    }
+
+    @Test
+    fun fullPlayerWaitsForVisibleReadyContentBeforeAcceptingInput() {
+        val state = PlayerSheetTransitionState()
+
+        state.open()
+
+        assertTrue(state.fullPlayerHostMounted)
+        assertFalse(state.fullPlayerDrawsInPlace)
+        assertFalse(state.fullPlayerAcceptsInput)
+
+        val containerBounds = Rect(0f, 0f, 360f, 800f)
+        val artworkBounds = Rect(24f, 120f, 336f, 432f)
+        state.updateMiniPlayerBounds(Rect(6f, 720f, 354f, 788f))
+        state.updateFullPlayerBounds(containerBounds)
+        state.updateMiniArtworkBounds(Rect(16f, 730f, 64f, 778f))
+        state.updateFullArtworkBounds(artworkBounds)
+
+        assertTrue(state.fullPlayerHostMounted)
+        assertTrue(state.fullPlayerAcceptsInput)
+    }
+
+    @Test
+    fun collapsedTransitionTailKeepsTheFullPlayerHostResidentAfterFirstOpen() {
+        val state = PlayerSheetTransitionState(initialProgress = 0.1f)
+        state.updateMiniPlayerBounds(Rect(6f, 720f, 354f, 788f))
+        state.updateFullPlayerBounds(Rect(0f, 0f, 360f, 800f))
+        state.updateMiniArtworkBounds(Rect(16f, 730f, 64f, 778f))
+        state.updateFullArtworkBounds(Rect(24f, 120f, 336f, 432f))
+
+        assertTrue(state.isMounted)
+        assertTrue(state.miniPlayerAcceptsInput)
+        assertTrue(state.fullPlayerHostMounted)
+        assertFalse(state.fullPlayerAcceptsInput)
+    }
+
+    @Test
+    fun fullyExpandedPlayerKeepsItsInputHost() {
+        val state = PlayerSheetTransitionState(initialProgress = 1f)
+        state.updateMiniPlayerBounds(Rect(6f, 720f, 354f, 788f))
+        state.updateFullPlayerBounds(Rect(0f, 0f, 360f, 800f))
+        state.updateMiniArtworkBounds(Rect(16f, 730f, 64f, 778f))
+        state.updateFullArtworkBounds(Rect(24f, 120f, 336f, 432f))
+
+        assertTrue(state.fullPlayerHostMounted)
+        assertTrue(state.fullPlayerAcceptsInput)
+    }
+
+    @Test
+    fun miniPlayerDragKeepsTheFullPlayerRecordingHostMounted() {
+        val state = PlayerSheetTransitionState()
+        state.updateMiniPlayerBounds(Rect(6f, 720f, 354f, 788f))
+        state.updateFullPlayerBounds(Rect(0f, 0f, 360f, 800f))
+        state.updateMiniArtworkBounds(Rect(16f, 730f, 64f, 778f))
+        state.updateFullArtworkBounds(Rect(24f, 120f, 336f, 432f))
+
+        state.beginMiniPlayerDrag()
+        state.dragBy(-160f)
+
+        assertTrue(state.miniPlayerAcceptsInput)
+        assertTrue(state.fullPlayerHostMounted)
+        assertFalse(state.fullPlayerAcceptsInput)
+    }
+
+    @Test
     fun interruptedDragCanBeTakenOverImmediately() {
         val state = PlayerSheetTransitionState()
         state.updateFullPlayerBounds(Rect(0f, 0f, 360f, 800f))
@@ -1518,19 +2029,13 @@ class UiLogicTest {
     }
 
     @Test
-    fun artworkBackgroundStatusBarIconsUseLuminanceContrast() {
-        assertTrue(artworkBackgroundUsesLightStatusBarIcons(IntArray(16) { 0xFF242424.toInt() }))
-        assertFalse(artworkBackgroundUsesLightStatusBarIcons(IntArray(16) { 0xFFFFFFFF.toInt() }))
-    }
-
-    @Test
     fun sharedPlayerDragMapsDirectlyToOneClampedProgress() {
         assertEquals(
             0.25f,
             playerSheetDragProgress(
                 startProgress = 0f,
                 dragDistanceY = -200f,
-                containerHeight = 800f,
+                travelDistance = 800f,
             ),
             0f,
         )
@@ -1539,12 +2044,48 @@ class UiLogicTest {
             playerSheetDragProgress(
                 startProgress = 1f,
                 dragDistanceY = 200f,
-                containerHeight = 800f,
+                travelDistance = 800f,
             ),
             0f,
         )
         assertEquals(0f, playerSheetDragProgress(0f, 200f, 800f), 0f)
         assertEquals(1f, playerSheetDragProgress(1f, -200f, 800f), 0f)
+    }
+
+    @Test
+    fun sharedPlayerDragUsesMeasuredVerticalContainerTravel() {
+        assertEquals(
+            720f,
+            playerSheetVerticalTravel(
+                source = Rect(6f, 720f, 354f, 788f),
+                target = Rect(0f, 0f, 360f, 800f),
+            ),
+            0f,
+        )
+        assertEquals(
+            120f,
+            playerSheetVerticalTravel(
+                source = Rect(20f, 80f, 380f, 180f),
+                target = Rect(0f, 0f, 400f, 300f),
+            ),
+            0f,
+        )
+        assertEquals(
+            700f,
+            playerSheetVerticalTravel(
+                source = Rect(420f, 700f, 780f, 764f),
+                target = Rect(0f, 0f, 1200f, 800f),
+            ),
+            0f,
+        )
+        assertEquals(
+            1f,
+            playerSheetVerticalTravel(
+                source = Rect(0f, 0f, 300f, 64f),
+                target = Rect(0f, 0f, 300f, 64f),
+            ),
+            0f,
+        )
     }
 
     @Test
@@ -1571,6 +2112,16 @@ class UiLogicTest {
         assertEquals("Z", createMusicSortKeys("周杰伦").section)
         assertEquals("#", createMusicSortKeys("♪ intro").section)
         assertEquals("#", createMusicSortKeys(null).section)
+    }
+
+    @Test
+    fun japaneseKanaUsesRomajiForTitleSortingAndSections() {
+        assertEquals("sakura", japaneseKanaToRomaji("さくら"))
+        assertEquals("katakana", japaneseKanaToRomaji("カタカナ"))
+        assertEquals("ccha", japaneseKanaToRomaji("っちゃ"))
+        assertEquals("S", createMusicSortKeys("さくら").section)
+        assertEquals("1_SAKURA", createMusicSortKeys("さくら").value)
+        assertEquals("T", createMusicSortKeys("とうきょう").section)
     }
 
     @Test
@@ -1779,6 +2330,36 @@ class UiLogicTest {
     }
 
     @Test
+    fun albumDiscSectionsSortMissingMetadataBeforeNumberedTracks() {
+        val tracks = listOf(
+            musicTrack(7L, "Disc One Track Two", 7L, "7.mp3", 7L, 7_000L)
+                .copy(discNumber = 1, trackNumber = 2),
+            musicTrack(1L, "Unnumbered B", 1L, "1.mp3", 1L, 1_000L),
+            musicTrack(9L, "Disc Two Track Three", 9L, "9.mp3", 9L, 9_000L)
+                .copy(discNumber = 2, trackNumber = 3),
+            musicTrack(5L, "Disc One Missing B", 5L, "5.mp3", 5L, 5_000L)
+                .copy(discNumber = 1),
+            musicTrack(3L, "Numbered Two", 3L, "3.mp3", 3L, 3_000L)
+                .copy(trackNumber = 2),
+            musicTrack(8L, "Disc One Track One", 8L, "8.mp3", 8L, 8_000L)
+                .copy(discNumber = 1, trackNumber = 1),
+            musicTrack(2L, "Unnumbered A", 2L, "2.mp3", 2L, 2_000L),
+            musicTrack(6L, "Disc One Missing A", 6L, "6.mp3", 6L, 6_000L)
+                .copy(discNumber = 1),
+            musicTrack(4L, "Numbered One", 4L, "4.mp3", 4L, 4_000L)
+                .copy(trackNumber = 1),
+        )
+
+        val sections = buildAlbumDiscSections(tracks)
+
+        assertEquals(listOf(null, 1, 2), sections.map { it.discNumber })
+        assertEquals(listOf(2L, 1L, 4L, 3L), sections[0].tracks.map(MusicTrack::id))
+        assertEquals(listOf(6L, 5L, 8L, 7L), sections[1].tracks.map(MusicTrack::id))
+        assertEquals(listOf(9L), sections[2].tracks.map(MusicTrack::id))
+        assertEquals(listOf(10_000L, 26_000L, 9_000L), sections.map { it.totalDurationMs })
+    }
+
+    @Test
     fun artistGroupsSplitDelimitedArtistNames() {
         val tracks = listOf(
             musicTrack(1L, "One", 1L, "one.mp3", 1L, 1L).copy(
@@ -1892,6 +2473,13 @@ class UiLogicTest {
     }
 
     @Test
+    fun emptyMiniPlayerStateIsNotTreatedAsASwipeTarget() {
+        assertFalse(hasExpectedMiniMetadataSwipeTarget(null, null))
+        assertFalse(hasExpectedMiniMetadataSwipeTarget("current", null))
+        assertTrue(hasExpectedMiniMetadataSwipeTarget("current", "current"))
+    }
+
+    @Test
     fun metadataSwipeHapticTracksEachThresholdDirection() {
         assertEquals(
             -1,
@@ -1993,6 +2581,96 @@ class UiLogicTest {
             resolveAlbumGridStyleOrdinal(
                 storedStyleOrdinal = 2,
                 legacyColumns = 3,
+            ),
+        )
+        assertEquals(2, albumGridColumnCount(AlbumGridStyle.TWO_SMALL, false, false, 400.dp))
+        assertEquals(3, albumGridColumnCount(AlbumGridStyle.TWO_SMALL, true, false, 520.dp))
+        assertEquals(4, albumGridColumnCount(AlbumGridStyle.TWO_SMALL, true, true, 680.dp))
+        assertEquals(5, albumGridColumnCount(AlbumGridStyle.TWO_SMALL, true, false, 840.dp))
+        assertEquals(3, albumGridColumnCount(AlbumGridStyle.THREE, false, true, 400.dp))
+        assertEquals(3, albumGridColumnCount(AlbumGridStyle.THREE, true, false, 400.dp))
+        assertEquals(4, albumGridColumnCount(AlbumGridStyle.THREE, true, false, 560.dp))
+        assertEquals(5, albumGridColumnCount(AlbumGridStyle.THREE, true, true, 720.dp))
+        assertEquals(6, albumGridColumnCount(AlbumGridStyle.THREE, true, false, 840.dp))
+        assertEquals(2, homePlaylistGridColumnCount(landscape = false, availableWidth = 400.dp))
+        assertEquals(2, homePlaylistGridColumnCount(landscape = true, availableWidth = 400.dp))
+        assertEquals(3, homePlaylistGridColumnCount(landscape = true, availableWidth = 600.dp))
+        assertEquals(5, homePlaylistGridColumnCount(landscape = true, availableWidth = 840.dp))
+        assertEquals(3, responsiveGridColumnCount(600.dp, 32.dp, 140.dp, 2, 6))
+        assertEquals(4, homeInitialRecommendationCount(400.dp))
+        assertEquals(8, homeInitialRecommendationCount(1280.dp))
+        assertEquals(9, homeInitialRecommendationCount(1413.dp))
+    }
+
+    @Test
+    fun playlistGridColumnsStayBetweenTheTwoAlbumGridStyles() {
+        (320..1200 step 4).forEach { width ->
+            val availableWidth = width.dp
+            val smallAlbumColumns = albumGridColumnCount(
+                gridStyle = AlbumGridStyle.TWO_SMALL,
+                landscape = true,
+                navigationRailExpanded = false,
+                availableWidth = availableWidth,
+            )
+            val playlistColumns = homePlaylistGridColumnCount(
+                landscape = true,
+                availableWidth = availableWidth,
+            )
+            val largeAlbumColumns = albumGridColumnCount(
+                gridStyle = AlbumGridStyle.THREE,
+                landscape = true,
+                navigationRailExpanded = false,
+                availableWidth = availableWidth,
+            )
+
+            assertTrue(smallAlbumColumns <= playlistColumns)
+            assertTrue(playlistColumns <= largeAlbumColumns)
+        }
+    }
+
+    @Test
+    fun playlistArtworkUsesTheExpectedLayoutForEachEntryCount() {
+        assertEquals(PlaylistArtworkLayout.EMPTY, playlistArtworkLayout(0))
+        assertEquals(PlaylistArtworkLayout.SINGLE, playlistArtworkLayout(1))
+        assertEquals(PlaylistArtworkLayout.DOUBLE, playlistArtworkLayout(2))
+        assertEquals(PlaylistArtworkLayout.COLLAGE, playlistArtworkLayout(3))
+        assertEquals(PlaylistArtworkLayout.COLLAGE, playlistArtworkLayout(12))
+    }
+
+    @Test
+    fun albumDetailHeaderCoverUsesFixedSizeInEveryOrientation() {
+        assertEquals(96.dp, albumDetailHeaderCoverSize())
+    }
+
+    @Test
+    fun landscapeFloatingBottomBarUsesNavigationInsetOrTwelveDpFallback() {
+        assertEquals(24.dp, floatingBottomBarBottomPadding(24.dp))
+        assertEquals(12.dp, floatingBottomBarBottomPadding(0.dp))
+    }
+
+    @Test
+    fun portraitMiniPlayerStopsAtTheFloatingNavigationBarPosition() {
+        assertEquals(
+            24.dp,
+            floatingMiniPlayerBottomPaddingWhenNavigationIsHidden(
+                navigationBarBottomInset = 0.dp,
+                isPortrait = true,
+            ),
+        )
+        assertEquals(32.dp, floatingNavigationBarBottomPadding(0.dp))
+        assertEquals(32.dp, floatingNavigationBarBottomPadding(24.dp))
+        assertEquals(
+            0.dp,
+            floatingMiniPlayerBottomPaddingWhenNavigationIsHidden(
+                navigationBarBottomInset = 0.dp,
+                isPortrait = false,
+            ),
+        )
+        assertEquals(
+            24.dp,
+            floatingMiniPlayerBottomPaddingWhenNavigationIsHidden(
+                navigationBarBottomInset = 24.dp,
+                isPortrait = true,
             ),
         )
     }
@@ -2106,45 +2784,6 @@ class UiLogicTest {
         assertEquals(
             setOf(PlaybackMode.REPEAT_ONE),
             normalized.queue.map(PlaybackQueueItem::playbackMode).toSet(),
-        )
-    }
-
-    @Test
-    fun homeRecentlyAddedTracksPrioritizeScanAdditionsAndFillWithNewestFiles() {
-        val tracks = listOf(
-            musicTrack(1L, "Track 1", 1L, "1.mp3", 1L, 1L, dateModifiedEpochSeconds = 10L),
-            musicTrack(2L, "Track 2", 2L, "2.mp3", 2L, 2L, dateModifiedEpochSeconds = 40L),
-            musicTrack(3L, "Track 3", 3L, "3.mp3", 3L, 3L, dateModifiedEpochSeconds = 30L),
-            musicTrack(4L, "Track 4", 4L, "4.mp3", 4L, 4L, dateModifiedEpochSeconds = 20L),
-        )
-
-        assertEquals(
-            listOf(1L, 2L, 3L, 4L),
-            buildHomeRecentlyAddedTracks(tracks, recentlyAddedTrackIds = setOf(1L))
-                .map(MusicTrack::id),
-        )
-    }
-
-    @Test
-    fun homeRecentlyAddedTracksKeepEveryNewSongAboveTheDefaultLimit() {
-        val tracks = (1L..21L).map { id ->
-            musicTrack(
-                id = id,
-                title = "Track $id",
-                dateAddedEpochSeconds = id,
-                fileName = "$id.mp3",
-                fileSizeBytes = id,
-                durationMs = id,
-                dateModifiedEpochSeconds = id,
-            )
-        }
-
-        assertEquals(
-            (21L downTo 1L).toList(),
-            buildHomeRecentlyAddedTracks(
-                tracks = tracks,
-                recentlyAddedTrackIds = tracks.map(MusicTrack::id).toSet(),
-            ).map(MusicTrack::id),
         )
     }
 
@@ -2413,7 +3052,7 @@ class UiLogicTest {
             baseTrack.copy(
                 fileName = "quality.flac",
                 mimeType = "audio/flac",
-                sampleRateHz = 48_000,
+                sampleRateHz = 44_100,
                 bitDepth = 24,
             ).resolveAudioQuality(),
         )
@@ -2431,7 +3070,7 @@ class UiLogicTest {
             baseTrack.copy(
                 fileName = "quality.flac",
                 mimeType = "audio/flac",
-                sampleRateHz = 47_999,
+                sampleRateHz = 44_099,
                 bitDepth = 32,
             ).resolveAudioQuality(),
         )
@@ -2492,7 +3131,7 @@ class UiLogicTest {
     }
 
     @Test
-    fun tagLibPropertyMapResolvesLyricoCompatibleLibraryFields() {
+    fun tagLibPropertyMapResolvesLibraryFields() {
         assertEquals(
             com.melox.player.data.library.LocalAudioTags(
                 title = "Title",
@@ -2514,6 +3153,36 @@ class UiLogicTest {
                     "DISCNUMBER" to arrayOf("2/2"),
                 ),
             ),
+        )
+    }
+
+    @Test
+    fun tagLibPropertyMapResolvesWavAndId3Aliases() {
+        assertEquals(
+            com.melox.player.data.library.LocalAudioTags(
+                title = "WAV title",
+                artist = "WAV artist",
+                album = "WAV album",
+                albumArtist = "Album artist",
+                year = 2025,
+                trackNumber = 4,
+                discNumber = 1,
+            ),
+            parseAudioTagProperties(
+                mapOf(
+                    "INAM" to arrayOf("WAV title"),
+                    "IART" to arrayOf("WAV artist"),
+                    "IPRD" to arrayOf("WAV album"),
+                    "TPE2" to arrayOf("Album artist"),
+                    "DATE" to arrayOf("2025"),
+                    "ITRK" to arrayOf("4/10"),
+                    "DISKNUMBER" to arrayOf("1/1"),
+                ),
+            ),
+        )
+        assertEquals(
+            "ID3 title",
+            parseAudioTagProperties(mapOf("TIT2" to arrayOf("ID3 title"))).title,
         )
     }
 
@@ -2823,6 +3492,24 @@ class UiLogicTest {
     }
 
     @Test
+    fun pendingPlaybackModeKeepsTheNewIconUntilThePlayerConfirmsIt() {
+        assertEquals(
+            PlaybackMode.RANDOM,
+            displayedPlaybackMode(
+                playerMode = PlaybackMode.REPEAT_ONE,
+                pendingMode = PlaybackMode.RANDOM,
+            ),
+        )
+        assertEquals(
+            PlaybackMode.ORDER,
+            displayedPlaybackMode(
+                playerMode = PlaybackMode.ORDER,
+                pendingMode = null,
+            ),
+        )
+    }
+
+    @Test
     fun randomToOrderReplacementKeepsCurrentSlotOutsideTwoBulkSpans() {
         val sourceQueue = List(100_000) { index ->
             playbackQueueItem(index.toString()).copy(sourceOrder = index.toDouble())
@@ -3044,6 +3731,206 @@ class UiLogicTest {
         assertFalse(isValidQueueIndex(index = -1, itemCount = 3))
         assertFalse(isValidQueueIndex(index = 3, itemCount = 3))
         assertFalse(isValidQueueIndex(index = 0, itemCount = 0))
+
+        assertEquals(true, isValidQueueMove(fromIndex = 0, toIndex = 2, itemCount = 3))
+        assertFalse(isValidQueueMove(fromIndex = 1, toIndex = 1, itemCount = 3))
+        assertFalse(isValidQueueMove(fromIndex = -1, toIndex = 1, itemCount = 3))
+        assertFalse(isValidQueueMove(fromIndex = 1, toIndex = 3, itemCount = 3))
+    }
+
+    @Test
+    fun blockedContentUrisRemoveEveryMatchingQueueSlotFromTheEnd() {
+        val queue = listOf(
+            playbackQueueItem("keep"),
+            playbackQueueItem("blocked"),
+            playbackQueueItem("blocked"),
+            playbackQueueItem("tail"),
+        )
+
+        assertEquals(
+            listOf(2, 1),
+            queueRemovalIndicesForContentUris(
+                queue = queue,
+                contentUris = setOf("content://music/blocked"),
+            ),
+        )
+        assertEquals(
+            emptyList<Int>(),
+            queueRemovalIndicesForContentUris(queue, emptySet()),
+        )
+    }
+
+    @Test
+    fun queueDraftMoveAndPlayNextTargetPreserveSlotIdentity() {
+        val queue = listOf("a", "b", "current", "d", "e")
+
+        assertEquals(
+            listOf("b", "current", "a", "d", "e"),
+            moveQueueListItem(queue, fromIndex = 0, toIndex = 2),
+        )
+        assertEquals(
+            2,
+            queueMoveTargetAfterCurrent(itemIndex = 0, currentIndex = 2, itemCount = 5),
+        )
+        assertEquals(
+            3,
+            queueMoveTargetAfterCurrent(itemIndex = 4, currentIndex = 2, itemCount = 5),
+        )
+        assertNull(
+            queueMoveTargetAfterCurrent(itemIndex = 2, currentIndex = 2, itemCount = 5),
+        )
+        assertEquals("current", moveQueueListItem(queue, 2, 4)[4])
+    }
+
+    @Test
+    fun queuePlayNextActionSkipsCurrentAndImmediateNextItems() {
+        assertFalse(queueShowsPlayNextAction(itemIndex = 2, currentIndex = 2, itemCount = 5))
+        assertFalse(queueShowsPlayNextAction(itemIndex = 3, currentIndex = 2, itemCount = 5))
+        assertTrue(queueShowsPlayNextAction(itemIndex = 1, currentIndex = 2, itemCount = 5))
+        assertTrue(queueShowsPlayNextAction(itemIndex = 4, currentIndex = 2, itemCount = 5))
+        assertFalse(queueShowsPlayNextAction(itemIndex = 0, currentIndex = -1, itemCount = 5))
+    }
+
+    @Test
+    fun queueOffscreenPlayNextAnimationUsesTheRequestedViewportEdge() {
+        assertEquals(
+            -308f,
+            queueOffscreenExitTranslation(
+                itemIndex = 4,
+                currentIndex = 1,
+                itemOffsetPx = 240,
+                itemSizePx = 68,
+                viewportStartPx = 0,
+                viewportEndPx = 600,
+            ),
+            0f,
+        )
+        assertEquals(
+            480f,
+            queueOffscreenExitTranslation(
+                itemIndex = 1,
+                currentIndex = 4,
+                itemOffsetPx = 120,
+                itemSizePx = 68,
+                viewportStartPx = 0,
+                viewportEndPx = 600,
+            ),
+            0f,
+        )
+    }
+
+    @Test
+    fun queueOffscreenPlayNextFadesOnlyAcrossTheViewportBoundary() {
+        assertEquals(
+            1f,
+            queueOffscreenExitAlpha(
+                itemIndex = 4,
+                currentIndex = 1,
+                itemOffsetPx = 240,
+                itemSizePx = 68,
+                translationY = -240f,
+                viewportStartPx = 0,
+                viewportEndPx = 600,
+            ),
+            0f,
+        )
+        assertEquals(
+            0.5f,
+            queueOffscreenExitAlpha(
+                itemIndex = 4,
+                currentIndex = 1,
+                itemOffsetPx = 240,
+                itemSizePx = 68,
+                translationY = -274f,
+                viewportStartPx = 0,
+                viewportEndPx = 600,
+            ),
+            0f,
+        )
+        assertEquals(
+            0f,
+            queueOffscreenExitAlpha(
+                itemIndex = 1,
+                currentIndex = 4,
+                itemOffsetPx = 120,
+                itemSizePx = 68,
+                translationY = 480f,
+                viewportStartPx = 0,
+                viewportEndPx = 600,
+            ),
+            0f,
+        )
+    }
+
+    @Test
+    fun queueOffscreenPlayNextMovesCrossedRowsOutOfTheGap() {
+        assertEquals(
+            34f,
+            queuePlayNextPeerTranslation(
+                itemIndex = 3,
+                movingIndex = 5,
+                currentIndex = 1,
+                rowHeightPx = 68f,
+                progress = 0.5f,
+            ),
+            0f,
+        )
+        assertEquals(
+            -68f,
+            queuePlayNextPeerTranslation(
+                itemIndex = 2,
+                movingIndex = 1,
+                currentIndex = 4,
+                rowHeightPx = 68f,
+                progress = 1f,
+            ),
+            0f,
+        )
+        assertEquals(
+            0f,
+            queuePlayNextPeerTranslation(
+                itemIndex = 5,
+                movingIndex = 5,
+                currentIndex = 1,
+                rowHeightPx = 68f,
+                progress = 1f,
+            ),
+            0f,
+        )
+    }
+
+    @Test
+    fun queueLocationAddsOnlyTheSpaceNeededToPlaceCurrentFirst() {
+        assertEquals(
+            0.dp,
+            queueLocationAnchorHeight(
+                itemCount = 10,
+                currentIndex = 1,
+                rowHeight = 68.dp,
+                viewportHeight = 600.dp,
+                bottomPadding = 24.dp,
+            ),
+        )
+        assertEquals(
+            508.dp,
+            queueLocationAnchorHeight(
+                itemCount = 10,
+                currentIndex = 9,
+                rowHeight = 68.dp,
+                viewportHeight = 600.dp,
+                bottomPadding = 24.dp,
+            ),
+        )
+        assertEquals(
+            0.dp,
+            queueLocationAnchorHeight(
+                itemCount = 0,
+                currentIndex = -1,
+                rowHeight = 68.dp,
+                viewportHeight = 600.dp,
+                bottomPadding = 24.dp,
+            ),
+        )
     }
 
     @Test

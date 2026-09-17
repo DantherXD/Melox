@@ -14,6 +14,12 @@ data class AlbumGroup(
         get() = tracks.firstOrNull()
 }
 
+internal data class AlbumDiscSection(
+    val discNumber: Int?,
+    val tracks: List<MusicTrack>,
+    val totalDurationMs: Long,
+)
+
 data class ArtistGroup(
     val key: String,
     val name: String?,
@@ -70,6 +76,29 @@ internal fun buildAlbumGroups(tracks: List<MusicTrack>): List<AlbumGroup> =
                 tracks = albumTracks,
             )
         }
+
+internal fun buildAlbumDiscSections(tracks: List<MusicTrack>): List<AlbumDiscSection> {
+    val trackComparator = compareBy<MusicTrack> {
+        it.trackNumber?.takeIf { number -> number > 0 } != null
+    }
+        .thenBy { it.trackNumber?.takeIf { number -> number > 0 } ?: 0 }
+        .thenBy(MusicTrack::titleSortKey)
+        .thenBy(MusicTrack::id)
+
+    return tracks
+        .groupBy { it.discNumber?.takeIf { number -> number > 0 } }
+        .map { (discNumber, discTracks) ->
+            AlbumDiscSection(
+                discNumber = discNumber,
+                tracks = discTracks.sortedWith(trackComparator),
+                totalDurationMs = discTracks.sumOf { it.durationMs.coerceAtLeast(0L) },
+            )
+        }
+        .sortedWith(
+            compareBy<AlbumDiscSection> { it.discNumber != null }
+                .thenBy { it.discNumber ?: 0 },
+        )
+}
 
 internal fun buildArtistGroups(tracks: List<MusicTrack>): List<ArtistGroup> =
     tracks

@@ -1,10 +1,14 @@
 package com.melox.player
 
 import com.melox.player.data.repository.customFolderPrefixForDocumentId
+import com.melox.player.data.repository.customFolderScopeForDocumentId
+import com.melox.player.data.repository.customFolderScopeMatches
 import com.melox.player.data.repository.exactLyricsSidecarCandidates
 import com.melox.player.data.repository.folderMatchesPrefix
+import com.melox.player.data.repository.isSupportedAudioDocument
+import com.melox.player.data.repository.stableDocumentTrackId
+import com.melox.player.data.repository.stableMediaStoreTrackId
 import com.melox.player.model.LyricsFormat
-import com.melox.player.ui.screen.playback.correctedLyricClockMs
 import com.melox.player.ui.viewmodel.shouldEmitScanCompletion
 import com.melox.player.ui.viewmodel.shouldEmitScanNoChanges
 import org.junit.Assert.assertEquals
@@ -50,12 +54,72 @@ class MusicScanLogicTest {
                 prefix = "/Music",
             ),
         )
+        assertFalse(
+            folderMatchesPrefix(
+                rawPath = "Music2/song.flac",
+                includesFileName = false,
+                prefix = "/Music",
+            ),
+        )
     }
 
     @Test
-    fun lyricClockAdoptsControllerUpdatesWithoutKeepingAVisibleLag() {
-        assertEquals(10_500.0, correctedLyricClockMs(10_000.0, 10_500L), 0.0)
-        assertEquals(10_037.5, correctedLyricClockMs(10_000.0, 10_050L), 0.0)
+    fun secondaryStorageTreeMatchesOnlyItsOwnMediaStoreVolume() {
+        val scope = requireNotNull(
+            customFolderScopeForDocumentId("1234-5678:Music/Albums", sdkInt = 29),
+        )
+
+        assertEquals("1234-5678", scope.volumeName)
+        assertEquals("/Music/Albums", scope.folderPrefix)
+        assertTrue(
+            customFolderScopeMatches(
+                scope = scope,
+                volumeName = "1234-5678",
+                rawPath = "Music/Albums/Live/",
+                includesFileName = false,
+                sdkInt = 29,
+            ),
+        )
+        assertFalse(
+            customFolderScopeMatches(
+                scope = scope,
+                volumeName = "external_primary",
+                rawPath = "Music/Albums/Live/",
+                includesFileName = false,
+                sdkInt = 29,
+            ),
+        )
+    }
+
+    @Test
+    fun safFallbackRecognizesAudioMimeTypesAndReferenceExtensions() {
+        assertTrue(isSupportedAudioDocument("track.bin", "audio/x-custom"))
+        assertTrue(isSupportedAudioDocument("track.ape", "application/octet-stream"))
+        assertTrue(isSupportedAudioDocument("track.OPUS", null))
+        assertFalse(isSupportedAudioDocument("cover.jpg", "image/jpeg"))
+    }
+
+    @Test
+    fun directDocumentTrackIdsAreStableAndSeparatedFromMediaStoreIds() {
+        val first = stableDocumentTrackId("content://documents/tree/primary%3AMusic/one.flac")
+        val repeated = stableDocumentTrackId("content://documents/tree/primary%3AMusic/one.flac")
+        val second = stableDocumentTrackId("content://documents/tree/primary%3AMusic/two.flac")
+
+        assertEquals(first, repeated)
+        assertTrue(first < 0L)
+        assertTrue(second < 0L)
+        assertFalse(first == second)
+    }
+
+    @Test
+    fun secondaryVolumeTrackIdsDoNotCollideWithPrimaryRows() {
+        assertEquals(42L, stableMediaStoreTrackId("external_primary", 42L))
+        val secondary = stableMediaStoreTrackId("1234-5678", 42L)
+
+        assertTrue(secondary > 0L)
+        assertFalse(secondary == 42L)
+        assertEquals(secondary, stableMediaStoreTrackId("1234-5678", 42L))
+        assertFalse(secondary == stableMediaStoreTrackId("8765-4321", 42L))
     }
 
     @Test

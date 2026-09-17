@@ -6,6 +6,8 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.calculateEndPadding
+import androidx.compose.foundation.layout.calculateStartPadding
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -29,6 +31,7 @@ import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.LocalLayoutDirection
 import androidx.compose.ui.platform.LocalUriHandler
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
@@ -39,9 +42,9 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.melox.player.BuildConfig
 import com.melox.player.R
-import com.melox.player.ui.component.MiuixBlurredBar
+import com.melox.player.ui.component.BlurredBar
 import com.melox.player.ui.component.effect.AboutEffectBackground
-import com.melox.player.ui.component.rememberMiuixBlurBackdrop
+import com.melox.player.ui.component.rememberBlurBackdrop
 import top.yukonga.miuix.kmp.basic.Card
 import top.yukonga.miuix.kmp.basic.CardDefaults
 import top.yukonga.miuix.kmp.basic.Icon
@@ -66,7 +69,6 @@ import top.yukonga.miuix.kmp.utils.scrollEndHaptic
 
 @Composable
 fun AboutScreen(
-    blurEnabled: Boolean,
     bottomContentPadding: Dp,
     onBack: () -> Unit,
 ) {
@@ -92,7 +94,7 @@ fun AboutScreen(
     val collapsed by remember {
         derivedStateOf { scrollProgress >= 0.999f }
     }
-    val topBarBackdrop = rememberMiuixBlurBackdrop(enabled = blurEnabled)
+    val topBarBackdrop = rememberBlurBackdrop()
     val barBackdrop = if (collapsed) topBarBackdrop else null
     val barColor = if (collapsed && barBackdrop == null) {
         MiuixTheme.colorScheme.surface
@@ -101,15 +103,16 @@ fun AboutScreen(
     }
 
     Scaffold(
-        topBar = {
-            MiuixBlurredBar(
+            topBar = {
+            BlurredBar(
                 backdrop = barBackdrop,
-                modifier = Modifier.background(barColor),
+                blurEnabled = barBackdrop != null,
+                scrollBehavior = scrollBehavior,
             ) {
                 SmallTopAppBar(
                     title = stringResource(R.string.settings_about_title),
                     scrollBehavior = scrollBehavior,
-                    color = Color.Transparent,
+                    color = barColor,
                     titleColor = MiuixTheme.colorScheme.onSurface.copy(
                         alpha = ((scrollProgress - 0.35f) / 0.65f).coerceIn(0f, 1f),
                     ),
@@ -124,7 +127,7 @@ fun AboutScreen(
                 )
             }
         },
-    ) { padding ->
+        ) { padding ->
         Box(
             modifier = Modifier
                 .fillMaxSize()
@@ -135,7 +138,6 @@ fun AboutScreen(
                 listState = listState,
                 scrollBehavior = scrollBehavior,
                 scrollProgress = { scrollProgress },
-                blurEnabled = blurEnabled,
                 bottomContentPadding = bottomContentPadding,
             )
         }
@@ -148,14 +150,14 @@ private fun AboutContent(
     listState: androidx.compose.foundation.lazy.LazyListState,
     scrollBehavior: top.yukonga.miuix.kmp.basic.ScrollBehavior,
     scrollProgress: () -> Float,
-    blurEnabled: Boolean,
     bottomContentPadding: Dp,
 ) {
     val uriHandler = LocalUriHandler.current
     val density = LocalDensity.current
+    val layoutDirection = LocalLayoutDirection.current
     val versionName = BuildConfig.VERSION_NAME.ifBlank { "1.0.0" }
     var headerHeight by remember { mutableStateOf(190.dp) }
-    val contentBackdrop = rememberMiuixBlurBackdrop(enabled = blurEnabled)
+    val contentBackdrop = rememberBlurBackdrop()
     val isDark = MiuixTheme.colorScheme.surface.luminance() < 0.5f
     val logoBlend = remember(isDark) {
         if (isDark) {
@@ -210,7 +212,9 @@ private fun AboutContent(
                 .overScrollVertical()
                 .nestedScroll(scrollBehavior.nestedScrollConnection),
             contentPadding = PaddingValues(
+                start = padding.calculateStartPadding(layoutDirection),
                 top = padding.calculateTopPadding(),
+                end = padding.calculateEndPadding(layoutDirection),
                 bottom = maxOf(
                     padding.calculateBottomPadding(),
                     bottomContentPadding,
@@ -282,7 +286,7 @@ private fun AboutContent(
 
 private const val PROJECT_URL = "https://github.com/Inefy-03/Melox"
 private const val DEVELOPER_GITHUB_URL = "https://github.com/Inefy-03"
-private const val TELEGRAM_CHANNEL_URL = "https://t.me/MeloxPlayer"
+private const val TELEGRAM_CHANNEL_URL = "https://t.me/MeloxPlayerUpdate"
 
 @Composable
 private fun AboutHeader(
@@ -296,7 +300,11 @@ private fun AboutHeader(
     Column(
         modifier = Modifier
             .fillMaxWidth()
-            .padding(top = contentPadding.calculateTopPadding() + 92.dp)
+            .padding(
+                start = contentPadding.calculateStartPadding(LocalLayoutDirection.current),
+                top = contentPadding.calculateTopPadding() + 92.dp,
+                end = contentPadding.calculateEndPadding(LocalLayoutDirection.current),
+            )
             .onSizeChanged { onHeightChanged(it.height) },
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {

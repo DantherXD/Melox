@@ -8,11 +8,12 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.calculateEndPadding
+import androidx.compose.foundation.layout.calculateStartPadding
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -49,6 +50,7 @@ import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.layout.positionInRoot
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.LocalLayoutDirection
 import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.contentDescription
@@ -64,9 +66,11 @@ import com.melox.player.data.library.MusicLibraryStatistics
 import com.melox.player.data.library.buildMusicLibraryStatistics
 import com.melox.player.model.AudioQuality
 import com.melox.player.model.MusicTrack
-import com.melox.player.ui.component.MiuixBlurredBar
+import com.melox.player.ui.component.AdaptiveTopAppBar
+import com.melox.player.ui.component.BlurredBar
 import com.melox.player.ui.component.miuixBarColor
-import com.melox.player.ui.component.rememberMiuixBlurBackdrop
+import com.melox.player.ui.component.rememberBlurBackdrop
+import com.melox.player.ui.screen.library.MusicLibraryEmptyMessage
 import java.util.Locale
 import top.yukonga.miuix.kmp.basic.DropdownImpl
 import top.yukonga.miuix.kmp.basic.HorizontalDivider
@@ -79,10 +83,10 @@ import top.yukonga.miuix.kmp.basic.PopupPositionProvider
 import top.yukonga.miuix.kmp.basic.Scaffold
 import top.yukonga.miuix.kmp.basic.ScrollBehavior
 import top.yukonga.miuix.kmp.basic.Text
-import top.yukonga.miuix.kmp.basic.TopAppBar
 import top.yukonga.miuix.kmp.blur.layerBackdrop
 import top.yukonga.miuix.kmp.icon.MiuixIcons
 import top.yukonga.miuix.kmp.icon.extended.Back
+import top.yukonga.miuix.kmp.icon.extended.Music
 import top.yukonga.miuix.kmp.icon.extended.Tune
 import top.yukonga.miuix.kmp.overlay.OverlayListPopup
 import top.yukonga.miuix.kmp.theme.MiuixTheme
@@ -122,20 +126,24 @@ private data class CylinderSegment(
 @Composable
 fun MusicStatisticsScreen(
     tracks: List<MusicTrack>,
-    blurEnabled: Boolean,
     bottomContentPadding: Dp,
     onBack: () -> Unit,
 ) {
     val statistics = remember(tracks) { buildMusicLibraryStatistics(tracks) }
+    val layoutDirection = LocalLayoutDirection.current
     var group by remember { mutableStateOf(StatisticsGroup.QUALITY) }
     var metric by remember { mutableStateOf(StatisticsMetric.COUNT) }
     val scrollBehavior = MiuixScrollBehavior()
-    val topBarBackdrop = rememberMiuixBlurBackdrop(enabled = blurEnabled)
+    val topBarBackdrop = rememberBlurBackdrop()
 
     Scaffold(
-        topBar = {
-            MiuixBlurredBar(backdrop = topBarBackdrop) {
-                TopAppBar(
+            topBar = {
+            BlurredBar(
+                backdrop = topBarBackdrop,
+                blurEnabled = topBarBackdrop != null,
+                scrollBehavior = scrollBehavior,
+            ) {
+                AdaptiveTopAppBar(
                     title = stringResource(R.string.music_statistics_page_title),
                     color = topBarBackdrop.miuixBarColor(),
                     scrollBehavior = scrollBehavior,
@@ -158,7 +166,7 @@ fun MusicStatisticsScreen(
                 )
             }
         },
-    ) { padding ->
+        ) { padding ->
         Box(
             modifier = Modifier
                 .fillMaxSize()
@@ -168,7 +176,9 @@ fun MusicStatisticsScreen(
                 statistics = statistics,
                 group = group,
                 metric = metric,
+                startPadding = padding.calculateStartPadding(layoutDirection),
                 topPadding = padding.calculateTopPadding(),
+                endPadding = padding.calculateEndPadding(layoutDirection),
                 bottomPadding = maxOf(
                     padding.calculateBottomPadding(),
                     bottomContentPadding,
@@ -258,7 +268,9 @@ private fun StatisticsPage(
     statistics: MusicLibraryStatistics,
     group: StatisticsGroup,
     metric: StatisticsMetric,
+    startPadding: Dp,
     topPadding: Dp,
+    endPadding: Dp,
     bottomPadding: Dp,
     scrollBehavior: ScrollBehavior,
 ) {
@@ -321,12 +333,7 @@ private fun StatisticsPage(
             }
         }
     }
-    BoxWithConstraints(modifier = Modifier.fillMaxSize()) {
-        val stableTopPadding = remember(maxHeight) { topPadding }
-        val chartHeight = maxOf(
-            1.dp,
-            maxHeight - stableTopPadding - bottomPadding - 24.dp,
-        )
+    Box(modifier = Modifier.fillMaxSize()) {
         LazyColumn(
             modifier = Modifier
                 .fillMaxSize()
@@ -334,7 +341,9 @@ private fun StatisticsPage(
                 .overScrollVertical()
                 .nestedScroll(scrollBehavior.nestedScrollConnection),
             contentPadding = PaddingValues(
-                top = topPadding + 8.dp,
+                start = startPadding,
+                top = topPadding + 32.dp,
+                end = endPadding,
                 bottom = bottomPadding + 16.dp,
             ),
             overscrollEffect = null,
@@ -344,13 +353,12 @@ private fun StatisticsPage(
                     Box(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .height(chartHeight),
+                            .height(CYLINDER_HEIGHT),
                         contentAlignment = Alignment.Center,
                     ) {
-                        Text(
-                            text = stringResource(R.string.music_statistics_empty),
-                            style = MiuixTheme.textStyles.footnote1,
-                            color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+                        MusicLibraryEmptyMessage(
+                            icon = MiuixIcons.Music,
+                            text = stringResource(R.string.music_empty_after_scan),
                         )
                     }
                 } else {
@@ -358,7 +366,7 @@ private fun StatisticsPage(
                         items = items,
                         modifier = Modifier
                             .fillMaxWidth()
-                            .height(chartHeight),
+                            .height(CYLINDER_HEIGHT),
                     )
                 }
             }
@@ -386,11 +394,10 @@ private fun CylinderStatistics(
     val legendWidthPx = groupWidthPx * LEGEND_WIDTH_SHARE
     val legendWidth = with(density) { legendWidthPx.toDp() }
     val groupLeftPx = ((chartSize.width - groupWidthPx) / 2f).coerceAtLeast(0f)
-    val cylinderBodyHeight = min(
-        cylinderWidthPx * CYLINDER_BODY_ASPECT_RATIO,
-        (chartSize.height - cylinderWidthPx * ELLIPSE_HEIGHT_RATIO)
-            .coerceAtLeast(items.size.toFloat()),
-    )
+    val cylinderBodyHeight = (
+        with(density) { CYLINDER_HEIGHT.toPx() } -
+            cylinderWidthPx * ELLIPSE_HEIGHT_RATIO
+    ).coerceAtLeast(items.size.toFloat())
     val cylinderTop = ((chartSize.height - cylinderBodyHeight) / 2f).coerceAtLeast(0f)
     val legendTopPx = (
         cylinderTop - cylinderWidthPx * ELLIPSE_HEIGHT_RATIO / 2f
@@ -686,13 +693,14 @@ private enum class GestureAxis {
 
 private const val ELLIPSE_CONTROL_POINT = 0.5522848f
 private const val ELLIPSE_HEIGHT_RATIO = 0.19f
-private const val CYLINDER_BODY_ASPECT_RATIO = 4.5f
 private const val CHART_GROUP_WIDTH_RATIO = 0.78f
 private const val CHART_GROUP_HEIGHT_RATIO = 0.56f
 private const val CYLINDER_WIDTH_SHARE = 0.39726028f
 private const val LEGEND_GAP_SHARE = 0.12328767f
 private const val LEGEND_WIDTH_SHARE = 0.47945205f
+private const val MIN_SEGMENT_HEIGHT_TO_WIDTH_RATIO = 0.05f
 private const val STATISTICS_OPTION_COUNT = 4
+private val CYLINDER_HEIGHT = 539.dp
 
 private data class CylinderGeometry(
     val left: Float,
@@ -729,6 +737,13 @@ private fun calculateCylinderGeometry(
     )
     val bottom = (size.height - bottomInset).coerceAtLeast(top + items.size)
     val availableHeight = (bottom - top).coerceAtLeast(items.size.toFloat())
+    val minimumSegmentHeight = min(
+        width * MIN_SEGMENT_HEIGHT_TO_WIDTH_RATIO,
+        availableHeight / items.size,
+    )
+    val proportionalHeight = (
+        availableHeight - minimumSegmentHeight * items.size
+    ).coerceAtLeast(0f)
     val summedWeight = items.sumOf { it.weight.coerceAtLeast(0L) }
     val hasWeight = summedWeight > 0L
     val totalWeight = summedWeight
@@ -744,7 +759,8 @@ private fun calculateCylinderGeometry(
         val height = if (index == items.lastIndex) {
             bottom - currentTop
         } else {
-            availableHeight * (weight.toFloat() / totalWeight.toFloat())
+            minimumSegmentHeight +
+                proportionalHeight * (weight.toFloat() / totalWeight.toFloat())
         }
         CylinderSegment(
             index = index,
@@ -761,21 +777,54 @@ private fun calculateCylinderGeometry(
 }
 
 private fun qualityColor(quality: AudioQuality?, darkSurface: Boolean): Color = when (quality) {
-    AudioQuality.RAW -> Color(0xFFF46055)
-    AudioQuality.HI_RES -> Color(0xFFFAD657)
-    AudioQuality.SQ -> Color(0xFFD05BEA)
-    AudioQuality.HQ -> Color(0xFF639BF0)
-    null -> if (darkSurface) Color(0xFF7A829C) else Color(0xFF9AA2B8)
+    AudioQuality.RAW -> STATISTICS_COLUMN_RED
+    AudioQuality.HI_RES -> STATISTICS_COLUMN_YELLOW
+    AudioQuality.SQ -> STATISTICS_COLUMN_PURPLE
+    AudioQuality.HQ -> STATISTICS_COLUMN_BLUE
+    null -> statisticsColumnOtherColor(darkSurface)
 }
 
-private fun formatColor(index: Int, darkSurface: Boolean): Color = listOf(
-    Color(0xFFFAD657),
-    Color(0xFFF5A24A),
-    Color(0xFFF46055),
-    Color(0xFFD05BEA),
-    Color(0xFF639BF0),
-    if (darkSurface) Color(0xFF7A829C) else Color(0xFF9AA2B8),
-)[index % 6]
+private fun formatColor(index: Int, darkSurface: Boolean): Color = when (
+    index.mod(STATISTICS_FORMAT_COLUMN_COLOR_COUNT)
+) {
+    7 -> statisticsColumnOtherColor(darkSurface)
+    8 -> statisticsColumnLightGrayColor(darkSurface)
+    else -> STATISTICS_FORMAT_COLUMN_COLORS[index.mod(STATISTICS_FORMAT_COLUMN_COLORS.size)]
+}
+
+private fun statisticsColumnOtherColor(darkSurface: Boolean): Color = if (darkSurface) {
+    STATISTICS_COLUMN_DARK_OTHER
+} else {
+    STATISTICS_COLUMN_OTHER
+}
+
+private fun statisticsColumnLightGrayColor(darkSurface: Boolean): Color = if (darkSurface) {
+    STATISTICS_COLUMN_DARK_LIGHT_GRAY
+} else {
+    STATISTICS_COLUMN_LIGHT_GRAY
+}
+
+private val STATISTICS_COLUMN_LIGHT_GRAY = Color(0xFFC4CBE1)
+private val STATISTICS_COLUMN_OTHER = Color(0xFF9DA2BC)
+private val STATISTICS_COLUMN_GREEN = Color(0xFF38E191)
+private val STATISTICS_COLUMN_BLUE = Color(0xFF3193FB)
+private val STATISTICS_COLUMN_PURPLE = Color(0xFFD13FEE)
+private val STATISTICS_COLUMN_RED = Color(0xFFFB4D46)
+private val STATISTICS_COLUMN_ORANGE = Color(0xFFFF963A)
+private val STATISTICS_COLUMN_YELLOW = Color(0xFFFCD231)
+private val STATISTICS_COLUMN_CYAN = Color(0xFF14CBCB)
+private val STATISTICS_COLUMN_DARK_LIGHT_GRAY = Color(0xFF9FA4BE)
+private val STATISTICS_COLUMN_DARK_OTHER = Color(0xFF666F8E)
+private val STATISTICS_FORMAT_COLUMN_COLORS = listOf(
+    STATISTICS_COLUMN_YELLOW,
+    STATISTICS_COLUMN_ORANGE,
+    STATISTICS_COLUMN_RED,
+    STATISTICS_COLUMN_PURPLE,
+    STATISTICS_COLUMN_BLUE,
+    STATISTICS_COLUMN_GREEN,
+    STATISTICS_COLUMN_CYAN,
+)
+private const val STATISTICS_FORMAT_COLUMN_COLOR_COUNT = 9
 
 private fun formatStatisticsSize(bytes: Long): String {
     val safeBytes = bytes.coerceAtLeast(0L)

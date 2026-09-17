@@ -29,7 +29,7 @@ class MusicLibraryStatisticsTest {
     }
 
     @Test
-    fun statisticsKeepsFiveLargestFormatsAndMergesTheRest() {
+    fun statisticsKeepsEveryResolvedFormatAndOnlyMergesUnknown() {
         val statistics = buildMusicLibraryStatistics(
             listOf(
                 track(1L, "one.flac", 60L, "audio/flac"),
@@ -39,15 +39,33 @@ class MusicLibraryStatisticsTest {
                 track(5L, "five.alac", 20L, "audio/alac"),
                 track(6L, "six.ape", 10L, "audio/ape"),
                 track(7L, null, 5L, "audio/ogg; codecs=vorbis"),
+                track(8L, null, 4L, null),
             ),
         )
 
         assertEquals(
-            listOf("FLAC", "MP3", "AAC", "WAV", "ALAC", null),
+            listOf("FLAC", "MP3", "AAC", "WAV", "ALAC", "APE", "OGG", null),
             statistics.formats.map { it.format },
         )
-        assertEquals(2, statistics.formats.last().trackCount)
-        assertEquals(15L, statistics.formats.last().totalBytes)
+        assertEquals(1, statistics.formats.last().trackCount)
+        assertEquals(4L, statistics.formats.last().totalBytes)
+    }
+
+    @Test
+    fun statisticsCanExposeMoreThanNineFormats() {
+        val statistics = buildMusicLibraryStatistics(
+            (0 until 10).map { index ->
+                track(
+                    id = index.toLong(),
+                    fileName = "track.f$index",
+                    fileSizeBytes = (10 - index).toLong(),
+                    mimeType = "audio/f$index",
+                )
+            },
+        )
+
+        assertEquals(10, statistics.formats.size)
+        assertEquals((0 until 10).map { "F$it" }, statistics.formats.map { it.format })
     }
 
     @Test

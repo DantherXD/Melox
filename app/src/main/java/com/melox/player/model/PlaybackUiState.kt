@@ -54,6 +54,8 @@ data class PlaybackUiState(
     val isPlaying: Boolean = false,
     val playWhenReady: Boolean = false,
     val positionMs: Long = 0L,
+    val positionUpdateElapsedRealtimeMs: Long = 0L,
+    val playbackSpeed: Float = 1f,
     val durationMs: Long = 0L,
     val bufferedPositionMs: Long = 0L,
     val playbackMode: PlaybackMode = PlaybackMode.ORDER,

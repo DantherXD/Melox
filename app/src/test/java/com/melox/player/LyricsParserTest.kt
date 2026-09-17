@@ -2,7 +2,6 @@ package com.melox.player
 
 import com.melox.player.data.lyrics.LyricsParser
 import com.melox.player.model.LyricsFormat
-import com.melox.player.model.LyricsRenderItem
 import com.melox.player.model.LyricsSource
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -34,6 +33,21 @@ class LyricsParserTest {
         assertTrue(first.words.first().hasTrailingSpace)
         assertEquals(10_500L, first.words.first().endTimeMs)
         assertEquals(11_000L, first.words.last().endTimeMs)
+    }
+
+    @Test
+    fun lrcOffsetAppliesToLinesBeforeItsMetadataTag() {
+        val document = LyricsParser.parse(
+            raw = """
+                [00:01.00]First
+                [offset:+250]
+                [00:02.00]Second
+            """.trimIndent(),
+            source = LyricsSource.SIDECAR,
+        )!!
+
+        assertEquals(1_250L, document.lines[0].startTimeMs)
+        assertEquals(2_250L, document.lines[1].startTimeMs)
     }
 
     @Test
@@ -80,6 +94,27 @@ class LyricsParserTest {
 
         assertEquals(10_200L, document.lines.single().words.first().endTimeMs)
         assertEquals(11_000L, document.lines.single().words.last().startTimeMs)
+    }
+
+    @Test
+    fun ttmlUsesDeclaredFrameRateMultiplierAndTickRate() {
+        val document = LyricsParser.parse(
+            raw = """
+                <tt xmlns="http://www.w3.org/ns/ttml"
+                    xmlns:ttp="http://www.w3.org/ns/ttml#parameter"
+                    ttp:frameRate="25"
+                    ttp:frameRateMultiplier="1000 1001"
+                    ttp:tickRate="50">
+                  <body><div>
+                    <p begin="00:00:01:12" end="125t">Timed</p>
+                  </div></body>
+                </tt>
+            """.trimIndent(),
+            source = LyricsSource.EMBEDDED,
+        )!!.lines.single()
+
+        assertEquals(1_480L, document.startTimeMs)
+        assertEquals(2_500L, document.endTimeMs)
     }
 
     @Test
@@ -141,7 +176,7 @@ class LyricsParserTest {
     }
 
     @Test
-    fun longTimedGapPrecomputesStableThreeDotTransition() {
+    fun longTimedGapKeepsTheCompletedLineFocusedUntilTheNextLine() {
         val document = LyricsParser.parse(
             raw = """
                 [00:01.00]<00:01.00>First
@@ -150,36 +185,10 @@ class LyricsParserTest {
             source = LyricsSource.SIDECAR,
         )!!
 
-        assertEquals(1, document.transitions.size)
-        val transition = document.transitions.single()
-        assertEquals(0, transition.afterLineIndex)
-        assertEquals(1_500L, transition.startTimeMs)
-        assertEquals(6_500L, transition.endTimeMs)
-        assertTrue(transition.isActive(4_000L))
         assertEquals(-1, document.currentLineIndex(4_000L))
         assertEquals(1, document.focusLineIndex(4_000L))
-        assertEquals(-1, document.visualLineIndex(4_000L))
-        assertEquals(1, document.visualFocusLineIndex(4_000L))
-        assertEquals(0, document.transitionIndex(4_000L))
-
-        val renderItems = document.renderItems()
-        assertEquals(3, renderItems.size)
-        assertTrue(renderItems[0] is LyricsRenderItem.Line)
-        assertTrue(renderItems[1] is LyricsRenderItem.Transition)
-        assertTrue(renderItems[2] is LyricsRenderItem.Line)
-    }
-
-    @Test
-    fun gapShorterThanFiveSecondsDoesNotCreateTransition() {
-        val document = LyricsParser.parse(
-            raw = """
-                [00:01.00]<00:01.00>First
-                [00:06.49]Second
-            """.trimIndent(),
-            source = LyricsSource.SIDECAR,
-        )!!
-
-        assertTrue(document.transitions.isEmpty())
+        assertEquals(0, document.visualLineIndex(4_000L))
+        assertEquals(0, document.visualFocusLineIndex(4_000L))
     }
 
     @Test

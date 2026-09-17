@@ -3,6 +3,7 @@ package com.melox.player.playback
 import android.content.ComponentName
 import android.content.Context
 import android.net.Uri
+import android.os.SystemClock
 import androidx.core.content.ContextCompat
 import androidx.media3.common.C
 import androidx.media3.common.PlaybackException
@@ -27,14 +28,19 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import kotlin.random.Random
 
 /** UI-facing controller for the service-owned Media3 session. */
 class PlaybackController(context: Context) {
+    private companion object {
+        const val TRACK_SKIP_DEBOUNCE_MILLIS = 200L
+    }
     private val applicationContext = context.applicationContext
     private val mainExecutor = ContextCompat.getMainExecutor(applicationContext)
     private val released = AtomicBoolean(false)
     private val playbackModeChangeInFlight = AtomicBoolean(false)
+    private val lastTrackSkipElapsedRealtimeMs = java.util.concurrent.atomic.AtomicLong(Long.MIN_VALUE)
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
     private val initialSnapshot = MiniPlaybackSnapshotStore(applicationContext).load()
     private val mutableState = MutableStateFlow(
@@ -43,6 +49,9 @@ class PlaybackController(context: Context) {
     val state: StateFlow<PlaybackUiState> = mutableState.asStateFlow()
     private var pendingPlaybackModeChange: PendingPlaybackModeChange? = null
     private var playbackModeChangeTimeoutJob: Job? = null
+    private var homeRecommendationPlaybackJob: Job? = null
+    private var homeRecommendationPlaybackRequest = 0L
+    private var queueClearPending = false
 
     private val listener = object : Player.Listener {
         override fun onEvents(player: Player, events: Player.Events) {
@@ -119,34 +128,39 @@ class PlaybackController(context: Context) {
         loadedRecommendations: List<MusicTrack>,
         allTracks: List<MusicTrack>,
     ) {
+        val request = ++homeRecommendationPlaybackRequest
+        homeRecommendationPlaybackJob?.cancel()
         withController { controller ->
             val playbackMode = controller.currentPlaybackMode()
-            val queueTracks = buildHomeRecommendationPlaybackQueue(
-                selectedTrackId = selectedTrack.id,
-                recommendations = loadedRecommendations,
-                allTracks = allTracks,
-                playbackMode = playbackMode,
-            )
-            if (queueTracks.isEmpty()) return@withController
-            val sourceOrderByTrackId = allTracks
-                .mapIndexed { index, track -> track.id to index.toDouble() }
-                .toMap()
-            val queue = queueTracks.map { track ->
-                track.toPlaybackQueueItem(
-                    context = applicationContext,
-                    sourceOrder = sourceOrderByTrackId.getValue(track.id),
+            homeRecommendationPlaybackJob = scope.launch(Dispatchers.Default) {
+                val queueTracks = buildHomeRecommendationPlaybackQueue(
+                    selectedTrackId = selectedTrack.id,
+                    recommendations = loadedRecommendations,
+                    allTracks = allTracks,
                     playbackMode = playbackMode,
                 )
+                if (queueTracks.isEmpty()) return@launch
+                val sourceOrderByTrackId = allTracks
+                    .mapIndexed { index, track -> track.id to index.toDouble() }
+                    .toMap()
+                val mediaItems = queueTracks.map { track ->
+                    track.toPlaybackQueueItem(
+                        context = applicationContext,
+                        sourceOrder = sourceOrderByTrackId.getValue(track.id),
+                        playbackMode = playbackMode,
+                    ).toMediaItem()
+                }
+                withContext(Dispatchers.Main.immediate) {
+                    if (released.get() || request != homeRecommendationPlaybackRequest) {
+                        return@withContext
+                    }
+                    controller.setMediaItems(mediaItems, 0, C.TIME_UNSET)
+                    controller.shuffleModeEnabled = false
+                    controller.repeatMode = playbackMode.toPlayerRepeatMode()
+                    controller.prepare()
+                    controller.play()
+                }
             }
-            controller.setMediaItems(
-                queue.map(PlaybackQueueItem::toMediaItem),
-                0,
-                C.TIME_UNSET,
-            )
-            controller.shuffleModeEnabled = false
-            controller.repeatMode = playbackMode.toPlayerRepeatMode()
-            controller.prepare()
-            controller.play()
         }
     }
 
@@ -174,12 +188,28 @@ class PlaybackController(context: Context) {
 
     fun seekTo(positionMs: Long) = withController { it.seekTo(positionMs.coerceAtLeast(0L)) }
 
-    fun previous() = withController { controller ->
+    fun previous() {
+        if (!acceptTrackSkip(SystemClock.elapsedRealtime())) return
+        withController { controller ->
         controller.seekToAdjacentMediaItem(offset = -1)
+        }
     }
 
-    fun next() = withController { controller ->
+    fun next() {
+        if (!acceptTrackSkip(SystemClock.elapsedRealtime())) return
+        withController { controller ->
         controller.seekToAdjacentMediaItem(offset = 1)
+        }
+    }
+
+    internal fun acceptTrackSkip(nowElapsedRealtimeMs: Long): Boolean {
+        while (true) {
+            val previous = lastTrackSkipElapsedRealtimeMs.get()
+            if (!shouldAcceptTrackSkip(previous, nowElapsedRealtimeMs)) return false
+            if (lastTrackSkipElapsedRealtimeMs.compareAndSet(previous, nowElapsedRealtimeMs)) {
+                return true
+            }
+        }
     }
 
     fun cyclePlaybackMode() {
@@ -198,6 +228,7 @@ class PlaybackController(context: Context) {
                 targetMode = targetMode,
             )
             beginPlaybackModeChange(targetMode, reordered.queue)
+            mutableState.value = mutableState.value.copy(playbackMode = targetMode)
             PlaybackModeMemory.set(targetMode)
             controller.shuffleModeEnabled = false
             controller.repeatMode = targetMode.toPlayerRepeatMode()
@@ -255,15 +286,35 @@ class PlaybackController(context: Context) {
         }
     }
 
+    fun move(fromIndex: Int, toIndex: Int) = withController { controller ->
+        if (isValidQueueMove(fromIndex, toIndex, controller.mediaItemCount)) {
+            controller.moveMediaItem(fromIndex, toIndex)
+        }
+    }
+
     fun remove(index: Int) = withController { controller ->
         if (isValidQueueIndex(index, controller.mediaItemCount)) {
             controller.removeMediaItem(index)
         }
     }
 
-    fun clear() = withController { controller ->
-        controller.stop()
-        controller.clearMediaItems()
+    fun removeContentUris(contentUris: Set<String>) {
+        if (contentUris.isEmpty()) return
+        withController { controller ->
+            queueRemovalIndicesForContentUris(
+                queue = controller.currentPlaybackQueue(),
+                contentUris = contentUris,
+            ).forEach(controller::removeMediaItem)
+        }
+    }
+
+    fun clear() {
+        queueClearPending = true
+        mutableState.value = PlaybackUiState(playbackMode = mutableState.value.playbackMode)
+        withController { controller ->
+            controller.stop()
+            controller.clearMediaItems()
+        }
     }
 
     fun release() {
@@ -277,17 +328,25 @@ class PlaybackController(context: Context) {
 
     private fun publish(player: Player) {
         val rawQueue = player.currentPlaybackQueue()
-        val playbackMode = player.currentPlaybackMode()
+        if (queueClearPending && rawQueue.isNotEmpty()) return
+        queueClearPending = false
+        val playbackMode = displayedPlaybackMode(
+            playerMode = player.currentPlaybackMode(),
+            pendingMode = pendingPlaybackModeChange?.mode,
+        )
         val queue = rawQueue.map { item -> item.copy(playbackMode = playbackMode) }
         val duration = player.duration.takeIf { it != C.TIME_UNSET && it >= 0L }
             ?: queue.getOrNull(player.currentMediaItemIndex)?.durationMs
             ?: 0L
+        val positionMs = player.currentPosition.coerceAtLeast(0L)
         mutableState.value = PlaybackUiState(
             queue = queue,
             currentIndex = player.currentMediaItemIndex.takeIf { queue.isNotEmpty() } ?: -1,
             isPlaying = player.isPlaying,
             playWhenReady = player.playWhenReady,
-            positionMs = player.currentPosition.coerceAtLeast(0L),
+            positionMs = positionMs,
+            positionUpdateElapsedRealtimeMs = SystemClock.elapsedRealtime(),
+            playbackSpeed = player.playbackParameters.speed,
             durationMs = duration.coerceAtLeast(0L),
             bufferedPositionMs = player.bufferedPosition.coerceAtLeast(0L),
             playbackMode = playbackMode,
@@ -347,6 +406,13 @@ class PlaybackController(context: Context) {
     }
 }
 
+internal fun shouldAcceptTrackSkip(
+    previousElapsedRealtimeMs: Long,
+    nowElapsedRealtimeMs: Long,
+    intervalMillis: Long = 200L,
+): Boolean = previousElapsedRealtimeMs == Long.MIN_VALUE ||
+    nowElapsedRealtimeMs - previousElapsedRealtimeMs >= intervalMillis
+
 internal fun PlaybackSnapshot?.toInitialPlaybackState(): PlaybackUiState {
     val snapshot = this ?: return PlaybackUiState()
     val item = snapshot.queue.getOrNull(snapshot.currentIndex) ?: return PlaybackUiState()
@@ -368,6 +434,18 @@ internal fun nextQueueInsertionIndex(currentIndex: Int, itemCount: Int): Int =
 internal fun isValidQueueIndex(index: Int, itemCount: Int): Boolean =
     index in 0 until itemCount.coerceAtLeast(0)
 
+internal fun isValidQueueMove(fromIndex: Int, toIndex: Int, itemCount: Int): Boolean =
+    fromIndex != toIndex &&
+        isValidQueueIndex(fromIndex, itemCount) &&
+        isValidQueueIndex(toIndex, itemCount)
+
+internal fun queueRemovalIndicesForContentUris(
+    queue: List<PlaybackQueueItem>,
+    contentUris: Set<String>,
+): List<Int> = queue.indices
+    .filter { index -> queue[index].contentUri in contentUris }
+    .asReversed()
+
 internal fun Player.currentPlaybackQueue(): List<PlaybackQueueItem> =
     List(mediaItemCount) { index ->
         getMediaItemAt(index).toPlaybackQueueItem()
@@ -384,6 +462,11 @@ internal fun PlaybackMode.toPlayerRepeatMode(): Int =
     } else {
         Player.REPEAT_MODE_ALL
     }
+
+internal fun displayedPlaybackMode(
+    playerMode: PlaybackMode,
+    pendingMode: PlaybackMode?,
+): PlaybackMode = pendingMode ?: playerMode
 
 internal fun sourceOrderForPlayNext(
     queue: List<PlaybackQueueItem>,
@@ -414,7 +497,7 @@ private fun Player.seekToAdjacentMediaItem(offset: Int) {
     seekToDefaultPosition(targetIndex)
 }
 
-private fun Player.applyPlaybackQueue(
+internal fun Player.applyPlaybackQueue(
     targetQueue: List<PlaybackQueueItem>,
     targetCurrentIndex: Int,
 ) {

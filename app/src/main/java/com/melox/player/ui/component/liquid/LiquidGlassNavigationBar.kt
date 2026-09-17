@@ -3,7 +3,6 @@
 
 package com.melox.player.ui.component.liquid
 
-// Adapted from Kyant0/AndroidLiquidGlass — https://github.com/Kyant0/AndroidLiquidGlass (Apache 2.0).
 
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.EaseOut
@@ -217,6 +216,7 @@ fun LiquidGlassNavigationBar(
     isLiquidGlassActive: Boolean,
     isDark: Boolean,
     containerHighlight: Highlight? = null,
+    bottomPadding: Dp? = null,
     modifier: Modifier = Modifier,
 ) {
     if (items.isEmpty()) return
@@ -364,23 +364,30 @@ fun LiquidGlassNavigationBar(
         .only(WindowInsetsSides.Bottom)
         .asPaddingValues()
         .calculateBottomPadding()
-    val bottomPaddingValue = when (platform()) {
+    val bottomPaddingValue = bottomPadding ?: when (platform()) {
         Platform.IOS -> 20.dp
-        else -> if (navBarBottomPadding != 0.dp) 8.dp + navBarBottomPadding else 36.dp
+        else -> floatingNavigationBarBottomPadding(navBarBottomPadding)
     }
 
-    val tabsContent: @Composable RowScope.() -> Unit = {
+    val tabsContent: @Composable RowScope.(interactive: Boolean) -> Unit = { interactive ->
         val tabScale = LocalIosTabScale.current
         items.forEachIndexed { index, item ->
             Column(
                 modifier = Modifier
-                    .clickable(
-                        interactionSource = null,
-                        indication = null,
-                        role = Role.Tab,
-                        onClick = { currentIndex = index },
+                    .then(
+                        if (interactive) {
+                            Modifier
+                                .clickable(
+                                    interactionSource = null,
+                                    indication = null,
+                                    role = Role.Tab,
+                                    onClick = { currentIndex = index },
+                                )
+                                .semantics { selected = index == currentIndex }
+                        } else {
+                            Modifier
+                        },
                     )
-                    .semantics { selected = index == currentIndex }
                     .weight(1f)
                     .fillMaxHeight()
                     .graphicsLayer {
@@ -491,7 +498,7 @@ fun LiquidGlassNavigationBar(
                             .height(64.dp)
                             .padding(4.dp),
                         verticalAlignment = Alignment.CenterVertically,
-                        content = tabsContent,
+                        content = { tabsContent(true) },
                     )
                 }
 
@@ -527,7 +534,7 @@ fun LiquidGlassNavigationBar(
                                 .height(56.dp)
                                 .padding(horizontal = 4.dp),
                             verticalAlignment = Alignment.CenterVertically,
-                            content = tabsContent,
+                            content = { tabsContent(false) },
                         )
                     }
                 }
@@ -629,7 +636,7 @@ fun LiquidGlassNavigationBar(
                                             translationX = if (isLtr) -progressOffset else progressOffset
                                         },
                                     verticalAlignment = Alignment.CenterVertically,
-                                    content = tabsContent,
+                                content = { tabsContent(false) },
                                 )
                             }
                         }
@@ -639,3 +646,13 @@ fun LiquidGlassNavigationBar(
         }
     }
 }
+
+internal fun floatingNavigationBarBottomPadding(navigationBarBottomInset: Dp): Dp =
+    if (navigationBarBottomInset > 0.dp) {
+        FLOATING_NAVIGATION_BAR_BOTTOM_MARGIN + navigationBarBottomInset
+    } else {
+        FLOATING_NAVIGATION_BAR_BOTTOM_PADDING_WITHOUT_SYSTEM_NAVIGATION
+    }
+
+private val FLOATING_NAVIGATION_BAR_BOTTOM_MARGIN = 8.dp
+private val FLOATING_NAVIGATION_BAR_BOTTOM_PADDING_WITHOUT_SYSTEM_NAVIGATION = 32.dp

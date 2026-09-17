@@ -9,6 +9,11 @@ import android.provider.MediaStore
 import androidx.annotation.OptIn
 import androidx.media3.common.MediaItem
 import androidx.media3.common.util.UnstableApi
+import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
+import androidx.media3.extractor.DefaultExtractorsFactory
+import androidx.media3.extractor.amr.AmrExtractor
+import androidx.media3.extractor.mp4.Mp4Extractor
+import androidx.media3.extractor.ts.AdtsExtractor
 import androidx.media3.extractor.metadata.id3.BinaryFrame
 import androidx.media3.extractor.metadata.id3.CommentFrame
 import androidx.media3.extractor.metadata.id3.InternalFrame
@@ -19,6 +24,8 @@ import com.melox.player.data.lyrics.LyricsParser
 import com.melox.player.model.LyricsDocument
 import com.melox.player.model.LyricsFormat
 import com.melox.player.model.LyricsSource
+import com.melox.player.playback.PlaybackExtractorsFactory
+import com.kyant.taglib.TagLib
 import java.io.ByteArrayOutputStream
 import java.io.File
 import java.io.InputStream
@@ -131,11 +138,25 @@ class LyricsRepository(context: Context) {
             MetadataRetriever.Builder(
                 applicationContext,
                 MediaItem.fromUri(contentUri),
+            ).setMediaSourceFactory(
+                DefaultMediaSourceFactory(
+                    applicationContext,
+                    PlaybackExtractorsFactory(
+                        DefaultExtractorsFactory()
+                            .setAdtsExtractorFlags(AdtsExtractor.FLAG_ENABLE_CONSTANT_BITRATE_SEEKING)
+                            .setAmrExtractorFlags(AmrExtractor.FLAG_ENABLE_CONSTANT_BITRATE_SEEKING)
+                            .setMp4ExtractorFlags(
+                                Mp4Extractor.FLAG_READ_SEF_DATA or
+                                    Mp4Extractor.FLAG_OMIT_TRACK_SAMPLE_TABLE,
+                            ),
+                    ),
+                ),
             ).build().use { retriever ->
                 retriever.retrieveTrackGroups().get(METADATA_TIMEOUT_SECONDS, TimeUnit.SECONDS)
             }
-        }.getOrNull() ?: return emptyList()
-        return buildList {
+        }.getOrNull()
+        if (groups == null) return readTagLibLyrics(contentUri)
+        val metadataCandidates = buildList {
             for (groupIndex in 0 until groups.length) {
                 val group = groups[groupIndex]
                 for (formatIndex in 0 until group.length) {
@@ -150,7 +171,24 @@ class LyricsRepository(context: Context) {
                 }
             }
         }
+        if (metadataCandidates.isNotEmpty()) return metadataCandidates
+        return readTagLibLyrics(contentUri)
     }
+
+    private fun readTagLibLyrics(contentUri: String): List<String> = runCatching {
+        contentResolver.openFileDescriptor(Uri.parse(contentUri), "r")?.use { descriptor ->
+            val properties = TagLib.getMetadata(descriptor.dup().detachFd(), false)?.propertyMap.orEmpty()
+            properties.entries.asSequence()
+                .filter { (key, _) -> key.isLyricsKey() }
+                .flatMap { (_, values) -> values.asSequence() }
+                .map(String::trim)
+                .filter(String::isNotBlank)
+                .filterNot { it.contains('�') }
+                .map { it.take(MAX_EMBEDDED_CHARS) }
+                .distinct()
+                .toList()
+        }.orEmpty()
+    }.getOrDefault(emptyList())
 
     @OptIn(UnstableApi::class)
     private fun extractLyricsText(entry: Any): String? = when (entry) {
@@ -233,6 +271,7 @@ class LyricsRepository(context: Context) {
 
     private fun String?.isLyricsKey(): Boolean {
         val normalized = this?.uppercase(Locale.ROOT).orEmpty()
+            .substringAfterLast(':')
             .replace(" ", "")
             .replace("_", "")
         return normalized in LYRICS_KEYS || normalized.contains("LYRIC")
@@ -263,6 +302,10 @@ class LyricsRepository(context: Context) {
             "USLT",
             "LYRIC",
             "LYRICSENG",
+            "UNSYNCEDLYRICS",
+            "ITXT",
+            "ITEXT",
+            "LYRICIST",
         )
         private val SHARED_STORAGE_ROOTS = listOf(
             "/storage/emulated/0",

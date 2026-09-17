@@ -8,8 +8,10 @@ import android.graphics.PorterDuffXfermode
 import android.graphics.RectF
 import android.graphics.Shader
 import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
+import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
@@ -17,10 +19,13 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.calculateEndPadding
+import androidx.compose.foundation.layout.calculateStartPadding
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyListState
@@ -42,6 +47,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.graphics.nativeCanvas
 import androidx.compose.ui.graphics.drawscope.drawIntoCanvas
 import androidx.compose.ui.graphics.lerp
@@ -49,6 +55,7 @@ import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.input.pointer.PointerEventPass
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalLayoutDirection
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
@@ -56,7 +63,7 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.melox.player.R
-import com.melox.player.data.library.displayArtistName
+import com.melox.player.model.LocalPlaylist
 import com.melox.player.model.MusicTrack
 import com.melox.player.model.ScanStatus
 import com.melox.player.ui.component.home.HOME_RECOMMENDATION_ARTWORK_SIZE_PX
@@ -66,6 +73,8 @@ import com.melox.player.ui.component.library.PlaybackArtworkFrame
 import com.melox.player.ui.component.library.extractArtworkColor
 import com.melox.player.ui.component.library.loadArtworkBitmap
 import com.melox.player.ui.component.library.rememberArtworkBitmapPixels
+import com.melox.player.ui.component.library.responsiveGridColumnCount
+import com.melox.player.ui.component.playlist.PlaylistGridItem
 import com.melox.player.ui.screen.library.MusicLibraryPlaceholder
 import com.melox.player.ui.screen.library.toMusicLibraryPlaceholder
 import kotlinx.coroutines.Dispatchers
@@ -73,15 +82,23 @@ import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.withContext
+import top.yukonga.miuix.kmp.basic.BasicComponent
 import top.yukonga.miuix.kmp.basic.Card
 import top.yukonga.miuix.kmp.basic.CardDefaults
+import top.yukonga.miuix.kmp.basic.HorizontalDivider
 import top.yukonga.miuix.kmp.basic.InfiniteProgressIndicator
+import top.yukonga.miuix.kmp.basic.Icon
 import top.yukonga.miuix.kmp.basic.ScrollBehavior
 import top.yukonga.miuix.kmp.basic.Text
+import top.yukonga.miuix.kmp.icon.MiuixIcons
+import top.yukonga.miuix.kmp.icon.extended.ChevronForward
+import top.yukonga.miuix.kmp.icon.extended.Create
+import top.yukonga.miuix.kmp.icon.extended.RecordingTape
 import top.yukonga.miuix.kmp.theme.MiuixTheme
 import top.yukonga.miuix.kmp.utils.PressFeedbackType
 import top.yukonga.miuix.kmp.utils.overScrollVertical
 import top.yukonga.miuix.kmp.utils.scrollEndHaptic
+import kotlin.math.ceil
 import kotlin.math.max
 import kotlin.random.Random
 
@@ -94,44 +111,54 @@ data class HomeRecommendations(
 fun HomeScreen(
     tracks: List<MusicTrack>,
     recommendations: HomeRecommendations?,
-    recentlyAddedTrackIds: Set<Long>,
+    playlists: List<LocalPlaylist>,
+    playlistsLoaded: Boolean,
     scanStatus: ScanStatus,
     blurEnabled: Boolean,
-    onTrackClick: (List<MusicTrack>, Int) -> Unit,
+    onOpenPlaylists: () -> Unit,
+    onCreatePlaylist: () -> Unit,
+    onPlaylistClick: (LocalPlaylist) -> Unit,
     onRecommendationClick: (MusicTrack, List<MusicTrack>) -> Unit,
     onRecommendationPageChanged: (Int) -> Unit,
     onRecommendationGestureActiveChanged: (Boolean) -> Unit,
     scrollBehavior: ScrollBehavior,
     listState: LazyListState,
+    landscape: Boolean,
     modifier: Modifier = Modifier,
     contentPadding: PaddingValues = PaddingValues(),
 ) {
+    val layoutDirection = LocalLayoutDirection.current
     val recommendationTracks = recommendations?.tracks.orEmpty()
     val currentOnRecommendationGestureActiveChanged by rememberUpdatedState(
         onRecommendationGestureActiveChanged,
     )
-    val recentTracks = remember(tracks, recentlyAddedTrackIds) {
-        buildHomeRecentlyAddedTracks(tracks, recentlyAddedTrackIds)
-    }
-
-    LazyColumn(
-        state = listState,
-        modifier = modifier
-            .fillMaxSize()
-            .scrollEndHaptic()
-            .overScrollVertical()
-            .nestedScroll(scrollBehavior.nestedScrollConnection),
-        contentPadding = PaddingValues(
-            top = contentPadding.calculateTopPadding() + 12.dp,
-            bottom = contentPadding.calculateBottomPadding() + 12.dp,
-        ),
-        overscrollEffect = null,
-    ) {
+    BoxWithConstraints(modifier = modifier.fillMaxSize()) {
+        val playlistGridColumns = homePlaylistGridColumnCount(
+            landscape = landscape,
+            availableWidth = maxWidth,
+        )
+        LazyColumn(
+            state = listState,
+            modifier = Modifier
+                .fillMaxSize()
+                .scrollEndHaptic()
+                .overScrollVertical()
+                .nestedScroll(scrollBehavior.nestedScrollConnection),
+            contentPadding = PaddingValues(
+                start = contentPadding.calculateStartPadding(layoutDirection),
+                top = contentPadding.calculateTopPadding() + 12.dp,
+                end = contentPadding.calculateEndPadding(layoutDirection),
+                bottom = contentPadding.calculateBottomPadding() + 12.dp,
+            ),
+            overscrollEffect = null,
+        ) {
         if (tracks.isEmpty()) {
-            item(key = "home_empty") {
-                HomeEmptyState(
+            item(key = "home_recommendation_title") {
+                HomeSectionTitle(R.string.home_recommendation_title)
+            }
+            item(key = "home_recommendation_empty") {
+                HomeEmptyRecommendationState(
                     scanStatus = scanStatus,
-                    modifier = Modifier.fillParentMaxSize(),
                 )
             }
         } else {
@@ -182,9 +209,11 @@ fun HomeScreen(
                         HorizontalPager(
                             state = pagerState,
                             pageSize = PageSize.Fixed(HomeRecommendationArtworkSize),
-                            contentPadding = PaddingValues(horizontal = 16.dp),
-                            pageSpacing = 12.dp,
-                            beyondViewportPageCount = 1,
+                            contentPadding = PaddingValues(
+                                horizontal = HomeRecommendationHorizontalContentPadding,
+                            ),
+                            pageSpacing = HomeRecommendationPageSpacing,
+                            beyondViewportPageCount = HomeRecommendationPrefetchCount,
                             modifier = Modifier
                                 .fillMaxWidth()
                                 .padding(bottom = HomeRecommendationSectionBottomSpacing)
@@ -228,12 +257,35 @@ fun HomeScreen(
                 }
             }
 
-            if (recentTracks.isNotEmpty()) {
-                item(key = "home_recently_added_title") {
-                    HomeSectionTitle(R.string.home_recently_added_title)
+        }
+
+        item(key = "home_playlists_title") {
+            HomeSectionTitle(
+                stringRes = R.string.home_playlists_title,
+                onClick = onOpenPlaylists,
+                topPadding = 8.dp,
+                endPadding = 28.dp,
+            )
+        }
+        when {
+            !playlistsLoaded -> item(key = "home_playlists_loading") {
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(96.dp),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    InfiniteProgressIndicator(color = MiuixTheme.colorScheme.onSurface)
                 }
+            }
+
+            playlists.isEmpty() -> item(key = "home_playlists_empty") {
+                HomeEmptyPlaylistCard(onCreatePlaylist = onCreatePlaylist)
+            }
+
+            else -> {
                 items(
-                    items = recentTracks.chunked(HomeRecentGridColumns),
+                    items = playlists.chunked(playlistGridColumns),
                     key = { row -> row.first().id },
                 ) { row ->
                     Row(
@@ -242,21 +294,15 @@ fun HomeScreen(
                             .padding(start = 16.dp, end = 16.dp, bottom = 12.dp),
                         horizontalArrangement = Arrangement.spacedBy(12.dp),
                     ) {
-                        row.forEach { track ->
-                            HomeRecentTrackCard(
-                                track = track,
-                                onClick = {
-                                    val startIndex = tracks.indexOfFirst { allTrack ->
-                                        allTrack.id == track.id
-                                    }
-                                    if (startIndex >= 0) {
-                                        onTrackClick(tracks, startIndex)
-                                    }
-                                },
+                        row.forEach { playlist ->
+                            PlaylistGridItem(
+                                playlist = playlist,
+                                onClick = { onPlaylistClick(playlist) },
                                 modifier = Modifier.weight(1f),
+                                showEmptyArtworkIcon = false,
                             )
                         }
-                        if (row.size < HomeRecentGridColumns) {
+                        repeat(playlistGridColumns - row.size) {
                             Spacer(modifier = Modifier.weight(1f))
                         }
                     }
@@ -265,11 +311,148 @@ fun HomeScreen(
         }
     }
 }
+}
+
+@Composable
+private fun HomeEmptyPlaylistCard(
+    onCreatePlaylist: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    Card(
+        modifier = modifier
+            .fillMaxWidth()
+            .padding(start = 16.dp, end = 16.dp, bottom = 12.dp),
+        cornerRadius = 20.dp,
+    ) {
+        HomeEmptyCardContent(
+            imageVector = MiuixIcons.RecordingTape,
+            title = stringResource(R.string.home_playlist_empty_title),
+            description = stringResource(R.string.home_playlist_empty_description),
+        )
+        HorizontalDivider(modifier = Modifier.padding(horizontal = 20.dp))
+        BasicComponent(
+            insideMargin = PaddingValues(horizontal = 20.dp),
+            onClick = onCreatePlaylist,
+        ) {
+            Text(
+                text = stringResource(R.string.playlist_create_title),
+                style = MiuixTheme.textStyles.button,
+                color = MiuixTheme.colorScheme.primary,
+            )
+        }
+    }
+}
+
+@Composable
+private fun HomeEmptyRecommendationState(
+    scanStatus: ScanStatus,
+    modifier: Modifier = Modifier,
+) {
+    when (scanStatus.toMusicLibraryPlaceholder()) {
+        MusicLibraryPlaceholder.Loading -> Box(
+            modifier = modifier
+                .fillMaxWidth()
+                .height(HomeEmptyCardContentHeight),
+            contentAlignment = Alignment.Center,
+        ) {
+            InfiniteProgressIndicator(color = MiuixTheme.colorScheme.onSurface)
+        }
+
+        MusicLibraryPlaceholder.Error,
+        MusicLibraryPlaceholder.Empty,
+        -> Card(
+            modifier = modifier
+                .fillMaxWidth()
+                .padding(
+                    start = 16.dp,
+                    end = 16.dp,
+                    bottom = HomeRecommendationSectionBottomSpacing,
+                ),
+            cornerRadius = 20.dp,
+        ) {
+            HomeEmptyCardContent(
+                imageVector = MiuixIcons.Create,
+                title = if (scanStatus is ScanStatus.Error) {
+                    stringResource(R.string.music_scan_failed)
+                } else {
+                    stringResource(R.string.home_recommendation_empty_title)
+                },
+                description = stringResource(R.string.home_recommendation_empty_description),
+            )
+        }
+    }
+}
+
+@Composable
+private fun HomeEmptyCardContent(
+    imageVector: ImageVector,
+    title: String,
+    description: String,
+    modifier: Modifier = Modifier,
+) {
+    Column(
+        modifier = modifier
+            .fillMaxWidth()
+            .height(HomeEmptyCardContentHeight)
+            .padding(horizontal = 20.dp),
+    ) {
+        Spacer(modifier = Modifier.weight(2f))
+        Icon(
+            imageVector = imageVector,
+            contentDescription = null,
+            modifier = Modifier.size(32.dp),
+            tint = MiuixTheme.colorScheme.onSurfaceVariantActions,
+        )
+        Spacer(modifier = Modifier.weight(1f))
+        Column {
+            Text(
+                text = title,
+                style = MiuixTheme.textStyles.title4,
+                fontWeight = FontWeight.Medium,
+                color = MiuixTheme.colorScheme.onSurface,
+            )
+            Text(
+                text = description,
+                modifier = Modifier.padding(top = 4.dp),
+                style = MiuixTheme.textStyles.body2,
+                color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+            )
+        }
+        Spacer(modifier = Modifier.weight(4f))
+    }
+}
+
+internal fun homePlaylistGridColumnCount(
+    landscape: Boolean,
+    availableWidth: Dp,
+): Int = if (landscape) {
+    responsiveGridColumnCount(
+        availableWidth = availableWidth,
+        horizontalPadding = HomePlaylistGridHorizontalPadding,
+        minimumCellWidth = HomePlaylistGridMinimumCellWidth,
+        minimumColumns = HomePlaylistPortraitColumnCount,
+        maximumColumns = HomePlaylistLandscapeMaximumColumnCount,
+    )
+} else {
+    HomePlaylistPortraitColumnCount
+}
+
+internal fun homeInitialRecommendationCount(viewportWidth: Dp): Int {
+    val pageViewportWidth = (viewportWidth - HomeRecommendationHorizontalContentPadding * 2)
+        .coerceAtLeast(0.dp)
+    val pageExtent = HomeRecommendationArtworkSize + HomeRecommendationPageSpacing
+    return ceil(
+        ((pageViewportWidth + HomeRecommendationPageSpacing) / pageExtent).toDouble(),
+    ).toInt()
+        .coerceAtLeast(HomePriorityRecommendationCount)
+        .plus(HomeRecommendationPrefetchCount)
+}
 
 @Composable
 internal fun rememberHomeRecommendations(
     tracks: List<MusicTrack>,
     active: Boolean,
+    initialRecommendationCount: Int,
 ): HomeRecommendations? {
     val recommendationSeed = rememberSaveable { Random.nextInt() }
     var loadRequested by rememberSaveable { mutableStateOf(false) }
@@ -291,10 +474,15 @@ internal fun rememberHomeRecommendations(
     LaunchedEffect(active) {
         if (active) loadRequested = true
     }
-    LaunchedEffect(selectionComplete, initialRecommendationExpansionStarted) {
-        if (selectionComplete && !initialRecommendationExpansionStarted) {
-            initialRecommendationExpansionStarted = true
-            requestedRecommendationCount = HomeInitialRecommendationCount
+    LaunchedEffect(selectionComplete, initialRecommendationExpansionStarted, initialRecommendationCount) {
+        if (selectionComplete) {
+            if (!initialRecommendationExpansionStarted) {
+                initialRecommendationExpansionStarted = true
+            }
+            requestedRecommendationCount = maxOf(
+                requestedRecommendationCount,
+                initialRecommendationCount,
+            )
         }
     }
     LaunchedEffect(
@@ -336,78 +524,43 @@ internal fun rememberHomeRecommendations(
     }
 }
 
-internal fun buildHomeRecentlyAddedTracks(
-    tracks: List<MusicTrack>,
-    recentlyAddedTrackIds: Set<Long>,
-): List<MusicTrack> {
-    val newestFirst = tracks.sortedWith(
-        compareByDescending<MusicTrack>(MusicTrack::dateModifiedEpochSeconds)
-            .thenByDescending(MusicTrack::dateAddedEpochSeconds)
-            .thenByDescending(MusicTrack::id),
-    )
-    val newlyAdded = newestFirst.filter { track -> track.id in recentlyAddedTrackIds }
-    if (newlyAdded.isEmpty()) return newestFirst.take(HomeRecentTrackCount)
-
-    return newlyAdded + newestFirst
-        .asSequence()
-        .filterNot { track -> track.id in recentlyAddedTrackIds }
-        .take((HomeRecentTrackCount - newlyAdded.size).coerceAtLeast(0))
-        .toList()
-}
-
 @Composable
-private fun HomeSectionTitle(stringRes: Int) {
-    Text(
-        text = stringResource(stringRes),
-        modifier = Modifier.padding(start = 28.dp, top = 2.dp, end = 16.dp, bottom = 10.dp),
-        style = MiuixTheme.textStyles.title4,
-    )
-}
-
-@Composable
-private fun HomeRecentTrackCard(
-    track: MusicTrack,
-    onClick: () -> Unit,
-    modifier: Modifier = Modifier,
+private fun HomeSectionTitle(
+    stringRes: Int,
+    onClick: (() -> Unit)? = null,
+    topPadding: Dp = 2.dp,
+    endPadding: Dp = 16.dp,
 ) {
-    val title = track.title ?: stringResource(R.string.music_unknown_title)
-    val artist = displayArtistName(track.artist) ?: stringResource(R.string.music_unknown_artist)
-    Card(
-        modifier = modifier.fillMaxWidth(),
-        cornerRadius = 0.dp,
-        insideMargin = PaddingValues(0.dp),
-        colors = CardDefaults.defaultColors(
-            color = Color.Transparent,
-            contentColor = MiuixTheme.colorScheme.onSurface,
-        ),
-        pressFeedbackType = PressFeedbackType.Sink,
-        onClick = onClick,
-    ) {
-        Column(modifier = Modifier.fillMaxWidth()) {
-            BoxWithConstraints(modifier = Modifier.fillMaxWidth()) {
-                PlaybackArtwork(
-                    contentUri = track.contentUri,
-                    dateModifiedEpochSeconds = track.dateModifiedEpochSeconds,
-                    fileSizeBytes = track.fileSizeBytes,
-                    size = maxWidth,
-                    cornerRadius = 14.dp,
-                )
-            }
-            Text(
-                text = title,
-                modifier = Modifier.padding(start = 6.dp, top = 6.dp, end = 6.dp),
-                style = MiuixTheme.textStyles.body2,
-                color = MiuixTheme.colorScheme.onSurface,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
+    val interactionSource = remember { MutableInteractionSource() }
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .then(
+                if (onClick != null) {
+                    Modifier.clickable(
+                        interactionSource = interactionSource,
+                        indication = null,
+                        onClick = onClick,
+                    )
+                } else {
+                    Modifier
+                },
             )
-            Text(
-                text = artist,
-                modifier = Modifier.padding(start = 6.dp, top = 2.dp, end = 6.dp),
-                style = MiuixTheme.textStyles.footnote1.copy(fontSize = 12.sp),
-                color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
+            .padding(start = 28.dp, top = topPadding, end = endPadding, bottom = 10.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Text(
+            text = stringResource(stringRes),
+            modifier = Modifier.weight(1f),
+            style = MiuixTheme.textStyles.title4,
+            fontWeight = FontWeight.Medium,
+        )
+        if (onClick != null) {
+            Icon(
+                imageVector = MiuixIcons.Demibold.ChevronForward,
+                contentDescription = stringResource(stringRes),
+                modifier = Modifier.size(16.dp),
+                tint = MiuixTheme.colorScheme.onSurfaceVariantActions,
             )
         }
     }
@@ -491,6 +644,7 @@ private fun HomeRecommendationCard(
         modifier = modifier
             .width(artworkSize)
             .height(artworkSize + HomeRecommendationInfoHeight),
+        cornerRadius = HomeRecommendationCardCornerRadius,
         insideMargin = PaddingValues(0.dp),
         colors = CardDefaults.defaultColors(
             color = informationColor,
@@ -702,43 +856,21 @@ private val HomeRecommendationReflectionGradientColors = intArrayOf(
     0xFF000000.toInt(),
 )
 
-@Composable
-private fun HomeEmptyState(
-    scanStatus: ScanStatus,
-    modifier: Modifier = Modifier,
-) {
-    Box(
-        modifier = modifier,
-        contentAlignment = Alignment.Center,
-    ) {
-        when (scanStatus.toMusicLibraryPlaceholder()) {
-            MusicLibraryPlaceholder.Loading -> InfiniteProgressIndicator(
-                color = MiuixTheme.colorScheme.onSurface,
-            )
-
-            MusicLibraryPlaceholder.Error,
-            MusicLibraryPlaceholder.Empty,
-            -> Text(
-                text = if (scanStatus is ScanStatus.Error) {
-                    stringResource(R.string.music_scan_failed)
-                } else {
-                    stringResource(R.string.music_empty_after_scan)
-                },
-                color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
-            )
-        }
-    }
-}
-
 private const val HomePriorityRecommendationCount = 2
-private const val HomeInitialRecommendationCount = 5
 private const val HomePriorityRecommendationProbeBatchSize = 2
 private const val HomeRecommendationProbeBatchSize = 8
-private const val HomeRecentTrackCount = 20
-private val HomeRecommendationArtworkSize = 240.dp
-private const val HomeRecentGridColumns = 2
+private const val HomeRecommendationPrefetchCount = 2
+private val HomeRecommendationArtworkSize = 220.dp
+private val HomeRecommendationCardCornerRadius = 20.dp
+private val HomeRecommendationPageSpacing = 12.dp
+private val HomeRecommendationHorizontalContentPadding = 16.dp
+private const val HomePlaylistPortraitColumnCount = 2
+private const val HomePlaylistLandscapeMaximumColumnCount = 6
+private val HomePlaylistGridHorizontalPadding = 32.dp
+private val HomePlaylistGridMinimumCellWidth = 140.dp
 private val HomeRecommendationInfoHeight = 70.dp
-private val HomeRecommendationClearArtworkHeight = 240.dp
+private val HomeRecommendationClearArtworkHeight = 220.dp
 private val HomeRecommendationMetadataHorizontalPadding = 18.dp
 private val HomeRecommendationMetadataBottomPadding = 14.dp
 private val HomeRecommendationSectionBottomSpacing = 14.dp
+private val HomeEmptyCardContentHeight = 160.dp

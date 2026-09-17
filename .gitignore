@@ -7,6 +7,12 @@
 *~
 out/
 
+# Local run configurations and editor recovery files
+.run/
+*.orig
+*.rej
+*.tmp
+
 # Keep README files in Git; other Markdown documents are local-only
 *.md
 !README.md

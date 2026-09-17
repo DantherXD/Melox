@@ -1,9 +1,10 @@
 package com.melox.player.ui.component.library
 
-// Information hierarchy adapted from Replica0110/Lyrico (Apache-2.0).
 
-import androidx.compose.foundation.clickable
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -19,6 +20,9 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
+import androidx.compose.ui.draw.blur
+import androidx.compose.ui.draw.scale
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
@@ -30,6 +34,8 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.role
+import androidx.compose.ui.state.ToggleableState
 import androidx.compose.ui.unit.sp
 import com.melox.player.R
 import com.melox.player.data.library.displayArtistName
@@ -37,10 +43,13 @@ import com.melox.player.model.AudioQuality
 import com.melox.player.model.MusicTrack
 import com.melox.player.model.resolveAudioQuality
 import java.util.Locale
+import top.yukonga.miuix.kmp.basic.Checkbox
+import top.yukonga.miuix.kmp.basic.CheckboxDefaults
 import top.yukonga.miuix.kmp.basic.Icon
 import top.yukonga.miuix.kmp.basic.Text
 import top.yukonga.miuix.kmp.icon.MiuixIcons
 import top.yukonga.miuix.kmp.icon.extended.More
+import top.yukonga.miuix.kmp.squircle.squircleClip
 import top.yukonga.miuix.kmp.theme.MiuixTheme
 
 enum class MusicTrackDescriptionMode {
@@ -49,25 +58,45 @@ enum class MusicTrackDescriptionMode {
     Artist,
 }
 
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
 fun MusicTrackRow(
     track: MusicTrack,
     isCurrent: Boolean,
     onClick: () -> Unit,
-    onMoreClick: () -> Unit,
+    onMoreClick: (() -> Unit)?,
     modifier: Modifier = Modifier,
     descriptionMode: MusicTrackDescriptionMode = MusicTrackDescriptionMode.ArtistAndAlbum,
+    artworkOverlayText: String? = null,
+    enabled: Boolean = true,
+    descriptionOverride: String? = null,
+    moreActionEnabled: Boolean = true,
+    selectionMode: Boolean = false,
+    selected: Boolean = false,
+    onLongClick: (() -> Unit)? = null,
 ) {
     val title = track.title ?: stringResource(R.string.music_unknown_title)
     val moreActionLabel = stringResource(R.string.music_more_actions, title)
+    val rowActionLabel = stringResource(R.string.music_play_track_action, title)
+    val rowGestureModifier = if (selectionMode) {
+        Modifier.clickable(
+            enabled = true,
+            onClickLabel = rowActionLabel,
+            onClick = onClick,
+        )
+    } else {
+        Modifier.combinedClickable(
+            enabled = enabled || onLongClick != null,
+            onClickLabel = rowActionLabel,
+            onClick = onClick,
+            onLongClick = onLongClick,
+        )
+    }
 
     Row(
         modifier = modifier
             .fillMaxWidth()
-            .clickable(
-                onClickLabel = stringResource(R.string.music_play_track_action, title),
-                onClick = onClick,
-            )
+            .then(rowGestureModifier)
             .padding(
                 start = 16.dp,
                 top = 8.dp,
@@ -81,6 +110,9 @@ fun MusicTrackRow(
             track = track,
             isCurrent = isCurrent,
             descriptionMode = descriptionMode,
+            artworkOverlayText = artworkOverlayText,
+            enabled = enabled,
+            descriptionOverride = descriptionOverride,
         )
 
         Row(
@@ -94,24 +126,53 @@ fun MusicTrackRow(
                 maxLines = 1,
             )
 
-            Box(
-                modifier = Modifier
-                    .size(36.dp)
-                    .clickable(
-                        interactionSource = remember { MutableInteractionSource() },
-                        indication = null,
-                        role = Role.Button,
-                        onClickLabel = moreActionLabel,
-                        onClick = onMoreClick,
-                    ),
-                contentAlignment = Alignment.Center,
-            ) {
-                Icon(
-                    imageVector = MiuixIcons.More,
-                    contentDescription = moreActionLabel,
-                    modifier = Modifier.size(20.dp),
-                    tint = MiuixTheme.colorScheme.onSurfaceVariantActions,
-                )
+            if (selectionMode) {
+                Box(
+                    modifier = Modifier.size(36.dp),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Checkbox(
+                        state = if (selected) {
+                            ToggleableState.On
+                        } else {
+                            ToggleableState.Off
+                        },
+                        onClick = onClick,
+                        colors = CheckboxDefaults.checkboxColors(
+                            disabledCheckedForegroundColor = MiuixTheme.colorScheme.onPrimary,
+                            disabledUncheckedForegroundColor = MiuixTheme.colorScheme.secondary,
+                            disabledCheckedBackgroundColor = MiuixTheme.colorScheme.primary,
+                            disabledUncheckedBackgroundColor = MiuixTheme.colorScheme.secondary,
+                        ),
+                        enabled = true,
+                        modifier = Modifier.scale(20f / 26f),
+                    )
+                }
+            } else if (onMoreClick != null) {
+                Box(
+                    modifier = Modifier
+                        .size(36.dp)
+                        .clickable(
+                            enabled = moreActionEnabled,
+                            interactionSource = remember { MutableInteractionSource() },
+                            indication = null,
+                            role = Role.Button,
+                            onClickLabel = moreActionLabel,
+                            onClick = onMoreClick,
+                        ),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Icon(
+                        imageVector = MiuixIcons.More,
+                        contentDescription = moreActionLabel,
+                        modifier = Modifier.size(20.dp),
+                        tint = if (moreActionEnabled) {
+                            MiuixTheme.colorScheme.onSurfaceVariantActions
+                        } else {
+                            MiuixTheme.colorScheme.onSurfaceVariantActions.copy(alpha = 0.45f)
+                        },
+                    )
+                }
             }
         }
     }
@@ -148,10 +209,13 @@ private fun RowScope.MusicTrackLeadingContent(
     descriptionMode: MusicTrackDescriptionMode,
     artworkSize: Dp = 48.dp,
     artworkCornerRadius: Dp = 6.dp,
+    artworkOverlayText: String? = null,
+    enabled: Boolean = true,
+    descriptionOverride: String? = null,
 ) {
     val title = track.title ?: stringResource(R.string.music_unknown_title)
     val artist = displayArtistName(track.artist) ?: stringResource(R.string.music_unknown_artist)
-    val description = when (descriptionMode) {
+    val description = descriptionOverride ?: when (descriptionMode) {
         MusicTrackDescriptionMode.ArtistAndAlbum -> track.album?.let { album ->
             stringResource(R.string.music_artist_album, artist, album)
         } ?: artist
@@ -159,7 +223,8 @@ private fun RowScope.MusicTrackLeadingContent(
             track.album ?: stringResource(R.string.album_unknown)
         MusicTrackDescriptionMode.Artist -> artist
     }
-    val quality = track.resolveAudioQuality()
+    val quality = track.resolveAudioQuality().takeIf { descriptionOverride == null }
+    val contentAlpha = if (enabled) 1f else 0.45f
     val qualityLabel = quality?.let {
         stringResource(
             when (it) {
@@ -196,16 +261,46 @@ private fun RowScope.MusicTrackLeadingContent(
         }
     }
 
-    TrackArtwork(
-        contentUri = track.contentUri,
-        dateModifiedEpochSeconds = track.dateModifiedEpochSeconds,
-        fileSizeBytes = track.fileSizeBytes,
-        size = artworkSize,
-        cornerRadius = artworkCornerRadius,
-    )
+    if (artworkOverlayText == null) {
+        TrackArtwork(
+            contentUri = track.contentUri,
+            dateModifiedEpochSeconds = track.dateModifiedEpochSeconds,
+            fileSizeBytes = track.fileSizeBytes,
+            modifier = Modifier.alpha(contentAlpha),
+            size = artworkSize,
+            cornerRadius = artworkCornerRadius,
+        )
+    } else {
+        Box(
+            modifier = Modifier.size(artworkSize),
+            contentAlignment = Alignment.Center,
+        ) {
+            TrackArtwork(
+                contentUri = track.contentUri,
+                dateModifiedEpochSeconds = track.dateModifiedEpochSeconds,
+                fileSizeBytes = track.fileSizeBytes,
+                modifier = Modifier
+                    .alpha(contentAlpha)
+                    .squircleClip(artworkCornerRadius)
+                    .blur(6.dp)
+                    .alpha(0.1f),
+                size = artworkSize,
+                cornerRadius = artworkCornerRadius,
+            )
+            Text(
+                text = artworkOverlayText,
+                style = MiuixTheme.textStyles.headline1,
+                color = MiuixTheme.colorScheme.onSurface,
+                fontWeight = FontWeight.Medium,
+                maxLines = 1,
+            )
+        }
+    }
 
     Column(
-        modifier = Modifier.weight(1f),
+        modifier = Modifier
+            .weight(1f)
+            .alpha(contentAlpha),
         verticalArrangement = Arrangement.spacedBy(2.dp),
     ) {
         Text(

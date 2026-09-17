@@ -3,7 +3,6 @@
 
 package com.melox.player.ui.component.liquid
 
-// Adapted from Kyant0/AndroidLiquidGlass — https://github.com/Kyant0/AndroidLiquidGlass (Apache 2.0).
 
 import androidx.compose.runtime.Immutable
 import androidx.compose.runtime.Stable

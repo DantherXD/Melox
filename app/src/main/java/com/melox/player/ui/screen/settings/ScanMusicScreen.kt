@@ -13,6 +13,8 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.calculateEndPadding
+import androidx.compose.foundation.layout.calculateStartPadding
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
@@ -27,6 +29,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalLayoutDirection
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
@@ -36,13 +39,16 @@ import androidx.compose.ui.unit.dp
 import com.melox.player.R
 import com.melox.player.model.AppSettings
 import com.melox.player.model.ScanStatus
-import com.melox.player.ui.component.MiuixBlurredBar
+import com.melox.player.ui.component.AdaptiveTopAppBar
+import com.melox.player.ui.component.BlurredBar
 import com.melox.player.ui.component.miuixBarColor
-import com.melox.player.ui.component.rememberMiuixBlurBackdrop
+import com.melox.player.ui.component.rememberBlurBackdrop
 import top.yukonga.miuix.kmp.basic.BasicComponent
 import top.yukonga.miuix.kmp.basic.Button
 import top.yukonga.miuix.kmp.basic.ButtonDefaults
 import top.yukonga.miuix.kmp.basic.Card
+import top.yukonga.miuix.kmp.basic.DropdownEntry
+import top.yukonga.miuix.kmp.basic.DropdownItem
 import top.yukonga.miuix.kmp.basic.Icon
 import top.yukonga.miuix.kmp.basic.IconButton
 import top.yukonga.miuix.kmp.basic.InfiniteProgressIndicator
@@ -51,10 +57,11 @@ import top.yukonga.miuix.kmp.basic.Scaffold
 import top.yukonga.miuix.kmp.basic.SmallTitle
 import top.yukonga.miuix.kmp.basic.Text
 import top.yukonga.miuix.kmp.basic.TextButton
-import top.yukonga.miuix.kmp.basic.TopAppBar
 import top.yukonga.miuix.kmp.blur.layerBackdrop
 import top.yukonga.miuix.kmp.icon.MiuixIcons
 import top.yukonga.miuix.kmp.icon.extended.Back
+import top.yukonga.miuix.kmp.icon.extended.More
+import top.yukonga.miuix.kmp.menu.OverlayIconDropdownMenu
 import top.yukonga.miuix.kmp.overlay.OverlayDialog
 import top.yukonga.miuix.kmp.preference.ArrowPreference
 import top.yukonga.miuix.kmp.preference.SwitchPreference
@@ -78,12 +85,15 @@ fun ScanMusicScreen(
     onSkipShortAudioChange: (Boolean) -> Unit,
     onAddCustomFolder: (Uri) -> Unit,
     onRemoveCustomFolder: (String) -> Unit,
+    onOpenBlockedFolders: () -> Unit,
     onStartScan: () -> Unit,
+    onClearMusicLibrary: () -> Unit,
 ) {
     val context = LocalContext.current
+    val layoutDirection = LocalLayoutDirection.current
     val isScanning = scanStatus is ScanStatus.Scanning
     val scrollBehavior = MiuixScrollBehavior()
-    val topBarBackdrop = rememberMiuixBlurBackdrop(enabled = settings.blurEnabled)
+    val topBarBackdrop = rememberBlurBackdrop()
     var refreshOnStartChecked by remember(settings.refreshLibraryOnStart) {
         mutableStateOf(settings.refreshLibraryOnStart)
     }
@@ -94,6 +104,7 @@ fun ScanMusicScreen(
         mutableStateOf(settings.customFolderUris)
     }
     var pendingRemoval by remember { mutableStateOf<CustomFolderPresentation?>(null) }
+    var showClearMusicLibraryConfirm by remember { mutableStateOf(false) }
     val customFolders = remember(displayedCustomFolderUris) {
         displayedCustomFolderUris.map(::customFolderPresentation)
     }
@@ -115,9 +126,13 @@ fun ScanMusicScreen(
     }
 
     Scaffold(
-        topBar = {
-            MiuixBlurredBar(backdrop = topBarBackdrop) {
-                TopAppBar(
+            topBar = {
+            BlurredBar(
+                backdrop = topBarBackdrop,
+                blurEnabled = topBarBackdrop != null,
+                scrollBehavior = scrollBehavior,
+            ) {
+                AdaptiveTopAppBar(
                     title = stringResource(R.string.scan_music_page_title),
                     color = topBarBackdrop.miuixBarColor(),
                     scrollBehavior = scrollBehavior,
@@ -129,10 +144,29 @@ fun ScanMusicScreen(
                             )
                         }
                     },
+                    actions = {
+                        OverlayIconDropdownMenu(
+                            entry = DropdownEntry(
+                                items = listOf(
+                                    DropdownItem(
+                                        text = stringResource(R.string.scan_clear_library),
+                                        onClick = { showClearMusicLibraryConfirm = true },
+                                    ),
+                                ),
+                            ),
+                            enabled = !isScanning,
+                        ) {
+                            Icon(
+                                imageVector = MiuixIcons.More,
+                                contentDescription = stringResource(R.string.scan_clear_library),
+                                modifier = Modifier.size(24.dp),
+                            )
+                        }
+                    },
                 )
             }
         },
-    ) { padding ->
+        ) { padding ->
         Box(
             modifier = Modifier
                 .fillMaxSize()
@@ -145,7 +179,9 @@ fun ScanMusicScreen(
                     .overScrollVertical()
                     .nestedScroll(scrollBehavior.nestedScrollConnection),
                 contentPadding = PaddingValues(
+                    start = padding.calculateStartPadding(layoutDirection),
                     top = padding.calculateTopPadding(),
+                    end = padding.calculateEndPadding(layoutDirection),
                     bottom = maxOf(
                         padding.calculateBottomPadding(),
                         bottomContentPadding,
@@ -203,6 +239,7 @@ fun ScanMusicScreen(
                     Button(
                         onClick = onStartScan,
                         enabled = !isScanning,
+                        minHeight = 46.dp,
                         modifier = Modifier
                             .fillMaxWidth()
                             .padding(horizontal = 12.dp)
@@ -218,6 +255,14 @@ fun ScanMusicScreen(
                                 text = stringResource(R.string.scan_start),
                             )
                         }
+                    }
+                }
+                item(key = "blocked_folders") {
+                    ScanCard(topPadding = 16.dp, bottomPadding = 0.dp) {
+                        ArrowPreference(
+                            title = stringResource(R.string.scan_blocked_folder_title),
+                            onClick = onOpenBlockedFolders,
+                        )
                     }
                 }
             }
@@ -258,6 +303,38 @@ fun ScanMusicScreen(
                 },
                 modifier = Modifier.weight(1f),
                 colors = ButtonDefaults.textButtonColorsPrimary(),
+            )
+        }
+    }
+
+    OverlayDialog(
+        show = showClearMusicLibraryConfirm,
+        title = stringResource(R.string.scan_clear_library_confirm_title),
+        summary = stringResource(R.string.scan_clear_library_confirm_message),
+        enableWindowDim = true,
+        onDismissRequest = { showClearMusicLibraryConfirm = false },
+    ) {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+        ) {
+            TextButton(
+                text = stringResource(R.string.clear_queue_confirm_cancel),
+                onClick = { showClearMusicLibraryConfirm = false },
+                modifier = Modifier.weight(1f),
+            )
+            Spacer(modifier = Modifier.width(20.dp))
+            TextButton(
+                text = stringResource(R.string.clear_queue_confirm_confirm),
+                onClick = {
+                    showClearMusicLibraryConfirm = false
+                    onClearMusicLibrary()
+                },
+                modifier = Modifier.weight(1f),
+                colors = ButtonDefaults.textButtonColorsPrimary(
+                    color = MiuixTheme.colorScheme.error,
+                    textColor = MiuixTheme.colorScheme.onError,
+                ),
             )
         }
     }
@@ -304,6 +381,7 @@ private fun CustomFolderRow(
 
 @Composable
 private fun ScanCard(
+    topPadding: Dp = 0.dp,
     bottomPadding: Dp = 12.dp,
     content: @Composable () -> Unit,
 ) {
@@ -311,7 +389,7 @@ private fun ScanCard(
         modifier = Modifier
             .fillMaxWidth()
             .padding(horizontal = 12.dp)
-            .padding(bottom = bottomPadding),
+            .padding(top = topPadding, bottom = bottomPadding),
         content = { content() },
     )
 }

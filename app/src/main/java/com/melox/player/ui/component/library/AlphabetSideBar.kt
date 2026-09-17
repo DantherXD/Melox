@@ -1,6 +1,5 @@
 package com.melox.player.ui.component.library
 
-// Interaction pattern adapted from Replica0110/Lyrico (Apache-2.0).
 
 import android.view.HapticFeedbackConstants
 import androidx.compose.animation.AnimatedVisibility

@@ -77,9 +77,12 @@ internal fun Context.hasExternalEditor(kind: ExternalEditorKind): Boolean = when
 }
 
 private fun MusicTrack.externalEditorUris(context: Context): ExternalEditorUris? {
-    val mediaStoreUri = id.takeIf { it > 0L }?.let { trackId ->
-        ContentUris.withAppendedId(MediaStore.Audio.Media.EXTERNAL_CONTENT_URI, trackId)
-    }
+    val mediaStoreUri = contentUri
+        .let(Uri::parse)
+        .takeIf { uri -> uri.authority == MediaStore.AUTHORITY }
+        ?: mediaStoreId?.let { trackId ->
+            ContentUris.withAppendedId(MediaStore.Audio.Media.EXTERNAL_CONTENT_URI, trackId)
+        }
     val fileUri = displayFileLocation()
         ?.let(::File)
         ?.takeIf { it.isFile && it.canRead() }
@@ -180,9 +183,10 @@ private fun Intent.putExternalEditorTrackExtras(
         putExtra("path", filePath)
         putExtra("filePath", filePath)
     }
-    putExtra("id", track.id)
-    putExtra("songId", track.id)
-    putExtra("mediaId", track.id)
+    val sourceId = track.mediaStoreId ?: track.id
+    putExtra("id", sourceId)
+    putExtra("songId", sourceId)
+    putExtra("mediaId", sourceId)
     putExtra("uri", editUri.toString())
     putExtra("contentUrl", editUri.toString())
     putExtra("contentUri", editUri.toString())

@@ -24,6 +24,7 @@ import com.melox.player.model.AppSettings
 import com.melox.player.model.BottomBarStyle
 import com.melox.player.model.DefaultHomePage
 import com.melox.player.model.DynamicColorSource
+import com.melox.player.model.NavigationTransitionStyle
 import com.melox.player.model.PlaybackBackgroundStyle
 import com.melox.player.model.ThemeMode
 import java.io.IOException
@@ -86,19 +87,35 @@ class SettingsRepository(context: Context) {
                 forceWordByWordLyrics = preferences[Keys.ForceWordByWordLyrics] ?: false,
                 lyricBlurEnabled = preferences[Keys.LyricBlurEnabled] ?: false,
                 centerLyrics = preferences[Keys.CenterLyrics] ?: false,
+                leftAlignPlayerTitle = preferences[Keys.LeftAlignPlayerTitle] ?: false,
                 hideControlsOnLyrics = preferences[Keys.HideControlsOnLyrics] ?: false,
                 showLyricsTranslation = preferences[Keys.ShowLyricsTranslation] ?: true,
                 blurEnabled = preferences[Keys.BlurEnabled] ?: true,
+                progressiveTopBarBlurEnabled =
+                    preferences[Keys.ProgressiveTopBarBlurEnabled] ?: false,
+                hideBottomBar = preferences[Keys.HideBottomBar] ?: false,
                 floatingBottomBar = preferences[Keys.FloatingBottomBar]
                     ?: (preferences[Keys.BottomBarStyle] != null &&
                         preferences[Keys.BottomBarStyle] != BottomBarStyle.NORMAL.name),
+                navigationRailExpanded = preferences[Keys.NavigationRailExpanded] ?: true,
                 liquidGlass = preferences[Keys.LiquidGlass]
                     ?: (preferences[Keys.BottomBarStyle] == BottomBarStyle.LIQUID_GLASS.name),
                 predictiveBackEnabled = preferences[Keys.PredictiveBackEnabled] ?: true,
+                navigationTransitionStyle = preferences[Keys.NavigationTransitionStyle]
+                    ?.let { storedValue ->
+                        enumValueOrDefault(storedValue, NavigationTransitionStyle.MIUIX)
+                    }
+                    ?: NavigationTransitionStyle.MIUIX,
                 refreshLibraryOnStart = preferences[Keys.RefreshLibraryOnStart] ?: false,
                 skipShortAudio = preferences[Keys.SkipShortAudio] ?: false,
                 customFolderUris = preferences[Keys.CustomFolderUris]
                     ?.toList()
+                    ?.sorted()
+                    ?: emptyList(),
+                blockedFolderPaths = preferences[Keys.BlockedFolderPaths]
+                    ?.toList()
+                    ?.mapNotNull { it.trim().takeIf(String::isNotEmpty) }
+                    ?.distinctBy { it.lowercase() }
                     ?.sorted()
                     ?: emptyList(),
                 libraryTabIndex = preferences[Keys.LibraryTabIndex]
@@ -191,6 +208,12 @@ class SettingsRepository(context: Context) {
         }
     }
 
+    suspend fun setLeftAlignPlayerTitle(enabled: Boolean) {
+        dataStore.edit { preferences ->
+            preferences[Keys.LeftAlignPlayerTitle] = enabled
+        }
+    }
+
     suspend fun setHideControlsOnLyrics(enabled: Boolean) {
         dataStore.edit { preferences ->
             preferences[Keys.HideControlsOnLyrics] = enabled
@@ -216,10 +239,28 @@ class SettingsRepository(context: Context) {
         }
     }
 
+    suspend fun setProgressiveTopBarBlurEnabled(enabled: Boolean) {
+        dataStore.edit { preferences ->
+            preferences[Keys.ProgressiveTopBarBlurEnabled] = enabled
+        }
+    }
+
+    suspend fun setHideBottomBar(enabled: Boolean) {
+        dataStore.edit { preferences ->
+            preferences[Keys.HideBottomBar] = enabled
+        }
+    }
+
     suspend fun setFloatingBottomBar(enabled: Boolean) {
         dataStore.edit { preferences ->
             preferences[Keys.FloatingBottomBar] = enabled
             preferences[Keys.LiquidGlass] = false
+        }
+    }
+
+    suspend fun setNavigationRailExpanded(expanded: Boolean) {
+        dataStore.edit { preferences ->
+            preferences[Keys.NavigationRailExpanded] = expanded
         }
     }
 
@@ -232,6 +273,12 @@ class SettingsRepository(context: Context) {
     suspend fun setPredictiveBackEnabled(enabled: Boolean) {
         dataStore.edit { preferences ->
             preferences[Keys.PredictiveBackEnabled] = enabled
+        }
+    }
+
+    suspend fun setNavigationTransitionStyle(style: NavigationTransitionStyle) {
+        dataStore.edit { preferences ->
+            preferences[Keys.NavigationTransitionStyle] = style.name
         }
     }
 
@@ -258,6 +305,23 @@ class SettingsRepository(context: Context) {
         dataStore.edit { preferences ->
             preferences[Keys.CustomFolderUris] =
                 preferences[Keys.CustomFolderUris].orEmpty() - uri
+        }
+    }
+
+    suspend fun addBlockedFolderPath(path: String) {
+        val normalized = path.trim().replace('\\', '/').trimEnd('/').ifEmpty { "/" }
+        dataStore.edit { preferences ->
+            preferences[Keys.BlockedFolderPaths] =
+                preferences[Keys.BlockedFolderPaths].orEmpty() + normalized
+        }
+    }
+
+    suspend fun removeBlockedFolderPath(path: String) {
+        dataStore.edit { preferences ->
+            preferences[Keys.BlockedFolderPaths] = preferences[Keys.BlockedFolderPaths]
+                .orEmpty()
+                .filterNot { it.equals(path, ignoreCase = true) }
+                .toSet()
         }
     }
 
@@ -314,16 +378,23 @@ class SettingsRepository(context: Context) {
         val ForceWordByWordLyrics = booleanPreferencesKey("force_word_by_word_lyrics")
         val LyricBlurEnabled = booleanPreferencesKey("lyric_blur_enabled")
         val CenterLyrics = booleanPreferencesKey("center_lyrics")
+        val LeftAlignPlayerTitle = booleanPreferencesKey("left_align_player_title")
         val HideControlsOnLyrics = booleanPreferencesKey("hide_controls_on_lyrics")
         val ShowLyricsTranslation = booleanPreferencesKey("show_lyrics_translation")
         val BottomBarStyle = stringPreferencesKey("bottom_bar_style")
         val BlurEnabled = booleanPreferencesKey("blur_enabled")
+        val ProgressiveTopBarBlurEnabled =
+            booleanPreferencesKey("progressive_top_bar_blur_enabled")
         val FloatingBottomBar = booleanPreferencesKey("floating_bottom_bar")
+        val NavigationRailExpanded = booleanPreferencesKey("navigation_rail_expanded")
+        val HideBottomBar = booleanPreferencesKey("hide_bottom_bar")
         val LiquidGlass = booleanPreferencesKey("liquid_glass")
         val PredictiveBackEnabled = booleanPreferencesKey("predictive_back_enabled")
+        val NavigationTransitionStyle = stringPreferencesKey("navigation_transition_style")
         val RefreshLibraryOnStart = booleanPreferencesKey("refresh_library_on_start")
         val SkipShortAudio = booleanPreferencesKey("skip_short_audio")
         val CustomFolderUris = stringSetPreferencesKey("custom_folder_uris")
+        val BlockedFolderPaths = stringSetPreferencesKey("blocked_folder_paths")
         val DefaultHomePage = stringPreferencesKey("default_home_page")
         val LibraryTabIndex = intPreferencesKey("library_tab_index")
         val MusicSortField = intPreferencesKey("music_sort_field")

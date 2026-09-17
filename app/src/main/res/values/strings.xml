@@ -1,4 +1,14 @@
 <resources>
+    <string name="selection_selected_count">%1$d selected</string>
+    <string name="selection_choose_songs">Select songs</string>
+    <string name="selection_select_all">Select all</string>
+    <string name="selection_deselect_all">Deselect all</string>
+    <string name="selection_add_to_playlist">Add selected songs to playlist</string>
+    <string name="selection_remove_from_playlist">Remove selected songs from playlist</string>
+    <string name="playlist_remove_selected_title">Remove from playlist</string>
+    <string name="playlist_remove_selected_message">Remove the selected %1$d songs from this playlist?</string>
+    <string name="playlist_remove_selected_cancel">Cancel</string>
+    <string name="playlist_remove_selected_confirm">Confirm</string>
     <string name="app_name">Melox</string>
 
     <string name="navigation_home">Home</string>
@@ -8,8 +18,43 @@
     <string name="navigation_artists">Artists</string>
     <string name="navigation_folders">Folders</string>
     <string name="navigation_settings">Settings</string>
-    <string name="home_recommendation_title">Random recommendations</string>
+    <string name="navigation_expand">Expand navigation</string>
+    <string name="navigation_collapse">Collapse navigation</string>
+    <string name="home_recommendation_title">Recommendations</string>
+    <string name="home_recommendation_empty_title">No music yet</string>
+    <string name="home_recommendation_empty_description">Random recommendations will appear after music is scanned</string>
     <string name="home_recently_added_title">Recently added</string>
+    <string name="home_playlists_title">Playlists</string>
+    <string name="home_playlist_empty_title">No playlists yet</string>
+    <string name="home_playlist_empty_description">Create playlists to organize your music</string>
+    <string name="playlist_create">Create playlist</string>
+    <string name="playlist_create_title">New playlist</string>
+    <string name="playlist_name_hint">Playlist name</string>
+    <string name="playlist_rename">Rename</string>
+    <string name="playlist_rename_title">Rename playlist</string>
+    <string name="playlist_delete">Delete playlist</string>
+    <string name="playlist_delete_title">Delete playlist</string>
+    <string name="playlist_delete_message">Delete “%1$s”?</string>
+    <string name="playlist_add_to">Add to playlist</string>
+    <string name="playlist_added_to">Added to playlist %1$s</string>
+    <string name="playlist_picker_title">Add to playlist</string>
+    <string name="playlist_empty">No playlists</string>
+    <string name="playlist_empty_description">Create playlists to organize your music</string>
+    <string name="playlist_detail_empty">No songs in this playlist</string>
+    <string name="playlist_unavailable">Unavailable</string>
+    <string name="playlist_remove_song">Remove from playlist</string>
+    <string name="playlist_sort_action">Sort playlist</string>
+    <string name="playlist_sort_custom">Custom</string>
+    <string name="playlist_more_actions">Playlist actions</string>
+    <string name="playlist_add_collection">Add all to playlist</string>
+    <plurals name="playlist_song_count">
+        <item quantity="one">%1$d song</item>
+        <item quantity="other">%1$d songs</item>
+    </plurals>
+    <plurals name="playlist_card_song_count">
+        <item quantity="one">%1$d song</item>
+        <item quantity="other">%1$d songs</item>
+    </plurals>
 
     <string name="music_artist_album">%1$s - %2$s</string>
     <string name="music_play_track_action">Play %1$s</string>
@@ -17,6 +62,7 @@
     <string name="music_scan_failed">Scan failed</string>
     <string name="music_empty_after_scan">No music found</string>
     <string name="music_unknown_title">Unknown title</string>
+    <string name="music_track_number_missing">-</string>
     <string name="music_unknown_artist">Unknown artist</string>
     <string name="music_sort_action">Sort songs</string>
     <string name="music_sort_title">Title</string>
@@ -76,7 +122,17 @@
         <item quantity="one">%1$d song</item>
         <item quantity="other">%1$d songs</item>
     </plurals>
+    <plurals name="album_grid_song_count">
+        <item quantity="one">%1$d song</item>
+        <item quantity="other">%1$d songs</item>
+    </plurals>
+    <plurals name="album_grid_song_count_with_year">
+        <item quantity="one">%1$d song  %2$d</item>
+        <item quantity="other">%1$d songs  %2$d</item>
+    </plurals>
     <string name="album_detail_year">%1$d</string>
+    <string name="album_disc_title">DISC %1$d</string>
+    <string name="album_disc_details">( %1$d / %2$s )</string>
 
     <string name="artist_sort_action">Sort artists</string>
     <string name="artist_sort_name">Name</string>
@@ -106,6 +162,8 @@
     <string name="folder_no_search_results">No matching folders</string>
     <string name="folder_unknown">Unknown folder</string>
     <string name="folder_description">%1$s - %2$s</string>
+    <string name="folder_block_title">Block</string>
+    <string name="folder_block_message">Block this folder?</string>
     <plurals name="folder_song_count">
         <item quantity="one">%1$d song</item>
         <item quantity="other">%1$d songs</item>
@@ -121,6 +179,10 @@
     <string name="playback_mode_order">Order playback</string>
     <string name="playback_mode_repeat_one">Repeat one</string>
     <string name="playback_mode_random">Random queue</string>
+    <string name="notification_playback_mode_list_loop">List loop</string>
+    <string name="notification_playback_mode_repeat_one">Repeat one</string>
+    <string name="notification_playback_mode_shuffle">Shuffle</string>
+    <string name="notification_close">Close</string>
     <string name="playback_mode_one_badge" translatable="false">1</string>
     <string name="track_actions">Song actions</string>
     <string name="open_queue">Open queue</string>
@@ -132,6 +194,8 @@
     <string name="clear_queue_confirm_confirm">Confirm</string>
     <string name="queue_empty">The queue is empty</string>
     <string name="remove_from_queue">Remove from queue</string>
+    <string name="move_after_current">Play next</string>
+    <string name="locate_current_track">Locate current song</string>
     <string name="back">Back</string>
     <string name="close">Close</string>
 
@@ -153,7 +217,7 @@
     <string name="theme_mode_dark">Dark</string>
     <string name="settings_playback_background_title">Playback background</string>
     <string name="settings_playback_background_blurred_artwork">Blurred artwork</string>
-    <string name="settings_playback_background_flowing_colors">Flowing colors</string>
+    <string name="settings_playback_background_dynamic_flow">Dynamic flow</string>
     <string name="settings_dynamic_color_title">Dynamic colors</string>
     <string name="settings_dynamic_color_summary">Adjust app colors based on the selected source</string>
     <string name="settings_dynamic_color_unsupported">Dynamic colors require Android 12 or later</string>
@@ -163,12 +227,16 @@
     <string name="settings_blur_title">Blur</string>
     <string name="settings_blur_summary">Enable blur effects for the app</string>
     <string name="settings_blur_unsupported">Blur requires Android 13 or later</string>
+    <string name="settings_progressive_top_bar_blur_title">Progressive top bar blur</string>
     <string name="settings_floating_bottom_bar_title">Floating bottom bar</string>
     <string name="settings_floating_bottom_bar_summary">Use a floating-style navigation bar</string>
     <string name="settings_liquid_glass_title">Liquid glass</string>
     <string name="settings_liquid_glass_summary">Use refractive glass for the floating bottom bar</string>
+    <string name="settings_hide_bottom_bar_title">Hide bottom bar</string>
     <string name="settings_predictive_back_title">Predictive back gesture</string>
-    <string name="settings_predictive_back_summary">Move secondary pages with the system back gesture</string>
+    <string name="settings_navigation_transition_style_title">Transition style</string>
+    <string name="settings_navigation_transition_style_miuix">Miuix</string>
+    <string name="settings_navigation_transition_style_aosp">AOSP</string>
     <string name="settings_liquid_glass_unsupported">Floating liquid glass requires Android 13 or later</string>
 
     <string name="settings_section_music_library">Library</string>
@@ -197,7 +265,14 @@
     <string name="scan_skip_short_audio">Skip audio shorter than 60s</string>
     <string name="scan_custom_folder_title">Custom folders</string>
     <string name="scan_add_custom_folder">Add custom folder</string>
+    <string name="scan_blocked_folder_title">Blocked folders</string>
+    <string name="scan_blocked_folder_empty">No blocked folders</string>
+    <string name="scan_remove_blocked_folder_title">Remove</string>
+    <string name="scan_remove_blocked_folder_message">Remove the %1$s folder from blocked folders?</string>
     <string name="scan_start">Start scan</string>
+    <string name="scan_clear_library">Clear music library</string>
+    <string name="scan_clear_library_confirm_title">Clear music library</string>
+    <string name="scan_clear_library_confirm_message">Clear all scanned music?</string>
     <string name="scan_no_changes">No music file changes</string>
     <plurals name="scan_complete">
         <item quantity="one">Scan complete, %1$d song</item>
@@ -216,19 +291,20 @@
     <string name="scan_status_error_default">Scan failed. Try again.</string>
     <string name="playback_error">Unable to play this audio.</string>
     <string name="lyrics_unavailable">No lyrics</string>
-    <string name="lyrics_settings">Lyrics settings</string>
-    <string name="lyrics_settings_open">Open lyrics settings</string>
+    <string name="player_settings">Player settings</string>
+    <string name="player_settings_open">Open player settings</string>
+    <string name="player_title_left_aligned">Left-align title</string>
     <string name="lyrics_translation">Lyrics translation</string>
     <string name="lyrics_size">Lyrics size</string>
     <string name="lyrics_size_value">%1$d%%</string>
     <string name="lyrics_weight">Lyrics weight</string>
     <string name="lyrics_weight_value">%1$d</string>
     <string name="lyrics_force_word_by_word">Force word-by-word lyrics</string>
-    <string name="lyrics_force_word_by_word_summary">Display non-word-by-word lyrics with a linear gradient speed</string>
-    <string name="lyrics_blur">Lyric blur</string>
-    <string name="lyrics_blur_summary">Blur inactive lyric lines</string>
+    <string name="lyrics_force_word_by_word_summary">Apply word-by-word highlighting to line-synced lyrics</string>
+    <string name="lyrics_blur">Lyrics blur</string>
+    <string name="lyrics_blur_summary">Blur inactive lyrics</string>
     <string name="lyrics_center">Center lyrics</string>
-    <string name="lyrics_hide_controls">Hide controls on Lyrics</string>
+    <string name="lyrics_hide_controls">Hide controls on lyrics page</string>
 
     <string name="about_version">%1$s</string>
     <string name="about_project_title">Project address</string>

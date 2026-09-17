@@ -4,6 +4,7 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.calculateEndPadding
+import androidx.compose.foundation.layout.calculateStartPadding
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
@@ -25,11 +26,14 @@ import com.melox.player.R
 import com.melox.player.data.library.ArtistGroup
 import com.melox.player.data.library.ArtistSortConfig
 import com.melox.player.data.library.ArtistSortField
+import com.melox.player.model.ScanStatus
 import com.melox.player.ui.component.library.AlphabetSections
 import com.melox.player.ui.component.library.AlphabetSideBar
 import com.melox.player.ui.component.library.ArtistListItem
 import top.yukonga.miuix.kmp.basic.ScrollBehavior
 import top.yukonga.miuix.kmp.basic.Text
+import top.yukonga.miuix.kmp.icon.MiuixIcons
+import top.yukonga.miuix.kmp.icon.extended.Contacts
 import top.yukonga.miuix.kmp.theme.MiuixTheme
 import top.yukonga.miuix.kmp.utils.overScrollVertical
 import top.yukonga.miuix.kmp.utils.scrollEndHaptic
@@ -39,6 +43,7 @@ fun ArtistLibraryScreen(
     displayedArtists: List<ArtistGroup>,
     sectionIndexMap: Map<String, Int>,
     query: String,
+    scanStatus: ScanStatus,
     sortConfig: ArtistSortConfig,
     onArtistClick: (ArtistGroup) -> Unit,
     scrollBehavior: ScrollBehavior,
@@ -58,28 +63,37 @@ fun ArtistLibraryScreen(
     }
 
     Box(modifier = modifier.fillMaxSize()) {
-        if (displayedArtists.isEmpty()) {
-            Text(
-                text = stringResource(
-                    if (query.isBlank()) R.string.artist_empty else R.string.artist_no_search_results,
-                ),
-                modifier = Modifier.align(Alignment.Center),
-                color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
-            )
-        } else {
-            LazyColumn(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .scrollEndHaptic()
-                    .overScrollVertical()
-                    .nestedScroll(scrollBehavior.nestedScrollConnection),
-                state = listState,
-                contentPadding = PaddingValues(
-                    top = contentPadding.calculateTopPadding() + 12.dp,
-                    bottom = contentPadding.calculateBottomPadding() + 12.dp,
-                ),
-                overscrollEffect = null,
-            ) {
+        LazyColumn(
+            modifier = Modifier
+                .fillMaxSize()
+                .scrollEndHaptic()
+                .overScrollVertical()
+                .nestedScroll(scrollBehavior.nestedScrollConnection),
+            state = listState,
+            contentPadding = PaddingValues(
+                start = contentPadding.calculateStartPadding(layoutDirection),
+                top = contentPadding.calculateTopPadding() + 12.dp,
+                end = contentPadding.calculateEndPadding(layoutDirection),
+                bottom = contentPadding.calculateBottomPadding() + 12.dp,
+            ),
+            overscrollEffect = null,
+        ) {
+            if (displayedArtists.isEmpty()) {
+                item(key = "empty_artist") {
+                    Box(
+                        modifier = Modifier.fillParentMaxSize(),
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        MusicLibraryEmptyState(
+                            scanStatus = scanStatus,
+                            query = query,
+                            emptyMessageRes = R.string.artist_empty,
+                            noSearchResultsRes = R.string.artist_no_search_results,
+                            icon = MiuixIcons.Contacts,
+                        )
+                    }
+                }
+            } else {
                 items(
                     items = displayedArtists,
                     key = ArtistGroup::key,

@@ -16,7 +16,7 @@ enum class DynamicColorSource {
 /** Selects the artwork-derived background rendered behind the full player. */
 enum class PlaybackBackgroundStyle {
     BLURRED_ARTWORK,
-    FLOWING_COLORS,
+    DYNAMIC_FLOW,
 }
 
 /**
@@ -28,6 +28,12 @@ enum class BottomBarStyle {
     NORMAL,
     FLOATING,
     LIQUID_GLASS,
+}
+
+/** Selects the Miuix navigation host transition preset. */
+enum class NavigationTransitionStyle {
+    MIUIX,
+    AOSP,
 }
 
 /** Selects the root destination shown after settings finish loading at app startup. */
@@ -49,15 +55,22 @@ data class AppSettings(
     val forceWordByWordLyrics: Boolean = false,
     val lyricBlurEnabled: Boolean = false,
     val centerLyrics: Boolean = false,
+    val leftAlignPlayerTitle: Boolean = false,
     val hideControlsOnLyrics: Boolean = false,
     val showLyricsTranslation: Boolean = true,
     val blurEnabled: Boolean = true,
+    val progressiveTopBarBlurEnabled: Boolean = false,
+    val hideBottomBar: Boolean = false,
     val floatingBottomBar: Boolean = false,
+    val navigationRailExpanded: Boolean = true,
     val liquidGlass: Boolean = false,
     val predictiveBackEnabled: Boolean = true,
+    val navigationTransitionStyle: NavigationTransitionStyle =
+        NavigationTransitionStyle.MIUIX,
     val refreshLibraryOnStart: Boolean = false,
     val skipShortAudio: Boolean = false,
     val customFolderUris: List<String> = emptyList(),
+    val blockedFolderPaths: List<String> = emptyList(),
     val libraryTabIndex: Int = 0,
     val musicSortFieldOrdinal: Int = 0,
     val musicSortDescending: Boolean = false,

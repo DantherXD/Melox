@@ -2,74 +2,125 @@ package com.melox.player.ui.navigation
 
 import androidx.activity.compose.BackHandler
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
-import androidx.navigation3.runtime.NavEntry
-import androidx.navigation3.runtime.rememberDecoratedNavEntries
-import androidx.navigation3.runtime.rememberSaveableStateHolderNavEntryDecorator
-import androidx.navigation3.scene.SinglePaneSceneStrategy
-import androidx.navigation3.scene.rememberNavigationEventState
-import androidx.navigation3.scene.rememberSceneState
-import androidx.navigation3.ui.NavDisplay
-import androidx.navigationevent.compose.NavigationBackHandler
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.LocalWindowInfo
+import androidx.compose.ui.unit.Dp
+import androidx.compose.ui.unit.dp
+import androidx.navigationevent.NavigationEventDispatcher
+import androidx.navigationevent.NavigationEventDispatcherOwner
+import androidx.navigationevent.compose.LocalNavigationEventDispatcherOwner
+import com.melox.player.model.NavigationTransitionStyle
+import com.melox.player.ui.isMiuixWideLayout
+import top.yukonga.miuix.kmp.nav.core.NavBackStack
+import top.yukonga.miuix.kmp.nav.core.NavCornerClipMode
+import top.yukonga.miuix.kmp.nav.core.NavDisplay
+import top.yukonga.miuix.kmp.nav.core.NavDisplayEffects
+import top.yukonga.miuix.kmp.nav.core.NavEntryBuilder
+import top.yukonga.miuix.kmp.nav.core.rememberNavSystemCornerRadius
+import top.yukonga.miuix.kmp.nav.transition.NavTransitions
+import top.yukonga.miuix.kmp.theme.MiuixTheme
 
 /**
- * Hosts a single-pane stack with Miuix Navigation3 transitions.
- *
- * One scene host is retained while the setting changes so a visible entry is
- * never registered with two saveable-state providers in the same frame.
+ * Keeps one Miuix navigation host while predictive back is toggled at runtime.
  */
 @Composable
-fun <T : Any> PredictiveNavDisplay(
-    backStack: List<T>,
+fun PredictiveNavDisplay(
+    backStack: NavBackStack,
     predictiveBackEnabled: Boolean,
+    transitionStyle: NavigationTransitionStyle,
+    isDark: Boolean,
     onBack: () -> Unit,
-    entryProvider: (T) -> NavEntry<T>,
     modifier: Modifier = Modifier,
+    backEnabled: Boolean = true,
+    content: NavEntryBuilder.() -> Unit,
 ) {
-    val entries = rememberDecoratedNavEntries(
-        backStack = backStack,
-        entryDecorators = listOf(
-            rememberSaveableStateHolderNavEntryDecorator(),
-        ),
-        entryProvider = entryProvider,
+    val hasPreviousEntries = backStack.size > 1
+    val dispatcherOwner = LocalNavigationEventDispatcherOwner.current
+    val cornerRadius = rememberNavSystemCornerRadius()
+    val useAospTransition = transitionStyle == NavigationTransitionStyle.AOSP
+    val windowSize = LocalWindowInfo.current.containerSize
+    val transitionCornerRadius = with(LocalDensity.current) {
+        navigationTransitionCornerRadius(
+            windowWidth = windowSize.width.toDp(),
+            windowHeight = windowSize.height.toDp(),
+            transitionStyle = transitionStyle,
+            systemCornerRadius = cornerRadius,
+        )
+    }
+    val transition = if (useAospTransition) {
+        AospNavigationTransition
+    } else {
+        NavTransitions.MiuixDefault
+    }
+    val effects = NavDisplayEffects(
+        cornerClipRadius = transitionCornerRadius,
+        cornerClipMode = if (useAospTransition) {
+            NavCornerClipMode.All
+        } else {
+            NavCornerClipMode.Leading
+        },
+        dimAmount = if (useAospTransition) {
+            if (isDark) 0.8f else 0.2f
+        } else {
+            0.5f
+        },
+        backdropColor = MiuixTheme.colorScheme.surface,
     )
-
-    val sceneState = rememberSceneState(
-        entries = entries,
-        sceneStrategies = listOf(SinglePaneSceneStrategy()),
-        sceneDecoratorStrategies = emptyList(),
-        sharedTransitionScope = null,
-        onBack = onBack,
-    )
-    val navigationEventState = rememberNavigationEventState(sceneState)
-    val hasPreviousEntries = sceneState.currentScene.previousEntries.isNotEmpty()
-    NavigationBackHandler(
-        state = navigationEventState,
-        isBackEnabled = predictiveBackHandlerEnabled(
+    val disabledDispatcherOwner = remember {
+        object : NavigationEventDispatcherOwner {
+            override val navigationEventDispatcher =
+                NavigationEventDispatcher().also { it.isEnabled = false }
+        }
+    }
+    val activeDispatcherOwner = dispatcherOwner.takeIf {
+        backEnabled && predictiveBackEnabled
+    }
+        ?: disabledDispatcherOwner
+    BackHandler(
+        enabled = ordinaryBackHandlerEnabled(
             predictiveBackEnabled = predictiveBackEnabled,
             hasPreviousEntries = hasPreviousEntries,
+            backEnabled = backEnabled,
         ),
-        onBackCompleted = {
-            repeat(
-                sceneState.entries.size -
-                    sceneState.currentScene.previousEntries.size,
-            ) {
-                onBack()
-            }
-        },
-    )
-    BackHandler(
-        enabled = !predictiveBackEnabled && hasPreviousEntries,
         onBack = onBack,
     )
-    NavDisplay(
-        sceneState = sceneState,
-        navigationEventState = navigationEventState,
-        modifier = modifier,
-    )
+    CompositionLocalProvider(
+        LocalNavigationEventDispatcherOwner provides activeDispatcherOwner,
+    ) {
+        NavDisplay(
+            backStack = backStack,
+            modifier = modifier,
+            onBack = onBack,
+            transition = transition,
+            effects = effects,
+            content = content,
+        )
+    }
+}
+
+internal fun navigationTransitionCornerRadius(
+    windowWidth: Dp,
+    windowHeight: Dp,
+    transitionStyle: NavigationTransitionStyle,
+    systemCornerRadius: Dp,
+): Dp = when {
+    transitionStyle == NavigationTransitionStyle.MIUIX &&
+        isMiuixWideLayout(windowWidth, windowHeight) -> 0.dp
+    transitionStyle == NavigationTransitionStyle.AOSP && systemCornerRadius <= 0.dp -> 32.dp
+    else -> systemCornerRadius
 }
 
 internal fun predictiveBackHandlerEnabled(
     predictiveBackEnabled: Boolean,
     hasPreviousEntries: Boolean,
-): Boolean = predictiveBackEnabled && hasPreviousEntries
+    backEnabled: Boolean = true,
+): Boolean = backEnabled && predictiveBackEnabled && hasPreviousEntries
+
+internal fun ordinaryBackHandlerEnabled(
+    predictiveBackEnabled: Boolean,
+    hasPreviousEntries: Boolean,
+    backEnabled: Boolean = true,
+): Boolean = backEnabled && !predictiveBackEnabled && hasPreviousEntries

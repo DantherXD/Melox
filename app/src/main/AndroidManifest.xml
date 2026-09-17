@@ -25,6 +25,7 @@
     </queries>
 
     <application
+        android:name=".MeloxApplication"
         android:allowBackup="false"
         android:dataExtractionRules="@xml/data_extraction_rules"
         android:enableOnBackInvokedCallback="true"
@@ -38,9 +39,10 @@
         tools:targetApi="33">
         <activity
             android:name=".MainActivity"
-            android:configChanges="locale|layoutDirection|uiMode"
+            android:configChanges="fontScale|locale|layoutDirection|orientation|screenSize|uiMode"
             android:exported="true"
-            android:launchMode="singleTop">
+            android:launchMode="singleTop"
+            android:windowSoftInputMode="adjustResize">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
 

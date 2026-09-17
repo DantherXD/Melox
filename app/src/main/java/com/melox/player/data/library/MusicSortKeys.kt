@@ -25,6 +25,15 @@ internal fun createMusicSortKeys(text: String?): MusicSortKeys {
         )
     }
 
+    val japaneseRomaji = japaneseKanaToRomaji(raw)?.uppercase(Locale.ROOT)
+    val japaneseInitial = japaneseRomaji?.firstOrNull { it in 'A'..'Z' }
+    if (japaneseRomaji != null && japaneseInitial != null) {
+        return MusicSortKeys(
+            section = japaneseInitial.toString(),
+            value = "1_$japaneseRomaji",
+        )
+    }
+
     val pinyin = try {
         Pinyin.toPinyin(raw, "").uppercase(Locale.ROOT)
     } catch (_: Exception) {

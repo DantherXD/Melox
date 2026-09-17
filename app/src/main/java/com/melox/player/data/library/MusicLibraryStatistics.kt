@@ -27,7 +27,6 @@ internal data class MusicLibraryStatistics(
 
 internal fun buildMusicLibraryStatistics(
     tracks: List<MusicTrack>,
-    formatLimit: Int = DEFAULT_FORMAT_LIMIT,
 ): MusicLibraryStatistics {
     val qualityTotals = linkedMapOf<AudioQuality?, MutableStatistic>()
     val formatTotals = linkedMapOf<String?, MutableStatistic>()
@@ -58,14 +57,12 @@ internal fun buildMusicLibraryStatistics(
     }
     val formats = buildFormatStatistics(
         totals = formatTotals,
-        formatLimit = formatLimit,
         comparator = compareByDescending<FormatStatistic>(FormatStatistic::trackCount)
             .thenByDescending(FormatStatistic::totalBytes)
             .thenBy { it.format ?: "" },
     )
     val formatsBySize = buildFormatStatistics(
         totals = formatTotals,
-        formatLimit = formatLimit,
         comparator = compareByDescending<FormatStatistic>(FormatStatistic::totalBytes)
             .thenByDescending(FormatStatistic::trackCount)
             .thenBy { it.format ?: "" },
@@ -82,7 +79,6 @@ internal fun buildMusicLibraryStatistics(
 
 private fun buildFormatStatistics(
     totals: Map<String?, MutableStatistic>,
-    formatLimit: Int,
     comparator: Comparator<FormatStatistic>,
 ): List<FormatStatistic> {
     val sortedFormats = totals
@@ -95,17 +91,13 @@ private fun buildFormatStatistics(
             )
         }
         .sortedWith(comparator)
-    val retainedFormats = sortedFormats.take(formatLimit.coerceAtLeast(1))
-    val remainingFormats = sortedFormats.drop(retainedFormats.size)
     val unknownFormat = totals[null]
-    val otherTrackCount = remainingFormats.sumOf(FormatStatistic::trackCount) +
-        (unknownFormat?.trackCount ?: 0)
-    val otherBytes = remainingFormats.sumOf(FormatStatistic::totalBytes) +
-        (unknownFormat?.totalBytes ?: 0L)
+    val otherTrackCount = unknownFormat?.trackCount ?: 0
+    val otherBytes = unknownFormat?.totalBytes ?: 0L
     return if (otherTrackCount == 0) {
-        retainedFormats
+        sortedFormats
     } else {
-        retainedFormats + FormatStatistic(
+        sortedFormats + FormatStatistic(
             format = null,
             trackCount = otherTrackCount,
             totalBytes = otherBytes,
@@ -137,5 +129,3 @@ private data class MutableStatistic(
         totalBytes += bytes
     }
 }
-
-private const val DEFAULT_FORMAT_LIMIT = 5

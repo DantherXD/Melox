@@ -33,5 +33,6 @@ alignment.
 - SHA-256:
   `c03dacbed68c55782100f8bb715e85483fc6c95cea18c97591dd8c8e311ad4fa`
 
-The app keeps the system Media3 renderer first and loads this extension as the
-FFmpeg fallback. The AAR contains only `jni/arm64-v8a/libffmpegJNI.so`.
+The app places this extension before the system Media3 renderer for supported
+formats, while retaining the system renderer as fallback. The AAR contains only
+`jni/arm64-v8a/libffmpegJNI.so`.
