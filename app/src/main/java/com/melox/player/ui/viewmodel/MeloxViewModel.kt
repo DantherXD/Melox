@@ -47,6 +47,11 @@ import com.melox.player.model.BottomBarStyle
 import com.melox.player.model.DefaultHomePage
 import com.melox.player.model.DynamicColorSource
 import com.melox.player.model.LocalPlaylist
+import com.melox.player.model.LyricsDocument
+import com.melox.player.model.LyricsFormat
+import com.melox.player.model.LyricsSidecarFormatPriority
+import com.melox.player.model.LyricsSource
+import com.melox.player.model.LyricsSourcePriority
 import com.melox.player.model.MusicTrack
 import com.melox.player.model.NavigationTransitionStyle
 import com.melox.player.model.LyricsUiState
@@ -58,22 +63,22 @@ import com.melox.player.model.withTrackMetadata
 import com.melox.player.playback.PlaybackController
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asSharedFlow
+import kotlinx.coroutines.flow.channelFlow
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
-import kotlinx.coroutines.flow.transformLatest
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.sync.Mutex
@@ -97,7 +102,74 @@ data class MusicPresentationState(
     val items: List<MusicTrack> = emptyList(),
     val queueItems: List<MusicTrack> = emptyList(),
     val sectionIndexMap: Map<String, Int> = emptyMap(),
+    val query: String = "",
+    val sortConfig: MusicSortConfig = MusicSortConfig(),
 )
+
+private data class LyricsResolutionKey(
+    val source: LyricsSource,
+    val sidecarFormat: LyricsFormat?,
+)
+
+private fun LyricsDocument?.resolutionKey(): LyricsResolutionKey? = this?.let { document ->
+    LyricsResolutionKey(
+        source = document.source,
+        sidecarFormat = document.format.takeIf { document.source == LyricsSource.SIDECAR },
+    )
+}
+
+internal fun LyricsRequest.hasSameLyricsContentTarget(other: LyricsRequest): Boolean =
+    mediaId == other.mediaId &&
+        contentUri == other.contentUri &&
+        fileName == other.fileName &&
+        folderPath == other.folderPath &&
+        durationMs == other.durationMs &&
+        refreshRevision == other.refreshRevision
+
+internal fun shouldShowLyricsLoading(
+    previousRequest: LyricsRequest?,
+    request: LyricsRequest,
+): Boolean = previousRequest?.hasSameLyricsContentTarget(request) != true
+
+internal fun shouldPublishLyricsResolution(
+    previousRequest: LyricsRequest?,
+    request: LyricsRequest,
+    previousDocument: LyricsDocument?,
+    document: LyricsDocument?,
+): Boolean = shouldShowLyricsLoading(previousRequest, request) ||
+    previousDocument.resolutionKey() != document.resolutionKey()
+
+internal fun Flow<LyricsRequest?>.resolveLyricsStates(
+    loadDocument: suspend (LyricsRequest) -> LyricsDocument?,
+): Flow<LyricsUiState> = channelFlow {
+    var previousRequest: LyricsRequest? = null
+    var previousDocument: LyricsDocument? = null
+    collectLatest { request ->
+        if (request == null) {
+            send(LyricsUiState.Unavailable)
+            previousRequest = null
+            previousDocument = null
+            return@collectLatest
+        }
+
+        val showLoading = shouldShowLyricsLoading(previousRequest, request)
+        if (showLoading) send(LyricsUiState.Loading)
+
+        val document = loadDocument(request)
+        if (
+            shouldPublishLyricsResolution(
+                previousRequest = previousRequest,
+                request = request,
+                previousDocument = previousDocument,
+                document = document,
+            )
+        ) {
+            send(document?.let(LyricsUiState::Available) ?: LyricsUiState.Unavailable)
+        }
+        previousRequest = request
+        previousDocument = document
+    }
+}
 
 data class AlbumPresentationState(
     val items: List<AlbumGroup> = emptyList(),
@@ -169,6 +241,8 @@ class MeloxViewModel(application: Application) : AndroidViewModel(application) {
     private val playlistRepository = PlaylistRepository(application)
     private val lyricsRepository = LyricsRepository(application)
     private val playbackController = PlaybackController(application)
+    private val mutableSleepTimerSelectionSeconds = MutableStateFlow(initialSettings.sleepTimerSeconds)
+    val sleepTimerSelectionSeconds: StateFlow<Int> = mutableSleepTimerSelectionSeconds
     private var scanJob: Job? = null
     private val hasInitialAudioPermission = hasAudioPermission()
     private val loadedSettings = settingsRepository.settings
@@ -212,6 +286,9 @@ class MeloxViewModel(application: Application) : AndroidViewModel(application) {
         initialValue = PlaylistUiState(),
     )
     val playbackState: StateFlow<PlaybackUiState> = playbackController.state
+    val sleepTimerState = playbackController.sleepTimerState
+    val autoExtendSleepTimer = playbackController.autoExtendSleepTimer
+    val playbackPauseFade = playbackController.playbackPauseFade
     val currentTrackId: StateFlow<Long?> = playbackState
         .map { state -> state.currentItem?.trackId }
         .distinctUntilChanged()
@@ -253,12 +330,12 @@ class MeloxViewModel(application: Application) : AndroidViewModel(application) {
                 bufferedPositionMs = 0L,
             ).withTrackMetadata(library.value.tracks),
         )
-    @OptIn(ExperimentalCoroutinesApi::class)
-    val lyricsState: StateFlow<LyricsUiState> = combine(
+    private val lyricsRequests = combine(
         playbackState,
         library,
         lyricsRefreshRevision,
-    ) { playback, projection, refreshRevision ->
+        loadedSettings,
+    ) { playback, projection, refreshRevision, loadedSettings ->
         val item = playback.currentItem ?: return@combine null
         val track = item.trackId?.let { trackId ->
             projection.tracks.firstOrNull { it.id == trackId }
@@ -270,21 +347,14 @@ class MeloxViewModel(application: Application) : AndroidViewModel(application) {
             folderPath = track?.folderPath,
             durationMs = playback.durationMs,
             refreshRevision = refreshRevision,
+            sourcePriority = loadedSettings.value.lyricsSourcePriority,
+            sidecarFormatPriority = loadedSettings.value.lyricsSidecarFormatPriority,
         )
     }
         .distinctUntilChanged()
-        .transformLatest { request ->
-            if (request == null) {
-                emit(LyricsUiState.Unavailable)
-            } else {
-                emit(LyricsUiState.Loading)
-                emit(
-                    lyricsRepository.load(request)
-                        ?.let(LyricsUiState::Available)
-                        ?: LyricsUiState.Unavailable,
-                )
-            }
-        }
+
+    val lyricsState: StateFlow<LyricsUiState> = lyricsRequests
+        .resolveLyricsStates(lyricsRepository::load)
         .flowOn(Dispatchers.IO)
         .stateIn(
             scope = viewModelScope,
@@ -341,12 +411,14 @@ class MeloxViewModel(application: Application) : AndroidViewModel(application) {
             request.query.isBlank() &&
             (
                 request.sortConfig.field == MusicSortField.TITLE ||
+                    request.sortConfig.field == MusicSortField.ARTIST ||
                     request.sortConfig.field == MusicSortField.FILE_NAME
             )
         ) {
             buildMap {
                 items.forEachIndexed { index, track ->
                     val key = when (request.sortConfig.field) {
+                        MusicSortField.ARTIST -> createMusicSortKeys(track.artist).section
                         MusicSortField.FILE_NAME -> createMusicSortKeys(track.fileName).section
                         else -> track.titleSectionKey
                     }
@@ -360,6 +432,8 @@ class MeloxViewModel(application: Application) : AndroidViewModel(application) {
             items = items,
             queueItems = queueItems,
             sectionIndexMap = sectionIndexMap,
+            query = request.query,
+            sortConfig = request.sortConfig,
         )
     }
         .flowOn(Dispatchers.Default)
@@ -461,6 +535,10 @@ class MeloxViewModel(application: Application) : AndroidViewModel(application) {
         .stateIn(viewModelScope, SharingStarted.Eagerly, FolderPresentationState())
 
     init {
+        playbackController.setHighPrecisionOutput(initialSettings.highPrecisionOutput)
+        playbackController.setPlaybackSpeed(initialSettings.playbackSpeed)
+        playbackController.setAutoExtendSleepTimer(initialSettings.autoExtendSleepTimer)
+        playbackController.setPlaybackPauseFade(initialSettings.playbackPauseFade)
         viewModelScope.launch {
             playlists.value = playlistRepository.load()
             playlistsLoaded.value = true
@@ -562,6 +640,18 @@ class MeloxViewModel(application: Application) : AndroidViewModel(application) {
     fun setShowLyricsTranslation(enabled: Boolean) {
         viewModelScope.launch {
             settingsRepository.setShowLyricsTranslation(enabled)
+        }
+    }
+
+    fun setLyricsSourcePriority(priority: LyricsSourcePriority) {
+        viewModelScope.launch {
+            settingsRepository.setLyricsSourcePriority(priority)
+        }
+    }
+
+    fun setLyricsSidecarFormatPriority(priority: LyricsSidecarFormatPriority) {
+        viewModelScope.launch {
+            settingsRepository.setLyricsSidecarFormatPriority(priority)
         }
     }
 
@@ -921,6 +1011,41 @@ class MeloxViewModel(application: Application) : AndroidViewModel(application) {
     fun next() = playbackController.next()
 
     fun cyclePlaybackMode() = playbackController.cyclePlaybackMode()
+
+    fun setPlaybackSpeed(speed: Float) {
+        if (playbackController.state.value.floatOutputActive && speed != 1f) return
+        playbackController.setPlaybackSpeed(speed)
+        viewModelScope.launch { settingsRepository.setPlaybackSpeed(speed) }
+    }
+
+    val highPrecisionOutput = playbackController.highPrecisionOutput
+
+    fun setHighPrecisionOutput(enabled: Boolean) {
+        playbackController.setHighPrecisionOutput(enabled)
+        viewModelScope.launch { settingsRepository.setHighPrecisionOutput(enabled) }
+    }
+
+    fun setSleepTimerSelectionSeconds(seconds: Int) {
+        val value = seconds.coerceIn(0, 86_399)
+        mutableSleepTimerSelectionSeconds.value = value
+        viewModelScope.launch { settingsRepository.setSleepTimerSeconds(value) }
+    }
+
+    fun startSleepTimer(seconds: Int) = playbackController.startSleepTimer(seconds)
+
+    fun cancelSleepTimer() = playbackController.cancelSleepTimer()
+
+    fun acknowledgeSleepTimerInterruption() = playbackController.acknowledgeSleepTimerInterruption()
+
+    fun setAutoExtendSleepTimer(enabled: Boolean) {
+        playbackController.setAutoExtendSleepTimer(enabled)
+        viewModelScope.launch { settingsRepository.setAutoExtendSleepTimer(enabled) }
+    }
+
+    fun setPlaybackPauseFade(enabled: Boolean) {
+        playbackController.setPlaybackPauseFade(enabled)
+        viewModelScope.launch { settingsRepository.setPlaybackPauseFade(enabled) }
+    }
 
     fun playNext(track: MusicTrack) = playbackController.playNext(track)
 

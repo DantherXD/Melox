@@ -44,6 +44,7 @@ import com.melox.player.data.playback.toStartupPlaybackPreview
 import com.melox.player.data.repository.migrateLegacyLyricFontScale
 import com.melox.player.data.repository.normalizeLyricFontWeight
 import com.melox.player.data.repository.resolveAlbumGridStyleOrdinal
+import com.melox.player.data.repository.LyricsRequest
 import com.melox.player.model.AppSettings
 import com.melox.player.model.AudioQuality
 import com.melox.player.model.BottomBarStyle
@@ -53,7 +54,10 @@ import com.melox.player.model.NavigationTransitionStyle
 import com.melox.player.model.LyricLine
 import com.melox.player.model.LyricsDocument
 import com.melox.player.model.LyricsFormat
+import com.melox.player.model.LyricsSidecarFormatPriority
 import com.melox.player.model.LyricsSource
+import com.melox.player.model.LyricsSourcePriority
+import com.melox.player.model.LyricsUiState
 import com.melox.player.model.PlaybackMode
 import com.melox.player.model.PlaybackBackgroundStyle
 import com.melox.player.model.PlaybackQueueItem
@@ -79,6 +83,8 @@ import com.melox.player.playback.toInitialPlaybackState
 import com.melox.player.ui.component.library.findAlphabetTargetIndex
 import com.melox.player.ui.component.library.fitArtworkDimensions
 import com.melox.player.ui.component.library.formatDuration
+import com.melox.player.ui.component.library.fullPlayerArtworkTargetSizePx
+import com.melox.player.ui.screen.playback.artworkCrossfadeDurationMillis
 import com.melox.player.ui.component.library.playbackArtworkShadowBounds
 import com.melox.player.ui.component.library.artworkCacheFileStem
 import com.melox.player.ui.component.library.createArtworkCacheKey
@@ -91,6 +97,9 @@ import com.melox.player.ui.component.library.responsiveGridColumnCount
 import com.melox.player.ui.component.library.snapshotArtworkDiskCacheEntries
 import com.melox.player.ui.component.playback.hasDifferentMetadataSwipeTarget
 import com.melox.player.ui.component.playback.hasExpectedMiniMetadataSwipeTarget
+import com.melox.player.ui.viewmodel.shouldPublishLyricsResolution
+import com.melox.player.ui.viewmodel.shouldShowLyricsLoading
+import com.melox.player.ui.viewmodel.resolveLyricsStates
 import com.melox.player.ui.component.playback.KenBurnsFrame
 import com.melox.player.ui.component.playback.DYNAMIC_FLOW_ARTWORK_SATURATION
 import com.melox.player.ui.component.playback.DYNAMIC_FLOW_BACKGROUND_DARKEN_AMOUNT
@@ -181,7 +190,6 @@ import com.melox.player.ui.screen.playback.lyricLineVerticalPaddingDp
 import com.melox.player.ui.screen.playback.lyricOffscreenTranslationDistance
 import com.melox.player.ui.screen.playback.lyricPlaybackPositionMs
 import com.melox.player.ui.screen.playback.lyricProgrammaticTranslationStart
-import com.melox.player.ui.screen.playback.lyricRowRenderMode
 import com.melox.player.ui.screen.playback.lyricCenteringSpringStiffness
 import com.melox.player.ui.screen.playback.lyricScrollIsManual
 import com.melox.player.ui.screen.playback.lyricSeekUsesAnimatedCentering
@@ -192,7 +200,6 @@ import com.melox.player.ui.screen.playback.lyricTargetScrollOffset
 import com.melox.player.ui.screen.playback.lyricTranslationAlpha
 import com.melox.player.ui.screen.playback.lyricWordProgressActiveAlpha
 import com.melox.player.ui.screen.playback.lyricVerticalDragExceedsTouchSlop
-import com.melox.player.ui.screen.playback.LyricRowRenderMode
 import com.melox.player.ui.screen.playback.progressGestureIsDrag
 import com.melox.player.ui.screen.playback.playerHeaderArtistText
 import com.melox.player.ui.screen.playback.fitPlayerArtworkSize
@@ -217,6 +224,8 @@ import java.io.IOException
 import java.util.zip.CRC32
 import java.util.zip.CheckedOutputStream
 import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.flow.flowOf
+import kotlinx.coroutines.flow.toList
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertArrayEquals
 import org.junit.Assert.assertFalse
@@ -232,28 +241,28 @@ class UiLogicTest {
     @Test
     fun sliderTapUsesTrackBoundsStepsKeyPointsAndLayoutDirection() {
         assertEquals(
-            0.85f,
+            1f,
             sliderValueAtPosition(
                 positionX = 82.5f,
                 width = 300,
                 height = 30,
-                valueRange = 0.7f..1.3f,
+                valueRange = 0.6666667f..2f,
                 steps = 0,
-                keyPoints = listOf(0.7f, 1f, 1.3f),
+                keyPoints = listOf(1f),
                 magnetThreshold = 0.02f,
                 reverseDirection = false,
             ),
             0.0001f,
         )
         assertEquals(
-            1f,
+            1.3333333f,
             sliderValueAtPosition(
                 positionX = 150f,
                 width = 300,
                 height = 30,
-                valueRange = 0.7f..1.3f,
+                valueRange = 0.6666667f..2f,
                 steps = 0,
-                keyPoints = listOf(0.7f, 1f, 1.3f),
+                keyPoints = listOf(1f),
                 magnetThreshold = 0.02f,
                 reverseDirection = false,
             ),
@@ -273,6 +282,22 @@ class UiLogicTest {
             ),
             0f,
         )
+        (0..8).forEach { index ->
+            assertEquals(
+                100f + index * 100f,
+                sliderValueAtPosition(
+                    positionX = 15f + index * 270f / 8f,
+                    width = 300,
+                    height = 30,
+                    valueRange = 100f..900f,
+                    steps = 7,
+                    keyPoints = null,
+                    magnetThreshold = 0.02f,
+                    reverseDirection = false,
+                ),
+                0f,
+            )
+        }
         assertEquals(
             0.75f,
             sliderValueAtPosition(
@@ -381,6 +406,11 @@ class UiLogicTest {
         assertFalse(settings.centerLyrics)
         assertFalse(settings.leftAlignPlayerTitle)
         assertTrue(settings.showLyricsTranslation)
+        assertEquals(LyricsSourcePriority.EMBEDDED, settings.lyricsSourcePriority)
+        assertEquals(
+            LyricsSidecarFormatPriority.LRC,
+            settings.lyricsSidecarFormatPriority,
+        )
         assertEquals(true, settings.blurEnabled)
         assertFalse(settings.progressiveTopBarBlurEnabled)
         assertFalse(settings.hideBottomBar)
@@ -720,6 +750,68 @@ class UiLogicTest {
     }
 
     @Test
+    fun lyricPriorityChangePublishesOnlyWhenTheResolvedSourceChanges() {
+        val embeddedFirst = LyricsRequest(
+            mediaId = "1",
+            contentUri = "content://media/external_primary/audio/media/1",
+            fileName = "Song.flac",
+            folderPath = "/Music/Album",
+            durationMs = 10_000L,
+            sourcePriority = LyricsSourcePriority.EMBEDDED,
+            sidecarFormatPriority = LyricsSidecarFormatPriority.TTML,
+        )
+        val sidecarFirst = embeddedFirst.copy(sourcePriority = LyricsSourcePriority.SIDECAR)
+        val embeddedLyrics = LyricsDocument(
+            lines = emptyList(),
+            format = LyricsFormat.LRC,
+            source = LyricsSource.EMBEDDED,
+        )
+        val ttmlSidecarLyrics = LyricsDocument(
+            lines = emptyList(),
+            format = LyricsFormat.TTML,
+            source = LyricsSource.SIDECAR,
+        )
+        val lrcSidecarLyrics = ttmlSidecarLyrics.copy(format = LyricsFormat.LRC)
+
+        assertFalse(shouldShowLyricsLoading(embeddedFirst, sidecarFirst))
+        assertFalse(
+            shouldPublishLyricsResolution(
+                previousRequest = embeddedFirst,
+                request = sidecarFirst,
+                previousDocument = embeddedLyrics,
+                document = embeddedLyrics,
+            ),
+        )
+        assertTrue(
+            shouldPublishLyricsResolution(
+                previousRequest = embeddedFirst,
+                request = sidecarFirst,
+                previousDocument = embeddedLyrics,
+                document = ttmlSidecarLyrics,
+            ),
+        )
+        assertTrue(
+            shouldPublishLyricsResolution(
+                previousRequest = sidecarFirst,
+                request = sidecarFirst.copy(
+                    sidecarFormatPriority = LyricsSidecarFormatPriority.LRC,
+                ),
+                previousDocument = ttmlSidecarLyrics,
+                document = lrcSidecarLyrics,
+            ),
+        )
+    }
+
+    @Test
+    fun lyricResolutionFlowCanPublishFromCollectLatestWithoutAFlowInvariantCrash() = runBlocking {
+        val states = flowOf<LyricsRequest?>(null)
+            .resolveLyricsStates { error("No lyrics should be loaded without a request") }
+            .toList()
+
+        assertEquals(listOf(LyricsUiState.Unavailable), states)
+    }
+
+    @Test
     fun lyricSeekKeepsTheOutgoingLineAtItsCapturedProgress() {
         assertEquals(
             12_345L,
@@ -791,34 +883,6 @@ class UiLogicTest {
                 nowElapsedRealtimeMs = 11_000L,
                 isPlaying = false,
                 playbackSpeed = 1f,
-            ),
-        )
-    }
-
-    @Test
-    fun lyricRowsOnlyMaskWhileTheirWordTimingIsActive() {
-        assertEquals(
-            LyricRowRenderMode.BEFORE,
-            lyricRowRenderMode(
-                positionMs = 999L,
-                firstStartTimeMs = 1_000L,
-                lastEndTimeMs = 2_000L,
-            ),
-        )
-        assertEquals(
-            LyricRowRenderMode.ACTIVE,
-            lyricRowRenderMode(
-                positionMs = 1_500L,
-                firstStartTimeMs = 1_000L,
-                lastEndTimeMs = 2_000L,
-            ),
-        )
-        assertEquals(
-            LyricRowRenderMode.COMPLETE,
-            lyricRowRenderMode(
-                positionMs = 2_000L,
-                firstStartTimeMs = 1_000L,
-                lastEndTimeMs = 2_000L,
             ),
         )
     }
@@ -1088,8 +1152,8 @@ class UiLogicTest {
     fun legacyLyricFontScaleMapsOldEightyPercentToNewHundredPercent() {
         assertEquals(1f, migrateLegacyLyricFontScale(0.8f), 0f)
         assertEquals(1.25f, migrateLegacyLyricFontScale(1f), 0f)
-        assertEquals(0.7f, migrateLegacyLyricFontScale(0.4f), 0f)
-        assertEquals(1.3f, migrateLegacyLyricFontScale(1.2f), 0f)
+        assertEquals(0.6666667f, migrateLegacyLyricFontScale(0.4f), 0.0000001f)
+        assertEquals(1.5f, migrateLegacyLyricFontScale(1.2f), 0f)
     }
 
     @Test
@@ -1099,6 +1163,10 @@ class UiLogicTest {
         assertEquals(200, normalizeLyricFontWeight(150))
         assertEquals(400, normalizeLyricFontWeight(400))
         assertEquals(900, normalizeLyricFontWeight(950))
+        (1..9).forEach { step ->
+            val weight = step * 100
+            assertEquals(weight, normalizeLyricFontWeight(weight))
+        }
     }
 
     @Test
@@ -1107,9 +1175,44 @@ class UiLogicTest {
         assertEquals(28f, LYRIC_PRIMARY_LINE_HEIGHT_SP, 0f)
         assertEquals(16f, LYRIC_TRANSLATION_FONT_SIZE_SP, 0f)
         assertEquals(22f, LYRIC_TRANSLATION_LINE_HEIGHT_SP, 0f)
-        assertEquals(16.8f, LYRIC_PRIMARY_FONT_SIZE_SP * 0.7f, 0.0001f)
+        assertEquals(16f, LYRIC_PRIMARY_FONT_SIZE_SP * 0.6666667f, 0.0001f)
         assertEquals(24f, LYRIC_PRIMARY_FONT_SIZE_SP, 0.0001f)
-        assertEquals(31.2f, LYRIC_PRIMARY_FONT_SIZE_SP * 1.3f, 0.0001f)
+        assertEquals(48f, LYRIC_PRIMARY_FONT_SIZE_SP * 2f, 0.0001f)
+        assertEquals(
+            2f / 3f,
+            LYRIC_TRANSLATION_FONT_SIZE_SP / LYRIC_PRIMARY_FONT_SIZE_SP,
+            0.0001f,
+        )
+    }
+
+    @Test
+    fun fullPlayerArtworkResolutionFollowsDisplayNeedAndMemoryBudget() {
+        val largeHeap = 3L * 1024L * 1024L * 1024L
+
+        assertEquals(1800, fullPlayerArtworkTargetSizePx(1800, largeHeap))
+        assertEquals(3999, fullPlayerArtworkTargetSizePx(3999, largeHeap))
+        assertEquals(4000, fullPlayerArtworkTargetSizePx(4000, largeHeap))
+        assertEquals(4001, fullPlayerArtworkTargetSizePx(4001, largeHeap))
+        assertEquals(8000, fullPlayerArtworkTargetSizePx(9000, largeHeap))
+        assertEquals(
+            4096,
+            fullPlayerArtworkTargetSizePx(
+                displayedSizePx = 8000,
+                maxMemoryBytes = 512L * 1024L * 1024L,
+            ),
+        )
+    }
+
+    @Test
+    fun fullPlayerArtworkKeepsTrackTransitionAndShortensResolutionUpgrade() {
+        assertEquals(
+            500,
+            artworkCrossfadeDurationMillis("track-a", "track-b", 500, 100),
+        )
+        assertEquals(
+            100,
+            artworkCrossfadeDurationMillis("track-a", "track-a", 500, 100),
+        )
     }
 
     @Test
@@ -1127,22 +1230,25 @@ class UiLogicTest {
 
     @Test
     fun wordMotionProvidesScaleOffsetAndGlow() {
-        val start = wordMotion(progress = 0f, durationMs = 2_000L, characterCount = 4)
-        val middle = wordMotion(progress = 0.5f, durationMs = 2_000L, characterCount = 4)
-        val end = wordMotion(progress = 1f, durationMs = 2_000L, characterCount = 4)
+        val start = wordMotion(progress = 0f, durationMs = 2_000L)
+        val middle = wordMotion(progress = 0.5f, durationMs = 2_000L)
+        val end = wordMotion(progress = 1f, durationMs = 2_000L)
 
         assertTrue(start.scale >= 1f)
         assertTrue(middle.scale > 1f)
-        assertTrue(start.offsetYPx > 0f)
+        assertEquals(0f, start.offsetYPx, 0f)
         assertTrue(middle.offsetYPx < start.offsetYPx)
         assertTrue(middle.glowRadius > 0f)
-        assertEquals(0f, end.glowRadius, 0.000001f)
+        assertTrue(middle.glowAlpha > 0f)
+        assertEquals(start.glowRadius, middle.glowRadius, 0f)
+        assertEquals(middle.glowRadius, end.glowRadius, 0f)
+        assertEquals(0f, end.glowAlpha, 0.000001f)
     }
 
     @Test
-    fun charactersStartAcrossTheFirstTwentyPercentOfAWord() {
+    fun charactersStartAcrossTheFirstThirtyTwoPercentOfASyllable() {
         assertEquals(
-            0.125f,
+            100f / 680f,
             characterProgress(
                 positionMs = 1_100L,
                 wordStartTimeMs = 1_000L,
@@ -1181,7 +1287,7 @@ class UiLogicTest {
             characterIndex = 2,
             characterCount = 3,
         )
-        assertEquals(0f, finalMotion.glowRadius, 0.000001f)
+        assertEquals(0f, finalMotion.glowAlpha, 0.000001f)
     }
 
     @Test
@@ -2161,6 +2267,7 @@ class UiLogicTest {
             musicTrack(
                 id = 1L,
                 title = "Bravo",
+                artist = "Zed",
                 dateAddedEpochSeconds = 30L,
                 fileName = "c.mp3",
                 fileSizeBytes = 300L,
@@ -2169,6 +2276,7 @@ class UiLogicTest {
             musicTrack(
                 id = 2L,
                 title = "Alpha",
+                artist = "Alpha",
                 dateAddedEpochSeconds = 10L,
                 fileName = "b.mp3",
                 fileSizeBytes = 100L,
@@ -2177,6 +2285,7 @@ class UiLogicTest {
             musicTrack(
                 id = 3L,
                 title = "Charlie",
+                artist = "Mia",
                 dateAddedEpochSeconds = 20L,
                 fileName = "a.mp3",
                 fileSizeBytes = 200L,
@@ -2185,6 +2294,7 @@ class UiLogicTest {
         )
 
         assertEquals(listOf(2L, 1L, 3L), tracks.sortedIds(MusicSortField.TITLE))
+        assertEquals(listOf(2L, 3L, 1L), tracks.sortedIds(MusicSortField.ARTIST))
         assertEquals(listOf(2L, 3L, 1L), tracks.sortedIds(MusicSortField.DATE_ADDED))
         assertEquals(listOf(3L, 2L, 1L), tracks.sortedIds(MusicSortField.FILE_NAME))
         assertEquals(listOf(2L, 3L, 1L), tracks.sortedIds(MusicSortField.FILE_SIZE))
@@ -3720,6 +3830,17 @@ class UiLogicTest {
     }
 
     @Test
+    fun floatingBottomBarToggleRetainsLiquidGlassPreference() {
+        val settings = AppSettings(floatingBottomBar = false, liquidGlass = true)
+
+        assertEquals(BottomBarStyle.NORMAL, settings.bottomBarStyle)
+        assertEquals(
+            BottomBarStyle.LIQUID_GLASS,
+            settings.copy(floatingBottomBar = true).bottomBarStyle,
+        )
+    }
+
+    @Test
     fun queueOperationIndicesAreDeterministicAndBoundsChecked() {
         assertEquals(0, nextQueueInsertionIndex(currentIndex = 0, itemCount = 0))
         assertEquals(1, nextQueueInsertionIndex(currentIndex = 0, itemCount = 3))
@@ -4110,12 +4231,13 @@ private fun musicTrack(
     fileSizeBytes: Long,
     durationMs: Long,
     dateModifiedEpochSeconds: Long = 0L,
+    artist: String? = null,
 ): MusicTrack {
     val sortKeys = createMusicSortKeys(title)
     return MusicTrack(
         id = id,
         title = title,
-        artist = null,
+        artist = artist,
         album = null,
         durationMs = durationMs,
         dateAddedEpochSeconds = dateAddedEpochSeconds,

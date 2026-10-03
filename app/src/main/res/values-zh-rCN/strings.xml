@@ -1,4 +1,14 @@
 <resources>
+    <string name="music_share">分享</string>
+    <string name="music_share_failed">无法分享此歌曲文件</string>
+    <string name="artwork_preview">查看封面</string>
+    <string name="artwork_dimensions">%1$d × %2$d</string>
+    <string name="artwork_download">下载封面</string>
+    <string name="artwork_share">分享封面</string>
+    <string name="artwork_saved">封面已保存到 Melox 相册</string>
+    <string name="artwork_save_permission_denied">保存封面到相册需要存储权限</string>
+    <string name="artwork_unavailable">无法读取原始封面</string>
+    <string name="artwork_export_failed">封面保存或分享失败</string>
     <string name="selection_selected_count">已选择 %1$d 首</string>
     <string name="selection_choose_songs">请选择歌曲</string>
     <string name="selection_select_all">全选</string>
@@ -23,6 +33,8 @@
     <string name="home_recommendation_title">推荐</string>
     <string name="home_recommendation_empty_title">暂时没有音乐</string>
     <string name="home_recommendation_empty_description">将在扫描音乐后随机推荐</string>
+    <string name="home_recommendation_unavailable_title">暂时没有推荐</string>
+    <string name="home_recommendation_unavailable_description">歌曲需有封面才能出现在推荐中</string>
     <string name="home_recently_added_title">最近添加</string>
     <string name="home_playlists_title">歌单</string>
     <string name="home_playlist_empty_title">暂时没有歌单</string>
@@ -64,6 +76,7 @@
     <string name="music_unknown_artist">未知艺术家</string>
     <string name="music_sort_action">歌曲排序</string>
     <string name="music_sort_title">标题</string>
+    <string name="music_sort_artist">艺术家</string>
     <string name="music_sort_date_added">添加时间</string>
     <string name="music_sort_file_name">文件名</string>
     <string name="music_sort_file_size">文件大小</string>
@@ -201,11 +214,11 @@
     <string name="settings_default_home_title">默认主页</string>
     <string name="settings_theme_settings_title">主题设置</string>
     <string name="settings_theme_settings_summary">自定义外观</string>
-    <string name="settings_about_title">关于</string>
+    <string name="settings_about_title">关于应用</string>
     <string name="settings_theme_mode_title">主题模式</string>
     <string name="theme_mode_system">跟随系统</string>
-    <string name="theme_mode_light">浅色</string>
-    <string name="theme_mode_dark">深色</string>
+    <string name="theme_mode_light">浅色模式</string>
+    <string name="theme_mode_dark">深色模式</string>
     <string name="settings_playback_background_title">播放页背景</string>
     <string name="settings_playback_background_blurred_artwork">模糊封面</string>
     <string name="settings_playback_background_dynamic_flow">动态流光</string>
@@ -280,10 +293,27 @@
     <string name="lyrics_unavailable">暂无歌词</string>
     <string name="player_settings">播放页设置</string>
     <string name="player_settings_open">打开播放页设置</string>
+    <string name="playback_options_open">播放倍速与定时</string>
+    <string name="playback_sleep_timer">定时</string>
+    <string name="playback_sleep_timer_start">开始</string>
+    <string name="playback_sleep_timer_stop">停止</string>
+    <string name="playback_timer_auto_extend">延长到单首歌曲播完</string>
+    <string name="playback_timer_extension_title">延长定时关闭</string>
+    <string name="playback_timer_extension_interrupted">在延长定时期间手动暂停、切歌导致关闭定时</string>
+    <string name="playback_pause_fade">播放暂停时淡入淡出</string>
+    <string name="playback_high_precision_output">高精度输出</string>
+    <string name="playback_high_precision_output_summary">开启后部分歌曲无法调节倍速</string>
+    <string name="playback_timer_confirm">确认</string>
+    <string-array name="playback_speed_options">
+        <item>×0.25</item><item>×0.50</item><item>×0.75</item><item>×0.90</item>
+        <item>×0.95</item><item>×1.00</item><item>×1.05</item><item>×1.10</item>
+        <item>×1.25</item><item>×1.5</item><item>×1.75</item><item>×2.00</item>
+        <item>×2.50</item><item>×3.00</item>
+    </string-array>
     <string name="player_title_left_aligned">标题左对齐</string>
     <string name="lyrics_translation">歌词翻译</string>
     <string name="lyrics_size">歌词大小</string>
-    <string name="lyrics_size_value">%1$d%%</string>
+    <string name="lyrics_size_value">%1$dsp</string>
     <string name="lyrics_weight">歌词字重</string>
     <string name="lyrics_weight_value">%1$d</string>
     <string name="lyrics_force_word_by_word">强制逐字歌词</string>
@@ -292,9 +322,19 @@
     <string name="lyrics_blur_summary">模糊非当前歌词</string>
     <string name="lyrics_center">歌词居中</string>
     <string name="lyrics_hide_controls">歌词页隐藏控制</string>
+    <string name="lyrics_hide_controls_summary">隐藏控制后，可双击标题区播放/暂停，滑动切歌，长按呼出本弹窗</string>
+    <string name="lyrics_source_priority">歌词来源优先级</string>
+    <string name="lyrics_source_embedded">内嵌</string>
+    <string name="lyrics_source_external">外置</string>
+    <string name="lyrics_sidecar_format_priority">外置歌词格式优先级</string>
+    <string name="lyrics_sidecar_lrc">.lrc</string>
+    <string name="lyrics_sidecar_ttml">.ttml</string>
 
     <string name="about_version">%1$s</string>
-    <string name="about_project_title">项目地址</string>
-    <string name="about_developer_title">开发人员</string>
-    <string name="about_telegram_title">加入Telegram频道</string>
+    <string name="about_project_title">项目仓库</string>
+    <string name="about_join_group_title">加入群组</string>
+    <string name="about_sponsor_title">赞助支持</string>
+    <string name="about_github_label">Github</string>
+    <string name="about_telegram_label">Telegram</string>
+    <string name="sponsor_code_description">赞助码</string>
 </resources>

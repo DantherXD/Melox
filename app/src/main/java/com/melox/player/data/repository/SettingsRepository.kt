@@ -24,8 +24,11 @@ import com.melox.player.model.AppSettings
 import com.melox.player.model.BottomBarStyle
 import com.melox.player.model.DefaultHomePage
 import com.melox.player.model.DynamicColorSource
+import com.melox.player.model.LyricsSidecarFormatPriority
+import com.melox.player.model.LyricsSourcePriority
 import com.melox.player.model.NavigationTransitionStyle
 import com.melox.player.model.PlaybackBackgroundStyle
+import com.melox.player.model.normalizePlaybackSpeed
 import com.melox.player.model.ThemeMode
 import java.io.IOException
 import kotlinx.coroutines.flow.Flow
@@ -76,6 +79,13 @@ class SettingsRepository(context: Context) {
                         )
                     }
                     ?: PlaybackBackgroundStyle.BLURRED_ARTWORK,
+                playbackSpeed = preferences[Keys.PlaybackSpeed]
+                    ?.let(::normalizePlaybackSpeed) ?: 1f,
+                highPrecisionOutput = preferences[Keys.HighPrecisionOutput] ?: true,
+                sleepTimerSeconds = preferences[Keys.SleepTimerSeconds]
+                    ?.coerceIn(0, 86_399) ?: 600,
+                autoExtendSleepTimer = preferences[Keys.AutoExtendSleepTimer] ?: false,
+                playbackPauseFade = preferences[Keys.PlaybackPauseFade] ?: false,
                 lyricFontScale = preferences[Keys.LyricFontScale]
                     ?.coerceIn(MIN_LYRIC_FONT_SCALE, MAX_LYRIC_FONT_SCALE)
                     ?: preferences[Keys.LegacyLyricFontScale]
@@ -90,6 +100,16 @@ class SettingsRepository(context: Context) {
                 leftAlignPlayerTitle = preferences[Keys.LeftAlignPlayerTitle] ?: false,
                 hideControlsOnLyrics = preferences[Keys.HideControlsOnLyrics] ?: false,
                 showLyricsTranslation = preferences[Keys.ShowLyricsTranslation] ?: true,
+                lyricsSourcePriority = preferences[Keys.LyricsSourcePriority]
+                    ?.let { storedValue ->
+                        enumValueOrDefault(storedValue, LyricsSourcePriority.EMBEDDED)
+                    }
+                    ?: LyricsSourcePriority.EMBEDDED,
+                lyricsSidecarFormatPriority = preferences[Keys.LyricsSidecarFormatPriority]
+                    ?.let { storedValue ->
+                        enumValueOrDefault(storedValue, LyricsSidecarFormatPriority.LRC)
+                    }
+                    ?: LyricsSidecarFormatPriority.LRC,
                 blurEnabled = preferences[Keys.BlurEnabled] ?: true,
                 progressiveTopBarBlurEnabled =
                     preferences[Keys.ProgressiveTopBarBlurEnabled] ?: false,
@@ -175,6 +195,26 @@ class SettingsRepository(context: Context) {
         }
     }
 
+    suspend fun setPlaybackSpeed(speed: Float) {
+        dataStore.edit { it[Keys.PlaybackSpeed] = normalizePlaybackSpeed(speed) }
+    }
+
+    suspend fun setHighPrecisionOutput(enabled: Boolean) {
+        dataStore.edit { it[Keys.HighPrecisionOutput] = enabled }
+    }
+
+    suspend fun setSleepTimerSeconds(seconds: Int) {
+        dataStore.edit { it[Keys.SleepTimerSeconds] = seconds.coerceIn(0, 86_399) }
+    }
+
+    suspend fun setAutoExtendSleepTimer(enabled: Boolean) {
+        dataStore.edit { it[Keys.AutoExtendSleepTimer] = enabled }
+    }
+
+    suspend fun setPlaybackPauseFade(enabled: Boolean) {
+        dataStore.edit { it[Keys.PlaybackPauseFade] = enabled }
+    }
+
     suspend fun setLyricFontScale(scale: Float) {
         dataStore.edit { preferences ->
             preferences[Keys.LyricFontScale] = scale.coerceIn(
@@ -226,6 +266,18 @@ class SettingsRepository(context: Context) {
         }
     }
 
+    suspend fun setLyricsSourcePriority(priority: LyricsSourcePriority) {
+        dataStore.edit { preferences ->
+            preferences[Keys.LyricsSourcePriority] = priority.name
+        }
+    }
+
+    suspend fun setLyricsSidecarFormatPriority(priority: LyricsSidecarFormatPriority) {
+        dataStore.edit { preferences ->
+            preferences[Keys.LyricsSidecarFormatPriority] = priority.name
+        }
+    }
+
     suspend fun setBottomBarStyle(bottomBarStyle: BottomBarStyle) {
         dataStore.edit { preferences ->
             preferences[Keys.FloatingBottomBar] = bottomBarStyle != BottomBarStyle.NORMAL
@@ -254,7 +306,6 @@ class SettingsRepository(context: Context) {
     suspend fun setFloatingBottomBar(enabled: Boolean) {
         dataStore.edit { preferences ->
             preferences[Keys.FloatingBottomBar] = enabled
-            preferences[Keys.LiquidGlass] = false
         }
     }
 
@@ -372,6 +423,11 @@ class SettingsRepository(context: Context) {
         val DynamicColorEnabled = booleanPreferencesKey("dynamic_color_enabled")
         val DynamicColorSource = stringPreferencesKey("dynamic_color_source")
         val PlaybackBackgroundStyle = stringPreferencesKey("playback_background_style")
+        val PlaybackSpeed = floatPreferencesKey("playback_speed")
+        val HighPrecisionOutput = booleanPreferencesKey("high_precision_output")
+        val SleepTimerSeconds = intPreferencesKey("sleep_timer_seconds")
+        val AutoExtendSleepTimer = booleanPreferencesKey("auto_extend_sleep_timer")
+        val PlaybackPauseFade = booleanPreferencesKey("playback_pause_fade")
         val LyricFontScale = floatPreferencesKey("lyric_font_scale_v2")
         val LegacyLyricFontScale = floatPreferencesKey("lyric_font_scale")
         val LyricFontWeight = intPreferencesKey("lyric_font_weight")
@@ -381,6 +437,8 @@ class SettingsRepository(context: Context) {
         val LeftAlignPlayerTitle = booleanPreferencesKey("left_align_player_title")
         val HideControlsOnLyrics = booleanPreferencesKey("hide_controls_on_lyrics")
         val ShowLyricsTranslation = booleanPreferencesKey("show_lyrics_translation")
+        val LyricsSourcePriority = stringPreferencesKey("lyrics_source_priority")
+        val LyricsSidecarFormatPriority = stringPreferencesKey("lyrics_sidecar_format_priority")
         val BottomBarStyle = stringPreferencesKey("bottom_bar_style")
         val BlurEnabled = booleanPreferencesKey("blur_enabled")
         val ProgressiveTopBarBlurEnabled =
@@ -436,8 +494,8 @@ internal fun normalizeLyricFontWeight(weight: Int): Int =
 private const val LIBRARY_TAB_COUNT = 3
 private const val LEGACY_ALBUM_GRID_THREE_ORDINAL = 2
 private const val LEGACY_LYRIC_FONT_BASE_SCALE = 0.8f
-private const val MIN_LYRIC_FONT_SCALE = 0.7f
-private const val MAX_LYRIC_FONT_SCALE = 1.3f
+private const val MIN_LYRIC_FONT_SCALE = 0.6666667f
+private const val MAX_LYRIC_FONT_SCALE = 2f
 private const val DEFAULT_LYRIC_FONT_SCALE = 1f
 private const val MIN_LYRIC_FONT_WEIGHT = 100
 private const val MAX_LYRIC_FONT_WEIGHT = 900

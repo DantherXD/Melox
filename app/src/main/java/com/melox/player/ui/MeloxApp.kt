@@ -114,11 +114,14 @@ import com.melox.player.data.library.FolderSortField
 import com.melox.player.model.BottomBarStyle
 import com.melox.player.model.DefaultHomePage
 import com.melox.player.model.DynamicColorSource
+import com.melox.player.model.LyricsSidecarFormatPriority
+import com.melox.player.model.LyricsSourcePriority
 import com.melox.player.model.PlaybackBackgroundStyle
 import com.melox.player.model.ScanStatus
 import com.melox.player.model.ThemeMode
 import com.melox.player.model.MusicTrack
 import com.melox.player.ui.component.BlurredBar
+import com.melox.player.ui.component.LocalBottomSheetBlurBackdrop
 import com.melox.player.ui.component.LocalTopBarBlurSettings
 import com.melox.player.ui.component.TopBarBlurSettings
 import com.melox.player.ui.component.miuixBarColor
@@ -138,15 +141,20 @@ import com.melox.player.ui.component.library.selectedItemsInDisplayedOrder
 import com.melox.player.ui.component.library.toggleAllTrackSelection
 import com.melox.player.ui.component.playlist.PlaylistNameDialog
 import com.melox.player.ui.component.playlist.PlaylistPickerOverlay
+import com.melox.player.ui.component.playback.playerNavigationOffset
+import com.melox.player.ui.component.playback.playerSheetInputLayer
+import com.melox.player.ui.component.playback.playerSheetInputTransform
 import com.melox.player.ui.component.playback.MiniPlayer
 import com.melox.player.ui.component.playback.DynamicFlowBackgroundState
 import com.melox.player.ui.component.playback.PLAYER_FULL_ARTWORK_REQUEST_SIZE
 import com.melox.player.ui.component.playback.PlayerSheetArtworkOverlay
 import com.melox.player.ui.component.playback.PlayerSheetContentOverlay
+import com.melox.player.ui.component.playback.PlayerSheetMiniControlsInputOverlay
 import com.melox.player.ui.component.playback.sharedArtworkTargetIsOnscreen
 import com.melox.player.ui.component.playback.playerSheetUsesFullPlayerStatusBar
 import com.melox.player.ui.component.playback.playerSheetResidentHostTranslationY
 import com.melox.player.ui.component.playback.prefetchPlaybackArtworkResource
+import com.melox.player.ui.component.playback.prefetchPlaybackBackground
 import com.melox.player.ui.component.playback.rememberDynamicFlowBackgroundState
 import com.melox.player.ui.component.playback.rememberPlayerSheetTransitionState
 import com.melox.player.ui.navigation.PredictiveNavDisplay
@@ -168,6 +176,7 @@ import com.melox.player.ui.screen.settings.SettingsScreen
 import com.melox.player.ui.screen.settings.ScanMusicScreen
 import com.melox.player.ui.screen.settings.MusicStatisticsScreen
 import com.melox.player.ui.screen.settings.AboutScreen
+import com.melox.player.ui.screen.settings.SponsorScreen
 import com.melox.player.ui.screen.settings.ThemeSettingsScreen
 import com.melox.player.ui.screen.settings.BlockedFoldersScreen
 import com.melox.player.ui.viewmodel.MeloxViewModel
@@ -238,6 +247,7 @@ private enum class AppRoute {
     PLAYLISTS,
     PLAYLIST_DETAIL,
     BLOCKED_FOLDERS,
+    SPONSOR,
 }
 
 @Serializable
@@ -337,7 +347,10 @@ fun MeloxApp(
         ThemeMode.DARK -> true
     }
     val dynamicFlowBackgroundState = rememberDynamicFlowBackgroundState()
-    PlaybackArtworkPrefetchEffect(viewModel = viewModel)
+    PlaybackArtworkPrefetchEffect(
+        viewModel = viewModel,
+        playbackBackgroundStyle = settings.playbackBackgroundStyle,
+    )
     // API level alone is insufficient: liquid glass also needs RuntimeShader support at runtime.
     val liquidGlassSupported = Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
         isRuntimeShaderSupported()
@@ -848,6 +861,9 @@ fun MeloxApp(
                             onOpenPlaylists = {
                                 currentRoute = AppRoute.PLAYLISTS
                             },
+                            onOpenScanSettings = {
+                                currentRoute = AppRoute.SCAN_SETTINGS
+                            },
                             onCreatePlaylist = {
                                 if (playlistState.loaded) {
                                     playlistCreateRequest = PlaylistCreateRequest(
@@ -983,8 +999,8 @@ fun MeloxApp(
                             sectionIndexMap = musicPresentation.sectionIndexMap,
                             scanStatus = uiState.scanStatus,
                             currentTrackId = currentTrackId,
-                            query = songSearchQuery,
-                            sortConfig = musicSortConfig,
+                            query = musicPresentation.query,
+                            sortConfig = musicPresentation.sortConfig,
                             onPlayNext = viewModel::playNext,
                             onAppendToQueue = viewModel::appendToQueue,
                             onAddToPlaylist = { track ->
@@ -1150,9 +1166,11 @@ fun MeloxApp(
                                     LIBRARY_ALBUMS_TAB_INDEX -> AlbumLibraryScreen(
                                         displayedAlbums = albumPresentation.items,
                                         sectionIndexMap = albumPresentation.sectionIndexMap,
-                                        query = librarySearchQuery,
+                                        query = albumPresentation.query,
                                         scanStatus = uiState.scanStatus,
-                                        sortConfig = albumSortConfig,
+                                        sortConfig = albumPresentation.sortConfig.copy(
+                                            gridStyle = albumSortConfig.gridStyle,
+                                        ),
                                         onAlbumClick = { album ->
                                             dismissLibrarySearchFocus()
                                             selectedAlbumKey = album.key
@@ -1172,9 +1190,9 @@ fun MeloxApp(
                                     LIBRARY_ARTISTS_TAB_INDEX -> ArtistLibraryScreen(
                                         displayedArtists = artistPresentation.items,
                                         sectionIndexMap = artistPresentation.sectionIndexMap,
-                                        query = librarySearchQuery,
+                                        query = artistPresentation.query,
                                         scanStatus = uiState.scanStatus,
-                                        sortConfig = artistSortConfig,
+                                        sortConfig = artistPresentation.sortConfig,
                                         onArtistClick = { artist ->
                                             dismissLibrarySearchFocus()
                                             openTrackArtist(artist)
@@ -1189,9 +1207,9 @@ fun MeloxApp(
                                                     LIBRARY_FOLDERS_TAB_INDEX -> FolderLibraryScreen(
                                         displayedFolders = folderPresentation.items,
                                         sectionIndexMap = folderPresentation.sectionIndexMap,
-                                        query = librarySearchQuery,
+                                        query = folderPresentation.query,
                                         scanStatus = uiState.scanStatus,
-                                        sortConfig = folderSortConfig,
+                                        sortConfig = folderPresentation.sortConfig,
                                         onFolderClick = { folder ->
                                             dismissLibrarySearchFocus()
                                             selectedFolderKey = folder.key
@@ -1398,6 +1416,11 @@ fun MeloxApp(
                         depth = 2,
                     ),
                 )
+                currentRoute == AppRoute.SPONSOR -> listOf(
+                    root,
+                    AppNavDestination(AppRoute.ABOUT, depth = 1),
+                    AppNavDestination(AppRoute.SPONSOR, depth = 2),
+                )
                 currentRoute == AppRoute.PLAYLIST_DETAIL &&
                     playlistParentRoute == AppRoute.PLAYLISTS -> listOf(
                     root,
@@ -1446,6 +1469,8 @@ fun MeloxApp(
                 returnToArtistParentAlbum(null)
             } else if (currentRoute == AppRoute.BLOCKED_FOLDERS) {
                 currentRoute = AppRoute.SCAN_SETTINGS
+            } else if (currentRoute == AppRoute.SPONSOR) {
+                currentRoute = AppRoute.ABOUT
             } else if (
                 currentRoute == AppRoute.PLAYLIST_DETAIL &&
                 playlistParentRoute == AppRoute.PLAYLISTS
@@ -1462,20 +1487,34 @@ fun MeloxApp(
             currentRoute = AppRoute.ROOT
             playerPagerState.animateToPage(selectedTab)
         }
-        Scaffold(
-            containerColor = MiuixTheme.colorScheme.surface,
-            popupHost = {
-                MiuixPopupHost()
-            },
-        ) { _ ->
+        CompositionLocalProvider(
+            LocalTopBarBlurSettings provides TopBarBlurSettings(
+                blurEnabled = settings.blurEnabled,
+                progressiveEnabled = settings.progressiveTopBarBlurEnabled,
+            ),
+        ) {
+            val bottomSheetBackdrop = rememberBlurBackdrop()
+            // Overlay content is composed by the root popup host.
             CompositionLocalProvider(
-                LocalTopBarBlurSettings provides TopBarBlurSettings(
-                    blurEnabled = settings.blurEnabled,
-                    progressiveEnabled = settings.progressiveTopBarBlurEnabled,
-                ),
+                LocalBottomSheetBlurBackdrop provides bottomSheetBackdrop,
             ) {
-                Box(modifier = Modifier.fillMaxSize()) {
+                Scaffold(
+                    containerColor = MiuixTheme.colorScheme.surface,
+                    popupHost = { MiuixPopupHost() },
+                ) { _ ->
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .then(bottomSheetBackdrop?.let { Modifier.layerBackdrop(it) } ?: Modifier),
+                ) {
                     PlayerScaffold(
+                            playerNavigationOffset = {
+                                playerNavigationOffset(
+                                    source = playerTransition.miniPlayerBounds,
+                                    target = playerTransition.fullPlayerBounds,
+                                    progress = playerTransition.progress,
+                                )
+                            },
                             selectedTab = playerPagerState.selectedPage,
                             onTabSelected = onNavigationTabSelected,
                             showNavigation = shouldShowNavigation(
@@ -1669,6 +1708,14 @@ fun MeloxApp(
                                                         )
 
                                                     AppRoute.ABOUT -> AboutScreen(
+                                                        bottomContentPadding = routeBottomPadding,
+                                                        onBack = navigateBack,
+                                                        onOpenSponsor = {
+                                                            currentRoute = AppRoute.SPONSOR
+                                                        },
+                                                    )
+
+                                                    AppRoute.SPONSOR -> SponsorScreen(
                                                         bottomContentPadding = routeBottomPadding,
                                                         onBack = navigateBack,
                                                     )
@@ -1930,10 +1977,22 @@ fun MeloxApp(
                         closePlayer()
                     }
                     if (playerTransition.fullPlayerHostMounted) {
+                        val fullPlayerInputTransform = if (
+                            playerTransition.sharedLayersReady &&
+                            playerTransition.isTransitionActive
+                        ) {
+                            playerSheetInputTransform(
+                                source = playerTransition.miniPlayerBounds,
+                                target = playerTransition.fullPlayerBounds,
+                                progress = playerTransition.progress,
+                            )
+                        } else {
+                            null
+                        }
                         val fullPlayerHostTranslationY = playerSheetResidentHostTranslationY(
                             miniPlayerAcceptsInput = playerTransition.miniPlayerAcceptsInput,
                             windowHeight = windowSize.height,
-                        )
+                        ).takeIf { fullPlayerInputTransform == null } ?: 0f
                         FullPlayerHost(
                             viewModel = viewModel,
                             tracks = uiState.tracks,
@@ -1949,6 +2008,8 @@ fun MeloxApp(
                             leftAlignPlayerTitle = settings.leftAlignPlayerTitle,
                             hideControlsOnLyrics = settings.hideControlsOnLyrics,
                             showLyricsTranslation = settings.showLyricsTranslation,
+                            lyricsSourcePriority = settings.lyricsSourcePriority,
+                            lyricsSidecarFormatPriority = settings.lyricsSidecarFormatPriority,
                             onDismiss = closePlayer,
                             onOpenQueue = { showQueue = true },
                             onAddToPlaylist = { track ->
@@ -1971,7 +2032,11 @@ fun MeloxApp(
                             initialArtworkPageSelected =
                                 playerTransition.fullPlayerArtworkPageSelected,
                             onPlayerDragStart = playerTransition::beginFullPlayerDrag,
-                            onPlayerDrag = playerTransition::dragBy,
+                            onPlayerDrag = { amount ->
+                                playerTransition.dragBy(
+                                    amount * (fullPlayerInputTransform?.scale ?: 1f),
+                                )
+                            },
                             onPlayerDragEnd = playerTransition::endDrag,
                             onPlayerDragCancel = playerTransition::cancelDrag,
                             onBackgroundLayerRecorded = { generation, size ->
@@ -1989,26 +2054,30 @@ fun MeloxApp(
                                 )
                             },
                             onPlayerBoundsChanged = { bounds ->
-                                playerTransition.updateFullPlayerBounds(
-                                    androidx.compose.ui.geometry.Rect(
-                                        left = bounds.left,
-                                        top = bounds.top - fullPlayerHostTranslationY,
-                                        right = bounds.right,
-                                        bottom = bounds.bottom - fullPlayerHostTranslationY,
-                                    ),
-                                    windowSize,
-                                )
+                                if (fullPlayerInputTransform == null) {
+                                    playerTransition.updateFullPlayerBounds(
+                                        androidx.compose.ui.geometry.Rect(
+                                            left = bounds.left,
+                                            top = bounds.top - fullPlayerHostTranslationY,
+                                            right = bounds.right,
+                                            bottom = bounds.bottom - fullPlayerHostTranslationY,
+                                        ),
+                                        windowSize,
+                                    )
+                                }
                             },
                             onArtworkBoundsChanged = { bounds ->
-                                playerTransition.updateFullArtworkBounds(
-                                    androidx.compose.ui.geometry.Rect(
-                                        left = bounds.left,
-                                        top = bounds.top - fullPlayerHostTranslationY,
-                                        right = bounds.right,
-                                        bottom = bounds.bottom - fullPlayerHostTranslationY,
-                                    ),
-                                    windowSize,
-                                )
+                                if (fullPlayerInputTransform == null) {
+                                    playerTransition.updateFullArtworkBounds(
+                                        androidx.compose.ui.geometry.Rect(
+                                            left = bounds.left,
+                                            top = bounds.top - fullPlayerHostTranslationY,
+                                            right = bounds.right,
+                                            bottom = bounds.bottom - fullPlayerHostTranslationY,
+                                        ),
+                                        windowSize,
+                                    )
+                                }
                             },
                             onArtworkPageSelectedChanged =
                                 playerTransition::updateFullPlayerArtworkPageSelected,
@@ -2019,11 +2088,31 @@ fun MeloxApp(
                                 .zIndex(
                                     if (playerTransition.fullPlayerDrawsAboveRoot) 1f else -1f,
                                 )
-                                .graphicsLayer {
-                                    translationY = fullPlayerHostTranslationY
-                                },
+                                .then(
+                                    if (fullPlayerInputTransform != null) {
+                                        Modifier.playerSheetInputLayer(
+                                            transform = fullPlayerInputTransform,
+                                            miniPlayerBounds = playerTransition.miniPlayerBounds
+                                                .takeIf {
+                                                    playerTransition.miniPlayerAcceptsInput
+                                                },
+                                        )
+                                    } else {
+                                        Modifier.graphicsLayer {
+                                            translationY = fullPlayerHostTranslationY
+                                        }
+                                    },
+                                ),
                         )
                     }
+                    PlayerSheetMiniControlsInputOverlay(
+                        transition = playerTransition,
+                        hasItem = compactPlayback.currentItem != null,
+                        normalChrome = miniPlayerUsesNormalChrome,
+                        onTogglePlayPause = viewModel::togglePlayPause,
+                        onOpenQueue = { showQueue = true },
+                        modifier = Modifier.zIndex(2f),
+                    )
                     PlayerSheetContentOverlay(
                         transition = playerTransition,
                         miniPlayerContentLayer = miniPlayerContentLayer,
@@ -2115,6 +2204,7 @@ fun MeloxApp(
                     },
                 )
             }
+            }
         }
     }
 }
@@ -2135,6 +2225,8 @@ private fun FullPlayerHost(
     leftAlignPlayerTitle: Boolean,
     hideControlsOnLyrics: Boolean,
     showLyricsTranslation: Boolean,
+    lyricsSourcePriority: LyricsSourcePriority,
+    lyricsSidecarFormatPriority: LyricsSidecarFormatPriority,
     onDismiss: () -> Unit,
     onOpenQueue: () -> Unit,
     onAddToPlaylist: (MusicTrack) -> Unit,
@@ -2163,6 +2255,11 @@ private fun FullPlayerHost(
 ) {
     val playback by viewModel.playbackState.collectAsStateWithLifecycle()
     val lyrics by viewModel.lyricsState.collectAsStateWithLifecycle()
+    val sleepTimerState by viewModel.sleepTimerState.collectAsStateWithLifecycle()
+    val sleepTimerSelectionSeconds by viewModel.sleepTimerSelectionSeconds.collectAsStateWithLifecycle()
+    val autoExtendSleepTimer by viewModel.autoExtendSleepTimer.collectAsStateWithLifecycle()
+    val playbackPauseFade by viewModel.playbackPauseFade.collectAsStateWithLifecycle()
+    val highPrecisionOutput by viewModel.highPrecisionOutput.collectAsStateWithLifecycle()
     val currentTrack = remember(tracks, playback.currentItem?.trackId) {
         val trackId = playback.currentItem?.trackId
         tracks.firstOrNull { it.id == trackId }
@@ -2181,6 +2278,8 @@ private fun FullPlayerHost(
         leftAlignPlayerTitle = leftAlignPlayerTitle,
         hideControlsOnLyrics = hideControlsOnLyrics,
         showLyricsTranslation = showLyricsTranslation,
+        lyricsSourcePriority = lyricsSourcePriority,
+        lyricsSidecarFormatPriority = lyricsSidecarFormatPriority,
         onLyricFontScaleChange = viewModel::setLyricFontScale,
         onLyricFontWeightChange = viewModel::setLyricFontWeight,
         onForceWordByWordLyricsChange = viewModel::setForceWordByWordLyrics,
@@ -2189,12 +2288,27 @@ private fun FullPlayerHost(
         onLeftAlignPlayerTitleChange = viewModel::setLeftAlignPlayerTitle,
         onHideControlsOnLyricsChange = viewModel::setHideControlsOnLyrics,
         onShowLyricsTranslationChange = viewModel::setShowLyricsTranslation,
+        onLyricsSourcePriorityChange = viewModel::setLyricsSourcePriority,
+        onLyricsSidecarFormatPriorityChange = viewModel::setLyricsSidecarFormatPriority,
         onDismiss = onDismiss,
         onTogglePlayPause = viewModel::togglePlayPause,
         onPrevious = viewModel::previous,
         onNext = viewModel::next,
         onSeek = viewModel::seekTo,
         onCyclePlaybackMode = viewModel::cyclePlaybackMode,
+        onPlaybackSpeedChange = viewModel::setPlaybackSpeed,
+        highPrecisionOutput = highPrecisionOutput,
+        onHighPrecisionOutputChange = viewModel::setHighPrecisionOutput,
+        sleepTimerState = sleepTimerState,
+        sleepTimerSeconds = sleepTimerSelectionSeconds,
+        onSleepTimerSecondsChange = viewModel::setSleepTimerSelectionSeconds,
+        autoExtendSleepTimer = autoExtendSleepTimer,
+        onAutoExtendSleepTimerChange = viewModel::setAutoExtendSleepTimer,
+        playbackPauseFade = playbackPauseFade,
+        onPlaybackPauseFadeChange = viewModel::setPlaybackPauseFade,
+        onStartSleepTimer = viewModel::startSleepTimer,
+        onCancelSleepTimer = viewModel::cancelSleepTimer,
+        onAcknowledgeSleepTimerInterruption = viewModel::acknowledgeSleepTimerInterruption,
         onOpenQueue = onOpenQueue,
         onPlayNext = viewModel::playNext,
         onAppendToQueue = viewModel::appendToQueue,
@@ -2292,6 +2406,7 @@ private fun playerSheetArtworkIsOffscreen(
 @Composable
 private fun PlaybackArtworkPrefetchEffect(
     viewModel: MeloxViewModel,
+    playbackBackgroundStyle: PlaybackBackgroundStyle,
 ) {
     val playback by viewModel.compactPlaybackState.collectAsStateWithLifecycle()
     val applicationContext = LocalContext.current.applicationContext
@@ -2308,6 +2423,7 @@ private fun PlaybackArtworkPrefetchEffect(
         playback.queue,
         artworkPrefetchSizePx,
         placeholderArtworkResId,
+        playbackBackgroundStyle,
     ) {
         if (playback.queue.isEmpty() || playback.currentIndex !in playback.queue.indices) {
             return@LaunchedEffect
@@ -2318,6 +2434,17 @@ private fun PlaybackArtworkPrefetchEffect(
             (playback.currentIndex - 1 + playback.queue.size) % playback.queue.size,
         ).distinct().forEach { index ->
             val item = playback.queue[index]
+            if (index == playback.currentIndex &&
+                playbackBackgroundStyle == PlaybackBackgroundStyle.BLURRED_ARTWORK
+            ) {
+                prefetchPlaybackBackground(
+                    context = applicationContext,
+                    contentUri = item.contentUri,
+                    dateModifiedEpochSeconds = item.dateModifiedEpochSeconds,
+                    fileSizeBytes = item.fileSizeBytes,
+                    placeholderArtworkResId = placeholderArtworkResId,
+                )
+            }
             prefetchPlaybackArtworkResource(
                 context = applicationContext,
                 contentUri = item.contentUri,
@@ -2325,6 +2452,8 @@ private fun PlaybackArtworkPrefetchEffect(
                 fileSizeBytes = item.fileSizeBytes,
                 targetSizePx = artworkPrefetchSizePx,
                 placeholderArtworkResId = placeholderArtworkResId,
+                includeBlurredArtwork =
+                    playbackBackgroundStyle == PlaybackBackgroundStyle.BLURRED_ARTWORK,
             )
         }
     }

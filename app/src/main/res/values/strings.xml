@@ -1,4 +1,14 @@
 <resources>
+    <string name="music_share">Share</string>
+    <string name="music_share_failed">Could not share this song file</string>
+    <string name="artwork_preview">View artwork</string>
+    <string name="artwork_dimensions">%1$d × %2$d</string>
+    <string name="artwork_download">Download artwork</string>
+    <string name="artwork_share">Share artwork</string>
+    <string name="artwork_saved">Artwork saved to the Melox album</string>
+    <string name="artwork_save_permission_denied">Storage permission is needed to save artwork to the gallery</string>
+    <string name="artwork_unavailable">Original artwork is unavailable</string>
+    <string name="artwork_export_failed">Could not save or share artwork</string>
     <string name="selection_selected_count">%1$d selected</string>
     <string name="selection_choose_songs">Select songs</string>
     <string name="selection_select_all">Select all</string>
@@ -23,6 +33,8 @@
     <string name="home_recommendation_title">Recommendations</string>
     <string name="home_recommendation_empty_title">No music yet</string>
     <string name="home_recommendation_empty_description">Random recommendations will appear after music is scanned</string>
+    <string name="home_recommendation_unavailable_title">No recommendations yet</string>
+    <string name="home_recommendation_unavailable_description">Songs need artwork to appear in recommendations</string>
     <string name="home_recently_added_title">Recently added</string>
     <string name="home_playlists_title">Playlists</string>
     <string name="home_playlist_empty_title">No playlists yet</string>
@@ -66,6 +78,7 @@
     <string name="music_unknown_artist">Unknown artist</string>
     <string name="music_sort_action">Sort songs</string>
     <string name="music_sort_title">Title</string>
+    <string name="music_sort_artist">Artist</string>
     <string name="music_sort_date_added">Date added</string>
     <string name="music_sort_file_name">File name</string>
     <string name="music_sort_file_size">File size</string>
@@ -210,11 +223,11 @@
     <string name="settings_default_home_title">Default home page</string>
     <string name="settings_theme_settings_title">Theme settings</string>
     <string name="settings_theme_settings_summary">Customize appearance</string>
-    <string name="settings_about_title">About</string>
+    <string name="settings_about_title">About app</string>
     <string name="settings_theme_mode_title">Theme</string>
     <string name="theme_mode_system">Follow system</string>
-    <string name="theme_mode_light">Light</string>
-    <string name="theme_mode_dark">Dark</string>
+    <string name="theme_mode_light">Light mode</string>
+    <string name="theme_mode_dark">Dark mode</string>
     <string name="settings_playback_background_title">Playback background</string>
     <string name="settings_playback_background_blurred_artwork">Blurred artwork</string>
     <string name="settings_playback_background_dynamic_flow">Dynamic flow</string>
@@ -293,10 +306,27 @@
     <string name="lyrics_unavailable">No lyrics</string>
     <string name="player_settings">Player settings</string>
     <string name="player_settings_open">Open player settings</string>
+    <string name="playback_options_open">Playback speed and sleep timer</string>
+    <string name="playback_sleep_timer">Timer</string>
+    <string name="playback_sleep_timer_start">Start</string>
+    <string name="playback_sleep_timer_stop">Stop</string>
+    <string name="playback_timer_auto_extend">Extend until this song ends</string>
+    <string name="playback_timer_extension_title">Extended sleep timer</string>
+    <string name="playback_timer_extension_interrupted">Manually pausing or skipping a song during the extension cancels the sleep timer.</string>
+    <string name="playback_pause_fade">Fade in and out on play/pause</string>
+    <string name="playback_high_precision_output">High-precision output</string>
+    <string name="playback_high_precision_output_summary">Some songs cannot change speed while this is on</string>
+    <string name="playback_timer_confirm">Confirm</string>
+    <string-array name="playback_speed_options">
+        <item>×0.25</item><item>×0.50</item><item>×0.75</item><item>×0.90</item>
+        <item>×0.95</item><item>×1.00</item><item>×1.05</item><item>×1.10</item>
+        <item>×1.25</item><item>×1.5</item><item>×1.75</item><item>×2.00</item>
+        <item>×2.50</item><item>×3.00</item>
+    </string-array>
     <string name="player_title_left_aligned">Left-align title</string>
     <string name="lyrics_translation">Lyrics translation</string>
     <string name="lyrics_size">Lyrics size</string>
-    <string name="lyrics_size_value">%1$d%%</string>
+    <string name="lyrics_size_value">%1$dsp</string>
     <string name="lyrics_weight">Lyrics weight</string>
     <string name="lyrics_weight_value">%1$d</string>
     <string name="lyrics_force_word_by_word">Force word-by-word lyrics</string>
@@ -305,9 +335,19 @@
     <string name="lyrics_blur_summary">Blur inactive lyrics</string>
     <string name="lyrics_center">Center lyrics</string>
     <string name="lyrics_hide_controls">Hide controls on lyrics page</string>
+    <string name="lyrics_hide_controls_summary">After hiding controls, double-tap the title area to play/pause, swipe to change song, or long-press to open this dialog</string>
+    <string name="lyrics_source_priority">Lyrics source priority</string>
+    <string name="lyrics_source_embedded">Embedded</string>
+    <string name="lyrics_source_external">External</string>
+    <string name="lyrics_sidecar_format_priority">External lyrics format priority</string>
+    <string name="lyrics_sidecar_lrc">.lrc</string>
+    <string name="lyrics_sidecar_ttml">.ttml</string>
 
     <string name="about_version">%1$s</string>
-    <string name="about_project_title">Project address</string>
-    <string name="about_developer_title">Developer</string>
-    <string name="about_telegram_title">Join Telegram channel</string>
+    <string name="about_project_title">Project repository</string>
+    <string name="about_join_group_title">Join group</string>
+    <string name="about_sponsor_title">Sponsor support</string>
+    <string name="about_github_label">Github</string>
+    <string name="about_telegram_label">Telegram</string>
+    <string name="sponsor_code_description">Sponsorship code</string>
 </resources>

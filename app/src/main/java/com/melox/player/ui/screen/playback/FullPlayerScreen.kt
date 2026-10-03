@@ -3,6 +3,9 @@ package com.melox.player.ui.screen.playback
 import android.graphics.Bitmap
 import androidx.activity.compose.BackHandler
 import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.slideInHorizontally
+import androidx.compose.animation.slideOutHorizontally
+import androidx.compose.animation.core.updateTransition
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.togetherWith
@@ -73,7 +76,6 @@ import androidx.compose.ui.layout.layout
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalLayoutDirection
-import androidx.compose.ui.platform.LocalWindowInfo
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.ProgressBarRangeInfo
@@ -82,6 +84,7 @@ import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.setProgress
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.SpanStyle
+import androidx.compose.ui.text.TextLayoutResult
 import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontSynthesis
 import androidx.compose.ui.text.font.FontWeight
@@ -101,21 +104,32 @@ import com.melox.player.data.library.displayArtistName
 import com.melox.player.model.MusicTrack
 import com.melox.player.model.LyricsUiState
 import com.melox.player.model.LyricsDocument
+import com.melox.player.model.LyricsSidecarFormatPriority
+import com.melox.player.model.LyricsSourcePriority
 import com.melox.player.model.PlaybackMode
 import com.melox.player.model.PlaybackBackgroundStyle
 import com.melox.player.model.PlaybackQueueItem
 import com.melox.player.model.PlaybackUiState
+import com.melox.player.model.SleepTimerState
 import com.melox.player.model.withTrackMetadata
+import com.melox.player.ui.usesMiuixSmallTopAppBar
 import com.melox.player.ui.isMiuixWideLayout
 import com.melox.player.ui.component.library.PlaybackArtworkFrame
 import com.melox.player.ui.component.library.PLAYBACK_ARTWORK_SHADOW_BLUR_RADIUS
 import com.melox.player.ui.component.library.TrackActionsOverlay
+import com.melox.player.ui.component.bottomSheetCardColor
+import com.melox.player.ui.component.bottomSheetGlassModifier
+import com.melox.player.ui.component.bottomSheetMaterialColor
 import com.melox.player.ui.component.library.formatDuration
+import com.melox.player.ui.component.library.fullPlayerArtworkTargetSizePx
+import com.melox.player.ui.component.library.normalizeArtworkTargetSize
+import com.melox.player.ui.component.library.rememberFullPlayerArtworkBitmapPixels
 import com.melox.player.ui.component.playback.BlurredArtworkBackground
 import com.melox.player.ui.component.playback.DynamicFlowBackground
 import com.melox.player.ui.component.playback.DynamicFlowBackgroundState
 import com.melox.player.ui.component.playback.PLAYER_FULL_ARTWORK_CORNER_RADIUS
 import com.melox.player.ui.component.playback.PLAYER_FULL_ARTWORK_REQUEST_SIZE
+import com.melox.player.ui.component.playback.PLAYER_ARTWORK_RESOLUTION_CROSSFADE_DURATION_MILLIS
 import com.melox.player.ui.component.playback.PLAYER_TRACK_ARTWORK_CROSSFADE_DURATION_MILLIS
 import com.melox.player.ui.component.playback.PLAYER_TRACK_ARTWORK_CROSSFADE_EASING
 import com.melox.player.ui.component.playback.rememberPlaybackArtworkResource
@@ -132,6 +146,7 @@ import kotlin.math.roundToInt
 import top.yukonga.miuix.kmp.basic.Card
 import top.yukonga.miuix.kmp.basic.CardDefaults
 import top.yukonga.miuix.kmp.basic.BasicComponent
+import top.yukonga.miuix.kmp.basic.DropdownItem
 import top.yukonga.miuix.kmp.basic.Icon
 import top.yukonga.miuix.kmp.basic.IconButton
 import top.yukonga.miuix.kmp.basic.LinearProgressIndicator
@@ -139,11 +154,14 @@ import top.yukonga.miuix.kmp.basic.ProgressIndicatorDefaults
 import top.yukonga.miuix.kmp.basic.Scaffold
 import top.yukonga.miuix.kmp.basic.Slider
 import top.yukonga.miuix.kmp.basic.Text
+import top.yukonga.miuix.kmp.basic.TextButton
 import top.yukonga.miuix.kmp.icon.MiuixIcons
 import top.yukonga.miuix.kmp.icon.extended.More
 import top.yukonga.miuix.kmp.icon.extended.Playlist
 import top.yukonga.miuix.kmp.icon.extended.Tune
 import top.yukonga.miuix.kmp.overlay.OverlayBottomSheet
+import top.yukonga.miuix.kmp.overlay.OverlayDialog
+import top.yukonga.miuix.kmp.preference.OverlaySpinnerPreference
 import top.yukonga.miuix.kmp.preference.SwitchPreference
 import top.yukonga.miuix.kmp.theme.MiuixTheme
 import top.yukonga.miuix.kmp.utils.overScrollVertical
@@ -163,6 +181,8 @@ internal fun FullPlayerScreen(
     leftAlignPlayerTitle: Boolean,
     hideControlsOnLyrics: Boolean,
     showLyricsTranslation: Boolean,
+    lyricsSourcePriority: LyricsSourcePriority,
+    lyricsSidecarFormatPriority: LyricsSidecarFormatPriority,
     onLyricFontScaleChange: (Float) -> Unit,
     onLyricFontWeightChange: (Int) -> Unit,
     onForceWordByWordLyricsChange: (Boolean) -> Unit,
@@ -171,12 +191,27 @@ internal fun FullPlayerScreen(
     onLeftAlignPlayerTitleChange: (Boolean) -> Unit,
     onHideControlsOnLyricsChange: (Boolean) -> Unit,
     onShowLyricsTranslationChange: (Boolean) -> Unit,
+    onLyricsSourcePriorityChange: (LyricsSourcePriority) -> Unit,
+    onLyricsSidecarFormatPriorityChange: (LyricsSidecarFormatPriority) -> Unit,
     onDismiss: () -> Unit,
     onTogglePlayPause: () -> Unit,
     onPrevious: () -> Unit,
     onNext: () -> Unit,
     onSeek: (Long) -> Unit,
     onCyclePlaybackMode: () -> Unit,
+    onPlaybackSpeedChange: (Float) -> Unit,
+    highPrecisionOutput: Boolean,
+    onHighPrecisionOutputChange: (Boolean) -> Unit,
+    sleepTimerState: SleepTimerState,
+    sleepTimerSeconds: Int,
+    onSleepTimerSecondsChange: (Int) -> Unit,
+    autoExtendSleepTimer: Boolean,
+    onAutoExtendSleepTimerChange: (Boolean) -> Unit,
+    playbackPauseFade: Boolean,
+    onPlaybackPauseFadeChange: (Boolean) -> Unit,
+    onStartSleepTimer: (Int) -> Unit,
+    onCancelSleepTimer: () -> Unit,
+    onAcknowledgeSleepTimerInterruption: () -> Unit,
     onOpenQueue: () -> Unit,
     onPlayNext: (MusicTrack) -> Unit,
     onAppendToQueue: (MusicTrack) -> Unit,
@@ -209,16 +244,39 @@ internal fun FullPlayerScreen(
     val item = playback.currentItem?.let { queueItem ->
         currentTrack?.let(queueItem::withTrackMetadata) ?: queueItem
     }
+    val density = LocalDensity.current
+    val backgroundArtworkTargetSizePx = normalizeArtworkTargetSize(
+        with(density) { PLAYER_FULL_ARTWORK_REQUEST_SIZE.roundToPx() },
+    )
+    var artworkDisplaySizePx by remember(density) {
+        mutableIntStateOf(backgroundArtworkTargetSizePx)
+    }
+    val resolvedFullPlayerArtworkTargetSizePx =
+        fullPlayerArtworkTargetSizePx(artworkDisplaySizePx)
     val artworkResource = rememberPlaybackArtworkResource(
         contentUri = item?.contentUri.orEmpty(),
         dateModifiedEpochSeconds = item?.dateModifiedEpochSeconds ?: 0L,
         fileSizeBytes = item?.fileSizeBytes ?: 0L,
         requestSize = PLAYER_FULL_ARTWORK_REQUEST_SIZE,
+        prioritizeBlurredBackground =
+            playbackBackgroundStyle == PlaybackBackgroundStyle.BLURRED_ARTWORK,
+    )
+    val fullPlayerArtwork = rememberFullPlayerArtworkBitmapPixels(
+        contentUri = item?.contentUri.orEmpty(),
+        dateModifiedEpochSeconds = item?.dateModifiedEpochSeconds ?: 0L,
+        fileSizeBytes = item?.fileSizeBytes ?: 0L,
+        targetSizePx = resolvedFullPlayerArtworkTargetSizePx,
+        enabled = item != null && artworkDisplaySizePx > 0,
     )
     val artworkBlend = rememberArtworkBlend(
-        targetBitmap = artworkResource.artwork,
+        targetBitmap = fullPlayerArtwork ?: artworkResource.artwork,
         animate = true,
+        contentKey = item?.contentUri,
+        sameContentDurationMillis = PLAYER_ARTWORK_RESOLUTION_CROSSFADE_DURATION_MILLIS,
     )
+    val onArtworkDisplaySizeChanged: (Int) -> Unit = { sizePx ->
+        artworkDisplaySizePx = sizePx
+    }
     val emphasisControlColor = Color.White
     val controlColor = emphasisControlColor.copy(alpha = 0.6f)
     val artistControlColor = emphasisControlColor.copy(
@@ -227,6 +285,11 @@ internal fun FullPlayerScreen(
     val artworkCornerRadius = PLAYER_FULL_ARTWORK_CORNER_RADIUS
     var showTrackActions by remember { mutableStateOf(false) }
     var showLyricsSettings by remember { mutableStateOf(false) }
+    var showPlaybackOptions by remember { mutableStateOf(false) }
+    var showTimerInterruption by remember { mutableStateOf(false) }
+    LaunchedEffect(sleepTimerState.interruptionNotice) {
+        showTimerInterruption = sleepTimerState.interruptionNotice > 0
+    }
     var displayedLyricFontScale by remember { mutableFloatStateOf(lyricFontScale) }
     var displayedLyricFontWeight by remember { mutableIntStateOf(lyricFontWeight) }
     var displayedForceWordByWordLyrics by remember {
@@ -242,6 +305,12 @@ internal fun FullPlayerScreen(
     }
     var displayedShowLyricsTranslation by remember {
         mutableStateOf(showLyricsTranslation)
+    }
+    var displayedLyricsSourcePriority by remember {
+        mutableStateOf(lyricsSourcePriority)
+    }
+    var displayedLyricsSidecarFormatPriority by remember {
+        mutableStateOf(lyricsSidecarFormatPriority)
     }
     var lyricsFollowRequestKey by remember { mutableIntStateOf(0) }
     var lyricsSeekRequestKey by remember { mutableIntStateOf(0) }
@@ -260,7 +329,6 @@ internal fun FullPlayerScreen(
         ),
         label = "playerArtworkPadding",
     )
-    val density = LocalDensity.current
     val playerHeaderTitleSlotHeight = with(density) {
         PLAYER_HEADER_TITLE_LINE_HEIGHT.toDp()
     }
@@ -276,6 +344,7 @@ internal fun FullPlayerScreen(
     val playerSafeTop = playerSafeDrawingPadding.calculateTopPadding()
     val playerSafeEnd = playerSafeDrawingPadding.calculateEndPadding(layoutDirection)
     val playerSafeBottom = playerSafeDrawingPadding.calculateBottomPadding()
+    val playerControlsBottomPadding = playerControlsBottomPadding(playerSafeBottom)
     val onTogglePlayPauseFromPlayer = {
         if (!playback.playWhenReady) lyricsFollowRequestKey += 1
         onTogglePlayPause()
@@ -290,7 +359,7 @@ internal fun FullPlayerScreen(
     val onPreviewSeekFromPlayer: (Long?) -> Unit = { targetPositionMs ->
         lyricsPreviewPositionMs = targetPositionMs
     }
-    LaunchedEffect(item?.contentUri) {
+    LaunchedEffect(item?.contentUri, playback.playbackIteration) {
         lyricsPreviewPositionMs = null
         lyricsSeekRequestKey = 0
         lyricsSeekPositionMs = playback.positionMs
@@ -342,6 +411,12 @@ internal fun FullPlayerScreen(
     }
     LaunchedEffect(showLyricsTranslation) {
         displayedShowLyricsTranslation = showLyricsTranslation
+    }
+    LaunchedEffect(lyricsSourcePriority) {
+        displayedLyricsSourcePriority = lyricsSourcePriority
+    }
+    LaunchedEffect(lyricsSidecarFormatPriority) {
+        displayedLyricsSidecarFormatPriority = lyricsSidecarFormatPriority
     }
     val dismissGestureModifier = rememberPlayerSheetVerticalDragModifier(
         enabled = interactionEnabled,
@@ -481,6 +556,7 @@ internal fun FullPlayerScreen(
                     if (playerLayout == PlayerLayout.PORTRAIT) {
                         PlayerHeader(
                             item = item,
+                            trackChangeDirection = playback.trackChangeDirection,
                             titleColor = emphasisControlColor,
                             artistColor = artistControlColor,
                             leftAligned = displayedLeftAlignPlayerTitle,
@@ -488,7 +564,20 @@ internal fun FullPlayerScreen(
                             artistSlotHeight = playerHeaderArtistSlotHeight,
                             modifier = Modifier
                                 .width(portraitArtworkContentWidth)
-                                .padding(top = headerTopPadding),
+                                .padding(top = headerTopPadding)
+                                .then(
+                                    rememberPlayerHeaderGestureModifier(
+                                        enabled = displayedHideControlsOnLyrics &&
+                                            lyricsPagingEnabled && item != null &&
+                                            pagerState.settledPage == 1 &&
+                                            !pagerState.isScrollInProgress,
+                                        playWhenReady = playback.playWhenReady,
+                                        onTogglePlayPause = onTogglePlayPause,
+                                        onPrevious = onPrevious,
+                                        onNext = onNext,
+                                        onOpenLyricsSettings = { showLyricsSettings = true },
+                                    ),
+                                ),
                         )
                         Spacer(Modifier.height(headerSpacing))
                     }
@@ -509,7 +598,7 @@ internal fun FullPlayerScreen(
                             val artworkContentWidth = playerUnboundedContentWidth(playbackPaneWidth)
                             WidePlayerContent(
                                 topPadding = headerTopPadding,
-                                bottomPadding = PLAYER_CONTENT_BOTTOM_SPACING,
+                                bottomPadding = playerControlsBottomPadding,
                                 playbackPaneWidth = playbackPaneWidth,
                                 lyricsPaneWidth = lyricsPaneWidth,
                                 paneSpacing = paneSpacing,
@@ -517,6 +606,7 @@ internal fun FullPlayerScreen(
                                     val spacing = landscapePlayerSpacing()
                                     PlayerHeader(
                                         item = item,
+                                        trackChangeDirection = playback.trackChangeDirection,
                                         titleColor = emphasisControlColor,
                                         artistColor = artistControlColor,
                                         leftAligned = displayedLeftAlignPlayerTitle,
@@ -541,6 +631,8 @@ internal fun FullPlayerScreen(
                                             cornerRadius = artworkCornerRadius,
                                             sharedArtworkVisible = sharedArtworkVisible,
                                             onArtworkBoundsChanged = onArtworkBoundsChanged,
+                                            onArtworkDisplaySizeChanged =
+                                                onArtworkDisplaySizeChanged,
                                         )
                                     }
                                     Spacer(Modifier.height(LANDSCAPE_PLAYER_ARTWORK_TO_PROGRESS_SPACING))
@@ -558,6 +650,7 @@ internal fun FullPlayerScreen(
                                         onSeek = onSeekFromPlayer,
                                         onPreviewPositionChange = onPreviewSeekFromPlayer,
                                         onCyclePlaybackMode = onCyclePlaybackMode,
+                                        onOpenPlaybackOptions = { showPlaybackOptions = true },
                                         onOpenLyricsSettings = { showLyricsSettings = true },
                                         onOpenQueue = onOpenQueue,
                                         onOpenTrackActions = {
@@ -574,6 +667,7 @@ internal fun FullPlayerScreen(
                                         positionMs = playback.positionMs,
                                         positionUpdateElapsedRealtimeMs =
                                             playback.positionUpdateElapsedRealtimeMs,
+                                        playbackIteration = playback.playbackIteration,
                                         playbackSpeed = playback.playbackSpeed,
                                         previewPositionMs = lyricsPreviewPositionMs,
                                         isPlaying = playback.isPlaying,
@@ -609,6 +703,8 @@ internal fun FullPlayerScreen(
                                         cornerRadius = artworkCornerRadius,
                                         sharedArtworkVisible = sharedArtworkVisible,
                                         onArtworkBoundsChanged = onArtworkBoundsChanged,
+                                        onArtworkDisplaySizeChanged =
+                                            onArtworkDisplaySizeChanged,
                                     )
                                 },
                                 lyricsContent = { contentWidth, contentHeight ->
@@ -622,6 +718,7 @@ internal fun FullPlayerScreen(
                                             positionMs = playback.positionMs,
                                             positionUpdateElapsedRealtimeMs =
                                                 playback.positionUpdateElapsedRealtimeMs,
+                                            playbackIteration = playback.playbackIteration,
                                             playbackSpeed = playback.playbackSpeed,
                                             previewPositionMs = lyricsPreviewPositionMs,
                                             isPlaying = playback.isPlaying,
@@ -654,6 +751,7 @@ internal fun FullPlayerScreen(
                                     ) {
                                         PlayerHeader(
                                             item = item,
+                                            trackChangeDirection = playback.trackChangeDirection,
                                             titleColor = emphasisControlColor,
                                             artistColor = artistControlColor,
                                             leftAligned = displayedLeftAlignPlayerTitle,
@@ -674,6 +772,7 @@ internal fun FullPlayerScreen(
                                             onSeek = onSeekFromPlayer,
                                             onPreviewPositionChange = onPreviewSeekFromPlayer,
                                             onCyclePlaybackMode = onCyclePlaybackMode,
+                                            onOpenPlaybackOptions = { showPlaybackOptions = true },
                                             onOpenLyricsSettings = { showLyricsSettings = true },
                                             onOpenQueue = onOpenQueue,
                                             onOpenTrackActions = {
@@ -708,7 +807,7 @@ internal fun FullPlayerScreen(
                             val spacing = playerVerticalSpacing(
                                 availableHeight = maxHeight,
                                 preferredArtworkSize = artworkSize,
-                                panelBottom = PLAYER_CONTENT_BOTTOM_SPACING,
+                                panelBottom = playerControlsBottomPadding,
                             )
                             if (displayedHideControlsOnLyrics) {
                                 PlayerContentPager(
@@ -717,6 +816,7 @@ internal fun FullPlayerScreen(
                                     positionMs = playback.positionMs,
                                     positionUpdateElapsedRealtimeMs =
                                         playback.positionUpdateElapsedRealtimeMs,
+                                    playbackIteration = playback.playbackIteration,
                                     playbackSpeed = playback.playbackSpeed,
                                     previewPositionMs = lyricsPreviewPositionMs,
                                     isPlaying = playback.isPlaying,
@@ -752,6 +852,8 @@ internal fun FullPlayerScreen(
                                                     cornerRadius = artworkCornerRadius,
                                                     sharedArtworkVisible = sharedArtworkVisible,
                                                     onArtworkBoundsChanged = onArtworkBoundsChanged,
+                                                    onArtworkDisplaySizeChanged =
+                                                        onArtworkDisplaySizeChanged,
                                                 )
                                             },
                                             detailsContent = {
@@ -769,6 +871,7 @@ internal fun FullPlayerScreen(
                                                     onSeek = onSeekFromPlayer,
                                                     onPreviewPositionChange = onPreviewSeekFromPlayer,
                                                     onCyclePlaybackMode = onCyclePlaybackMode,
+                                                    onOpenPlaybackOptions = { showPlaybackOptions = true },
                                                     onOpenLyricsSettings = {
                                                         showLyricsSettings = true
                                                     },
@@ -794,6 +897,7 @@ internal fun FullPlayerScreen(
                                             positionMs = playback.positionMs,
                                             positionUpdateElapsedRealtimeMs =
                                                 playback.positionUpdateElapsedRealtimeMs,
+                                            playbackIteration = playback.playbackIteration,
                                             playbackSpeed = playback.playbackSpeed,
                                             previewPositionMs = lyricsPreviewPositionMs,
                                             isPlaying = playback.isPlaying,
@@ -829,6 +933,8 @@ internal fun FullPlayerScreen(
                                                     sharedArtworkVisible = sharedArtworkVisible,
                                                     onArtworkBoundsChanged =
                                                         onArtworkBoundsChanged,
+                                                    onArtworkDisplaySizeChanged =
+                                                        onArtworkDisplaySizeChanged,
                                                 )
                                             },
                                         )
@@ -847,6 +953,7 @@ internal fun FullPlayerScreen(
                                             onSeek = onSeekFromPlayer,
                                             onPreviewPositionChange = onPreviewSeekFromPlayer,
                                             onCyclePlaybackMode = onCyclePlaybackMode,
+                                            onOpenPlaybackOptions = { showPlaybackOptions = true },
                                             onOpenLyricsSettings = {
                                                 showLyricsSettings = true
                                             },
@@ -886,6 +993,8 @@ internal fun FullPlayerScreen(
                     centerLyrics = displayedCenterLyrics,
                     hideControlsOnLyrics = displayedHideControlsOnLyrics,
                     showLyricsTranslation = displayedShowLyricsTranslation,
+                    lyricsSourcePriority = displayedLyricsSourcePriority,
+                    lyricsSidecarFormatPriority = displayedLyricsSidecarFormatPriority,
                     onDismiss = { showLyricsSettings = false },
                     onLeftAlignPlayerTitleChange = {
                         displayedLeftAlignPlayerTitle = it
@@ -919,7 +1028,51 @@ internal fun FullPlayerScreen(
                         displayedShowLyricsTranslation = it
                         onShowLyricsTranslationChange(it)
                     },
+                    onLyricsSourcePriorityChange = {
+                        displayedLyricsSourcePriority = it
+                        onLyricsSourcePriorityChange(it)
+                    },
+                    onLyricsSidecarFormatPriorityChange = {
+                        displayedLyricsSidecarFormatPriority = it
+                        onLyricsSidecarFormatPriorityChange(it)
+                    },
                 )
+                PlaybackOptionsDialog(
+                    show = showPlaybackOptions,
+                    playbackSpeed = playback.playbackSpeed,
+                    floatOutputActive = playback.floatOutputActive,
+                    highPrecisionOutput = highPrecisionOutput,
+                    onHighPrecisionOutputChange = onHighPrecisionOutputChange,
+                    timerSeconds = sleepTimerSeconds,
+                    timerState = sleepTimerState,
+                    autoExtendSleepTimer = autoExtendSleepTimer,
+                    onAutoExtendSleepTimerChange = onAutoExtendSleepTimerChange,
+                    playbackPauseFade = playbackPauseFade,
+                    onPlaybackPauseFadeChange = onPlaybackPauseFadeChange,
+                    onDismiss = { showPlaybackOptions = false },
+                    onPlaybackSpeedChange = onPlaybackSpeedChange,
+                    onTimerSecondsChange = onSleepTimerSecondsChange,
+                    onStartTimer = onStartSleepTimer,
+                    onCancelTimer = onCancelSleepTimer,
+                )
+                OverlayDialog(
+                    show = showTimerInterruption,
+                    title = stringResource(R.string.playback_timer_extension_title),
+                    summary = stringResource(R.string.playback_timer_extension_interrupted),
+                    onDismissRequest = {
+                        showTimerInterruption = false
+                        onAcknowledgeSleepTimerInterruption()
+                    },
+                ) {
+                    TextButton(
+                        text = stringResource(R.string.playback_timer_confirm),
+                        onClick = {
+                            showTimerInterruption = false
+                            onAcknowledgeSleepTimerInterruption()
+                        },
+                        modifier = Modifier.fillMaxWidth(),
+                    )
+                }
             }
     }
 }
@@ -937,6 +1090,8 @@ private fun PlayerSettingsSheet(
     centerLyrics: Boolean,
     hideControlsOnLyrics: Boolean,
     showLyricsTranslation: Boolean,
+    lyricsSourcePriority: LyricsSourcePriority,
+    lyricsSidecarFormatPriority: LyricsSidecarFormatPriority,
     onDismiss: () -> Unit,
     onLeftAlignPlayerTitleChange: (Boolean) -> Unit,
     onLyricFontScalePreview: (Float) -> Unit,
@@ -948,12 +1103,17 @@ private fun PlayerSettingsSheet(
     onCenterLyricsChange: (Boolean) -> Unit,
     onHideControlsOnLyricsChange: (Boolean) -> Unit,
     onShowLyricsTranslationChange: (Boolean) -> Unit,
+    onLyricsSourcePriorityChange: (LyricsSourcePriority) -> Unit,
+    onLyricsSidecarFormatPriorityChange: (LyricsSidecarFormatPriority) -> Unit,
 ) {
+    val wideLayout = usesMiuixSmallTopAppBar()
     val bottomPadding = WindowInsets.navigationBars
         .asPaddingValues()
         .calculateBottomPadding()
     OverlayBottomSheet(
         show = show,
+        modifier = bottomSheetGlassModifier(),
+        backgroundColor = bottomSheetMaterialColor(),
         title = stringResource(R.string.player_settings),
         enableWindowDim = true,
         onDismissRequest = onDismiss,
@@ -971,9 +1131,10 @@ private fun PlayerSettingsSheet(
             verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {
             Card(
-                modifier = Modifier.fillMaxWidth(),
+                modifier = Modifier
+                    .fillMaxWidth(),
                 colors = CardDefaults.defaultColors(
-                    color = MiuixTheme.colorScheme.secondaryContainer,
+                    color = bottomSheetCardColor(),
                 ),
             ) {
                 Column(modifier = Modifier.fillMaxWidth()) {
@@ -987,22 +1148,23 @@ private fun PlayerSettingsSheet(
                         checked = centerLyrics,
                         onCheckedChange = onCenterLyricsChange,
                     )
+                    SwitchPreference(
+                        title = stringResource(R.string.lyrics_translation),
+                        checked = showLyricsTranslation,
+                        onCheckedChange = onShowLyricsTranslationChange,
+                    )
                     TappableSliderPreference(
                         value = lyricFontScale,
                         onValueChange = onLyricFontScalePreview,
                         title = stringResource(R.string.lyrics_size),
                         valueText = stringResource(
                             R.string.lyrics_size_value,
-                            (lyricFontScale * 100f).roundToInt(),
+                            (LYRIC_PRIMARY_FONT_SIZE_SP * lyricFontScale).roundToInt(),
                         ),
                         valueRange = MIN_LYRIC_FONT_SCALE..MAX_LYRIC_FONT_SCALE,
                         onValueChangeFinished = onLyricFontScaleCommit,
                         showKeyPoints = true,
-                        keyPoints = listOf(
-                            MIN_LYRIC_FONT_SCALE,
-                            DEFAULT_LYRIC_FONT_SCALE,
-                            MAX_LYRIC_FONT_SCALE,
-                        ),
+                        keyPoints = listOf(DEFAULT_LYRIC_FONT_SCALE),
                     )
                     TappableSliderPreference(
                         value = lyricFontWeight.toFloat(),
@@ -1021,11 +1183,6 @@ private fun PlayerSettingsSheet(
                         showKeyPoints = true,
                     )
                     SwitchPreference(
-                        title = stringResource(R.string.lyrics_translation),
-                        checked = showLyricsTranslation,
-                        onCheckedChange = onShowLyricsTranslationChange,
-                    )
-                    SwitchPreference(
                         title = stringResource(R.string.lyrics_blur),
                         summary = stringResource(R.string.lyrics_blur_summary),
                         checked = lyricBlurEnabled,
@@ -1034,9 +1191,10 @@ private fun PlayerSettingsSheet(
                 }
             }
             Card(
-                modifier = Modifier.fillMaxWidth(),
+                modifier = Modifier
+                    .fillMaxWidth(),
                 colors = CardDefaults.defaultColors(
-                    color = MiuixTheme.colorScheme.secondaryContainer,
+                    color = bottomSheetCardColor(),
                 ),
             ) {
                 SwitchPreference(
@@ -1046,24 +1204,85 @@ private fun PlayerSettingsSheet(
                     onCheckedChange = onForceWordByWordLyricsChange,
                 )
             }
+            if (!wideLayout) {
+                Card(
+                    modifier = Modifier
+                        .fillMaxWidth(),
+                    colors = CardDefaults.defaultColors(
+                        color = bottomSheetCardColor(),
+                    ),
+                ) {
+                    SwitchPreference(
+                        title = stringResource(R.string.lyrics_hide_controls),
+                        summary = stringResource(R.string.lyrics_hide_controls_summary),
+                        checked = hideControlsOnLyrics,
+                        onCheckedChange = onHideControlsOnLyricsChange,
+                    )
+                }
+            }
             Card(
                 modifier = Modifier.fillMaxWidth(),
                 colors = CardDefaults.defaultColors(
-                    color = MiuixTheme.colorScheme.secondaryContainer,
+                    color = bottomSheetCardColor(),
                 ),
             ) {
-                SwitchPreference(
-                    title = stringResource(R.string.lyrics_hide_controls),
-                    checked = hideControlsOnLyrics,
-                    onCheckedChange = onHideControlsOnLyricsChange,
-                )
+                Column(modifier = Modifier.fillMaxWidth()) {
+                    OverlaySpinnerPreference(
+                        items = listOf(
+                            DropdownItem(
+                                text = stringResource(R.string.lyrics_source_embedded),
+                            ),
+                            DropdownItem(
+                                text = stringResource(R.string.lyrics_source_external),
+                            ),
+                        ),
+                        selectedIndex = when (lyricsSourcePriority) {
+                            LyricsSourcePriority.EMBEDDED -> 0
+                            LyricsSourcePriority.SIDECAR -> 1
+                        },
+                        title = stringResource(R.string.lyrics_source_priority),
+                        onSelectedIndexChange = { selectedIndex ->
+                            val priority = when (selectedIndex) {
+                                0 -> LyricsSourcePriority.EMBEDDED
+                                else -> LyricsSourcePriority.SIDECAR
+                            }
+                            if (priority != lyricsSourcePriority) {
+                                onLyricsSourcePriorityChange(priority)
+                            }
+                        },
+                    )
+                    OverlaySpinnerPreference(
+                        items = listOf(
+                            DropdownItem(
+                                text = stringResource(R.string.lyrics_sidecar_lrc),
+                            ),
+                            DropdownItem(
+                                text = stringResource(R.string.lyrics_sidecar_ttml),
+                            ),
+                        ),
+                        selectedIndex = when (lyricsSidecarFormatPriority) {
+                            LyricsSidecarFormatPriority.LRC -> 0
+                            LyricsSidecarFormatPriority.TTML -> 1
+                        },
+                        title = stringResource(R.string.lyrics_sidecar_format_priority),
+                        onSelectedIndexChange = { selectedIndex ->
+                            val priority = when (selectedIndex) {
+                                0 -> LyricsSidecarFormatPriority.LRC
+                                else -> LyricsSidecarFormatPriority.TTML
+                            }
+                            if (priority != lyricsSidecarFormatPriority) {
+                                onLyricsSidecarFormatPriorityChange(priority)
+                            }
+                        },
+                    )
+                }
             }
         }
     }
 }
 
 @Composable
-private fun TappableSliderPreference(
+internal fun TappableSliderPreference(
     value: Float,
     onValueChange: (Float) -> Unit,
     title: String,
@@ -1186,6 +1405,7 @@ internal fun sliderValueAtPosition(
 
 private data class PlayerHeaderContent(
     val trackKey: String?,
+    val direction: Int,
     val title: String,
     val artist: String,
 )
@@ -1206,6 +1426,7 @@ internal fun playerHeaderArtistText(artist: String): AnnotatedString = buildAnno
 @Composable
 private fun PlayerHeader(
     item: PlaybackQueueItem?,
+    trackChangeDirection: Int,
     titleColor: Color,
     artistColor: Color,
     leftAligned: Boolean,
@@ -1215,102 +1436,146 @@ private fun PlayerHeader(
 ) {
     val header = PlayerHeaderContent(
         trackKey = item?.contentUri,
+        direction = trackChangeDirection,
         title = item?.title ?: stringResource(R.string.no_track_selected),
         artist = displayArtistName(item?.artist)
             ?: stringResource(R.string.music_unknown_artist),
     )
-    AnimatedContent(
-        targetState = header,
-        modifier = modifier,
-        transitionSpec = {
-            fadeIn(tween(180)).togetherWith(fadeOut(tween(140)))
-        },
-        label = "playerHeaderTrack",
-    ) { target ->
-        Column(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalAlignment = if (leftAligned) {
-                Alignment.Start
-            } else {
-                Alignment.CenterHorizontally
-            },
-            verticalArrangement = Arrangement.spacedBy(1.dp),
+    val headerTransition = updateTransition(header, label = "playerHeaderTrack")
+    val alignmentProgress = animateFloatAsState(
+        targetValue = if (leftAligned) 0f else 1f,
+        animationSpec = playerTextAlignmentSpec(),
+        label = "playerHeaderAlignment",
+    )
+    val titleFadeWidthPx = with(LocalDensity.current) {
+        PLAYER_HEADER_TITLE_EDGE_FADE_WIDTH.roundToPx()
+    }
+    Column(
+        modifier = modifier.fillMaxWidth(),
+        horizontalAlignment = if (leftAligned) Alignment.Start else Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.spacedBy(1.dp),
+    ) {
+        Box(
+            modifier = Modifier.fillMaxWidth().heightIn(min = titleSlotHeight),
+            contentAlignment = if (leftAligned) Alignment.CenterStart else Alignment.Center,
         ) {
             Box(
                 modifier = Modifier
+                    .expandLeftForMarquee(PLAYER_HEADER_TITLE_EDGE_FADE_WIDTH)
                     .fillMaxWidth()
-                    .heightIn(min = titleSlotHeight),
-                contentAlignment = if (leftAligned) Alignment.CenterStart else Alignment.Center,
+                    .playerHeaderEdgeMask(),
             ) {
-                Box(
-                    modifier = Modifier
-                        .expandLeftForMarquee(PLAYER_HEADER_TITLE_EDGE_FADE_WIDTH)
-                        .fillMaxWidth()
-                        .graphicsLayer {
-                            compositingStrategy = CompositingStrategy.Offscreen
-                        }
-                        .drawWithContent {
-                            drawContent()
-                            val fadeWidth = PLAYER_HEADER_TITLE_EDGE_FADE_WIDTH.toPx()
-                            val edgeFraction = (
-                                fadeWidth / size.width.coerceAtLeast(1f)
-                            ).coerceIn(0f, 0.18f)
-                            drawRect(
-                                brush = Brush.horizontalGradient(
-                                    0f to Color.Transparent,
-                                    edgeFraction to Color.Black,
-                                    1f - edgeFraction to Color.Black,
-                                    1f to Color.Transparent,
-                                ),
-                                blendMode = BlendMode.DstIn,
+                headerTransition.AnimatedContent(
+                    modifier = Modifier.fillMaxWidth(),
+                    contentKey = { it.trackKey to it.direction },
+                    transitionSpec = {
+                        slideInHorizontally(tween(PLAYER_TRACK_ARTWORK_CROSSFADE_DURATION_MILLIS)) { it * targetState.direction }
+                            .togetherWith(
+                                slideOutHorizontally(tween(PLAYER_TRACK_ARTWORK_CROSSFADE_DURATION_MILLIS)) { -it * targetState.direction },
+                            ).using(null)
+                    },
+                ) { target ->
+                    var titleLayout by remember(target.trackKey) {
+                        mutableStateOf<TextLayoutResult?>(null)
+                    }
+                    Box(
+                        modifier = Modifier.fillMaxWidth()
+                            .animatedPlayerTextAlignment(
+                                layout = titleLayout,
+                                progress = alignmentProgress,
+                                viewportInsetPx = titleFadeWidthPx.toFloat(),
                             )
-                        }
-                        .basicMarquee(
-                            iterations = 1,
-                            spacing = MarqueeSpacing.fractionOfContainer(
-                                PLAYER_HEADER_MARQUEE_SPACING_FRACTION,
+                            .basicMarquee(
+                                iterations = if (headerTransition.isRunning) 0 else 1,
+                                spacing = MarqueeSpacing.fractionOfContainer(
+                                    PLAYER_HEADER_MARQUEE_SPACING_FRACTION,
+                                ),
                             ),
-                        ),
-                    contentAlignment = if (leftAligned) Alignment.CenterStart else Alignment.Center,
-                ) {
-                    Text(
-                        text = target.title,
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(start = PLAYER_HEADER_TITLE_EDGE_FADE_WIDTH),
-                        style = MiuixTheme.textStyles.title3.copy(
-                            lineHeight = PLAYER_HEADER_TITLE_LINE_HEIGHT,
-                        ),
-                        color = titleColor,
-                        fontWeight = FontWeight.Bold,
-                        textAlign = if (leftAligned) TextAlign.Start else TextAlign.Center,
-                        maxLines = 1,
-                        overflow = TextOverflow.Clip,
-                    )
+                        contentAlignment = Alignment.CenterStart,
+                    ) {
+                        Text(
+                            text = target.title,
+                            modifier = Modifier.fillMaxWidth()
+                                .padding(start = PLAYER_HEADER_TITLE_EDGE_FADE_WIDTH),
+                            style = MiuixTheme.textStyles.title3.copy(
+                                lineHeight = PLAYER_HEADER_TITLE_LINE_HEIGHT,
+                            ),
+                            color = titleColor,
+                            fontWeight = FontWeight.Bold,
+                            textAlign = TextAlign.Start,
+                            maxLines = 1,
+                            overflow = TextOverflow.Clip,
+                            onTextLayout = { titleLayout = it },
+                        )
+                    }
                 }
             }
+        }
+        Box(
+            modifier = Modifier.fillMaxWidth().heightIn(min = artistSlotHeight),
+            contentAlignment = if (leftAligned) Alignment.CenterStart else Alignment.Center,
+        ) {
             Box(
                 modifier = Modifier
+                    .expandLeftForMarquee(PLAYER_HEADER_TITLE_EDGE_FADE_WIDTH)
                     .fillMaxWidth()
-                    .heightIn(min = artistSlotHeight),
-                contentAlignment = if (leftAligned) Alignment.CenterStart else Alignment.Center,
+                    .playerHeaderEdgeMask(),
             ) {
-                Text(
-                    text = playerHeaderArtistText(target.artist),
+                headerTransition.AnimatedContent(
                     modifier = Modifier.fillMaxWidth(),
-                    style = MiuixTheme.textStyles.body2.copy(
-                        fontSize = 14.sp,
-                        lineHeight = PLAYER_HEADER_ARTIST_LINE_HEIGHT,
-                    ),
-                    color = artistColor,
-                    textAlign = if (leftAligned) TextAlign.Start else TextAlign.Center,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                )
+                    contentKey = { it.trackKey to it.direction },
+                    transitionSpec = {
+                        slideInHorizontally(tween(PLAYER_TRACK_ARTWORK_CROSSFADE_DURATION_MILLIS)) { it * targetState.direction }
+                            .togetherWith(
+                                slideOutHorizontally(tween(PLAYER_TRACK_ARTWORK_CROSSFADE_DURATION_MILLIS)) { -it * targetState.direction },
+                            ).using(null)
+                    },
+                    contentAlignment = if (leftAligned) Alignment.CenterStart else Alignment.Center,
+                ) { target ->
+                    var artistLayout by remember(target.trackKey) {
+                        mutableStateOf<TextLayoutResult?>(null)
+                    }
+                    Text(
+                        text = playerHeaderArtistText(target.artist),
+                        modifier = Modifier.fillMaxWidth()
+                            .padding(start = PLAYER_HEADER_TITLE_EDGE_FADE_WIDTH)
+                            .animatedPlayerTextAlignment(artistLayout, alignmentProgress),
+                        style = MiuixTheme.textStyles.body2.copy(
+                            fontSize = 14.sp,
+                            lineHeight = PLAYER_HEADER_ARTIST_LINE_HEIGHT,
+                        ),
+                        color = artistColor,
+                        textAlign = TextAlign.Start,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                        onTextLayout = { artistLayout = it },
+                    )
+                }
             }
         }
     }
 }
+
+private fun Modifier.playerHeaderEdgeMask(): Modifier = this
+    .graphicsLayer {
+        compositingStrategy = CompositingStrategy.Offscreen
+    }
+    .drawWithContent {
+        drawContent()
+        val fadeWidth = PLAYER_HEADER_TITLE_EDGE_FADE_WIDTH.toPx()
+        val edgeFraction = (
+            fadeWidth / size.width.coerceAtLeast(1f)
+        ).coerceIn(0f, 0.18f)
+        drawRect(
+            brush = Brush.horizontalGradient(
+                0f to Color.Transparent,
+                edgeFraction to Color.Black,
+                1f - edgeFraction to Color.Black,
+                1f to Color.Transparent,
+            ),
+            blendMode = BlendMode.DstIn,
+        )
+    }
 
 private fun Modifier.expandLeftForMarquee(extra: Dp): Modifier = layout { measurable, constraints ->
     val extraPx = extra.roundToPx()
