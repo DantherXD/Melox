@@ -24,6 +24,8 @@ import androidx.compose.ui.graphics.drawscope.ContentDrawScope
 import androidx.compose.ui.node.DrawModifierNode
 import androidx.compose.ui.node.ModifierNodeElement
 import androidx.compose.ui.node.invalidateDraw
+import com.melox.player.ui.component.LocalCustomPageBackground
+import com.melox.player.ui.component.customPageBackground
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
@@ -44,9 +46,24 @@ import kotlin.math.sin
 internal fun AboutEffectBackground(
     modifier: Modifier = Modifier,
     backgroundModifier: Modifier = Modifier,
+    useCustomBackground: Boolean = false,
     alpha: () -> Float = { 1f },
     content: @Composable BoxScope.() -> Unit,
 ) {
+    if (useCustomBackground || LocalCustomPageBackground.current != null) {
+        Box(modifier = modifier) {
+            // Record only the wallpaper; header blur consumers must stay outside this layer.
+            Spacer(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .then(backgroundModifier)
+                    .background(MiuixTheme.colorScheme.surface)
+                    .customPageBackground(),
+            )
+            content()
+        }
+        return
+    }
     val shaderSupported = remember { isRuntimeShaderSupported() }
     if (
         Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU ||

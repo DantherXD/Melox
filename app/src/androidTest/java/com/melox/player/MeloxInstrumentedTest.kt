@@ -7,6 +7,7 @@ import androidx.test.core.app.ActivityScenario
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
 import com.melox.player.data.repository.SettingsRepository
+import com.melox.player.model.LyricAnimationMode
 import com.melox.player.model.NavigationTransitionStyle
 import com.melox.player.model.ThemeMode
 import kotlinx.coroutines.runBlocking
@@ -79,6 +80,84 @@ class MeloxInstrumentedTest {
             repository.setLiquidGlass(original.liquidGlass)
             repository.setPredictiveBackEnabled(original.predictiveBackEnabled)
             repository.setNavigationTransitionStyle(original.navigationTransitionStyle)
+        }
+    }
+
+    @Test
+    fun lyricAnimationModesPersistAndPreserveOtherLyricSettings() = runBlocking {
+        val context = InstrumentationRegistry.getInstrumentation().targetContext
+        val repository = SettingsRepository(context)
+        val original = repository.loadSettings()
+        try {
+            for (mode in LyricAnimationMode.entries) {
+                repository.setLyricAnimationMode(mode)
+                val restored = SettingsRepository(context).loadSettings()
+                assertEquals(mode, restored.lyricAnimationMode)
+                assertEquals(original.lyricFontScale, restored.lyricFontScale, 0f)
+                assertEquals(original.lyricFontWeight, restored.lyricFontWeight)
+                assertEquals(original.showLyricsTranslation, restored.showLyricsTranslation)
+            }
+        } finally {
+            repository.setLyricAnimationMode(original.lyricAnimationMode)
+        }
+    }
+
+    @Test
+    fun cardBlurSettingPersistsIndependentlyAndClampsBounds() = runBlocking {
+        val context = InstrumentationRegistry.getInstrumentation().targetContext
+        val repository = SettingsRepository(context)
+        val original = repository.loadSettings()
+        try {
+            for ((requested, expected) in listOf(-1 to 0, 50 to 50, 101 to 100)) {
+                repository.setCustomBackgroundCardBlurPercent(requested)
+                val restored = SettingsRepository(context).loadSettings()
+                assertEquals(expected, restored.customBackgroundCardBlurPercent)
+                assertEquals(original.customBackgroundBlurPercent, restored.customBackgroundBlurPercent)
+                assertEquals(original.customBackgroundDimPercent, restored.customBackgroundDimPercent)
+                assertEquals(original.blurEnabled, restored.blurEnabled)
+            }
+        } finally {
+            repository.setCustomBackgroundCardBlurPercent(original.customBackgroundCardBlurPercent)
+        }
+    }
+
+    @Test
+    fun wallpaperDimmingSettingStopsAtNinetyPercentAndPreservesOtherSettings() = runBlocking {
+        val context = InstrumentationRegistry.getInstrumentation().targetContext
+        val repository = SettingsRepository(context)
+        val original = repository.loadSettings()
+        try {
+            for ((requested, expected) in listOf(-1 to 0, 90 to 90, 91 to 90, 100 to 90)) {
+                repository.setCustomBackgroundDimPercent(requested)
+                val restored = SettingsRepository(context).loadSettings()
+                assertEquals(expected, restored.customBackgroundDimPercent)
+                assertEquals(original.customBackgroundBlurPercent, restored.customBackgroundBlurPercent)
+                assertEquals(original.customBackgroundCardBlurPercent, restored.customBackgroundCardBlurPercent)
+                assertEquals(original.customBackgroundCardOpacityPercent, restored.customBackgroundCardOpacityPercent)
+                assertEquals(original.blurEnabled, restored.blurEnabled)
+            }
+        } finally {
+            repository.setCustomBackgroundDimPercent(original.customBackgroundDimPercent)
+        }
+    }
+
+    @Test
+    fun cardOpacitySettingPersistsWithoutChangingBlurOrOtherBackgroundSettings() = runBlocking {
+        val context = InstrumentationRegistry.getInstrumentation().targetContext
+        val repository = SettingsRepository(context)
+        val original = repository.loadSettings()
+        try {
+            for ((requested, expected) in listOf(-1 to 0, 80 to 80, 81 to 80, 101 to 80)) {
+                repository.setCustomBackgroundCardOpacityPercent(requested)
+                val restored = SettingsRepository(context).loadSettings()
+                assertEquals(expected, restored.customBackgroundCardOpacityPercent)
+                assertEquals(original.customBackgroundCardBlurPercent, restored.customBackgroundCardBlurPercent)
+                assertEquals(original.customBackgroundBlurPercent, restored.customBackgroundBlurPercent)
+                assertEquals(original.customBackgroundDimPercent, restored.customBackgroundDimPercent)
+                assertEquals(original.blurEnabled, restored.blurEnabled)
+            }
+        } finally {
+            repository.setCustomBackgroundCardOpacityPercent(original.customBackgroundCardOpacityPercent)
         }
     }
 

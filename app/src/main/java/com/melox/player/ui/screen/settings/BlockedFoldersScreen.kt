@@ -42,7 +42,7 @@ import top.yukonga.miuix.kmp.basic.ButtonDefaults
 import top.yukonga.miuix.kmp.basic.Icon
 import top.yukonga.miuix.kmp.basic.IconButton
 import top.yukonga.miuix.kmp.basic.MiuixScrollBehavior
-import top.yukonga.miuix.kmp.basic.Scaffold
+import com.melox.player.ui.component.PageScaffold
 import top.yukonga.miuix.kmp.basic.Text
 import top.yukonga.miuix.kmp.basic.TextButton
 import top.yukonga.miuix.kmp.icon.MiuixIcons
@@ -57,6 +57,7 @@ import top.yukonga.miuix.kmp.utils.scrollEndHaptic
 @Composable
 fun BlockedFoldersScreen(
     paths: List<String>,
+    displayPaths: Map<String, String>,
     bottomContentPadding: Dp,
     onBack: () -> Unit,
     onUnblock: (String) -> Unit,
@@ -68,7 +69,7 @@ fun BlockedFoldersScreen(
     val sortedPaths = remember(paths) {
         paths.sortedWith(compareBy(String::lowercase).thenBy { it })
     }
-    Scaffold(
+    PageScaffold(
         topBar = {
             BlurredBar(
                 backdrop = backdrop,
@@ -121,7 +122,7 @@ fun BlockedFoldersScreen(
                     }
                 } else {
                     items(sortedPaths, key = { it }) { path ->
-                        BlockedFolderRow(path = path, onRemove = { pendingPath = path })
+                        BlockedFolderRow(path = path, displayPath = displayPaths[path] ?: path, onRemove = { pendingPath = path })
                     }
                 }
             }
@@ -132,7 +133,7 @@ fun BlockedFoldersScreen(
         title = stringResource(R.string.scan_remove_blocked_folder_title),
         summary = stringResource(
             R.string.scan_remove_blocked_folder_message,
-            pendingPath.orEmpty(),
+            displayPaths[pendingPath] ?: pendingPath.orEmpty(),
         ),
         enableWindowDim = true,
         onDismissRequest = { pendingPath = null },
@@ -158,7 +159,7 @@ fun BlockedFoldersScreen(
 }
 
 @Composable
-private fun BlockedFolderRow(path: String, onRemove: () -> Unit) {
+private fun BlockedFolderRow(path: String, displayPath: String, onRemove: () -> Unit) {
     val normalized = path.trimEnd('/').ifEmpty { "/" }
     Row(
         modifier = Modifier
@@ -184,11 +185,9 @@ private fun BlockedFolderRow(path: String, onRemove: () -> Unit) {
                 overflow = TextOverflow.Ellipsis,
             )
             Text(
-                text = normalized,
+                text = displayPath,
                 style = MiuixTheme.textStyles.footnote1.copy(fontSize = 12.sp),
                 color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
             )
         }
         IconButton(onClick = onRemove) {

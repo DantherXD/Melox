@@ -38,10 +38,10 @@ import com.melox.player.ui.component.AdaptiveTopAppBar
 import com.melox.player.ui.component.BlurredBar
 import com.melox.player.ui.component.miuixBarColor
 import com.melox.player.ui.component.rememberBlurBackdrop
-import top.yukonga.miuix.kmp.basic.Card
+import com.melox.player.ui.component.PageScaffold
+import com.melox.player.ui.component.PageCard as Card
 import top.yukonga.miuix.kmp.basic.Icon
 import top.yukonga.miuix.kmp.basic.IconButton
-import top.yukonga.miuix.kmp.basic.Scaffold
 import top.yukonga.miuix.kmp.basic.ScrollBehavior
 import top.yukonga.miuix.kmp.basic.SmallTitle
 import top.yukonga.miuix.kmp.blur.layerBackdrop
@@ -49,6 +49,7 @@ import top.yukonga.miuix.kmp.icon.MiuixIcons
 import top.yukonga.miuix.kmp.icon.extended.Back
 import top.yukonga.miuix.kmp.preference.OverlayDropdownPreference
 import top.yukonga.miuix.kmp.preference.SwitchPreference
+import top.yukonga.miuix.kmp.preference.ArrowPreference
 import top.yukonga.miuix.kmp.utils.overScrollVertical
 import top.yukonga.miuix.kmp.utils.scrollEndHaptic
 
@@ -66,11 +67,13 @@ fun ThemeSettingsScreen(
     onPlaybackBackgroundStyleChange: (PlaybackBackgroundStyle) -> Unit,
     onBlurChange: (Boolean) -> Unit,
     onProgressiveTopBarBlurChange: (Boolean) -> Unit,
+    onSmallPlayerBarChange: (Boolean) -> Unit,
     onHideBottomBarChange: (Boolean) -> Unit,
     onFloatingBottomBarChange: (Boolean) -> Unit,
     onLiquidGlassChange: (Boolean) -> Unit,
     onPredictiveBackChange: (Boolean) -> Unit,
     onNavigationTransitionStyleChange: (NavigationTransitionStyle) -> Unit,
+    onOpenMainBackground: () -> Unit,
 ) {
     val layoutDirection = LocalLayoutDirection.current
     val dynamicColorSupported = Build.VERSION.SDK_INT >= Build.VERSION_CODES.S
@@ -80,6 +83,9 @@ fun ThemeSettingsScreen(
     }
     var progressiveTopBarBlurChecked by remember(settings.progressiveTopBarBlurEnabled) {
         mutableStateOf(settings.progressiveTopBarBlurEnabled)
+    }
+    var smallPlayerBarChecked by remember(settings.smallPlayerBar) {
+        mutableStateOf(settings.smallPlayerBar)
     }
     var hideBottomBarChecked by remember(settings.hideBottomBar) {
         mutableStateOf(settings.hideBottomBar)
@@ -116,7 +122,7 @@ fun ThemeSettingsScreen(
             stringResource(R.string.settings_playback_background_dynamic_flow),
     )
     val topBarBackdrop = rememberBlurBackdrop()
-    Scaffold(
+    PageScaffold(
             topBar = {
             BlurredBar(
                 backdrop = topBarBackdrop,
@@ -195,6 +201,10 @@ fun ThemeSettingsScreen(
                 }
                 item {
                     ThemeCard {
+                        ArrowPreference(
+                            title = stringResource(R.string.settings_custom_background_title),
+                            onClick = onOpenMainBackground,
+                        )
                         SwitchPreference(
                             checked = blurChecked && blurSupported,
                             onCheckedChange = { checked ->
@@ -264,6 +274,14 @@ fun ThemeSettingsScreen(
                                 enabled = liquidGlassSupported,
                             )
                         }
+                        SwitchPreference(
+                            checked = smallPlayerBarChecked,
+                            onCheckedChange = { checked ->
+                                smallPlayerBarChecked = checked
+                                onSmallPlayerBarChange(checked)
+                            },
+                            title = stringResource(R.string.settings_small_player_bar_title),
+                        )
                         SwitchPreference(
                             checked = hideBottomBarChecked,
                             onCheckedChange = { checked ->

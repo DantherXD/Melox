@@ -1,5 +1,6 @@
 package com.melox.player.ui.screen.library
 
+import com.melox.player.ui.component.library.LocalAlphabetIndexBottomPadding
 import com.melox.player.ui.component.library.PreserveSortScrollPosition
 
 import androidx.compose.foundation.layout.Box
@@ -11,6 +12,7 @@ import androidx.compose.foundation.layout.calculateStartPadding
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
@@ -18,17 +20,23 @@ import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.geometry.Rect
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.semantics.disabled
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.platform.LocalLayoutDirection
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.Dp
 import com.melox.player.R
@@ -43,6 +51,11 @@ import com.melox.player.ui.component.library.MusicTrackRow
 import com.melox.player.ui.component.library.TrackActionsOverlay
 import com.melox.player.ui.component.library.toggleTrackSelection
 import top.yukonga.miuix.kmp.basic.InfiniteProgressIndicator
+import top.yukonga.miuix.kmp.basic.CardDefaults
+import top.yukonga.miuix.kmp.basic.FloatingActionButton
+import top.yukonga.miuix.kmp.basic.ButtonDefaults
+import top.yukonga.miuix.kmp.basic.TopAppBarState
+import top.yukonga.miuix.kmp.basic.TopAppBarDefaults
 import top.yukonga.miuix.kmp.basic.Icon
 import top.yukonga.miuix.kmp.basic.ScrollBehavior
 import top.yukonga.miuix.kmp.basic.Text
@@ -51,6 +64,11 @@ import top.yukonga.miuix.kmp.icon.extended.Music
 import top.yukonga.miuix.kmp.theme.MiuixTheme
 import top.yukonga.miuix.kmp.utils.overScrollVertical
 import top.yukonga.miuix.kmp.utils.scrollEndHaptic
+import kotlin.math.roundToInt
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.flow.first
+import androidx.compose.runtime.snapshotFlow
+import kotlinx.coroutines.Job
 
 @Composable
 fun MusicListScreen(
@@ -69,19 +87,39 @@ fun MusicListScreen(
     artistGroups: List<ArtistGroup>,
     onGoToArtist: (ArtistGroup) -> Unit,
     onExternalEditReturned: (Long) -> Unit,
+    showMusicTagEditor: Boolean,
+    showLyricoEditor: Boolean,
+    showLunaBeatEditor: Boolean,
     scrollBehavior: ScrollBehavior,
     indexTopPadding: Dp,
     listState: LazyListState,
     modifier: Modifier = Modifier,
     contentPadding: PaddingValues = PaddingValues(),
     showIndex: Boolean = true,
-    indexBottomSpacing: Dp = 12.dp,
     selectionMode: Boolean = false,
     selectedTrackUris: Set<String> = emptySet(),
     onSelectionChange: ((Set<String>) -> Unit)? = null,
     onSelectionModeChange: ((Boolean) -> Unit)? = null,
+    showLocateAction: Boolean = false,
+    currentTrackContentUri: String? = null,
+    miniPlayerBounds: Rect = Rect.Zero,
+    playerContentBounds: Rect = Rect.Zero,
 ) {
     val layoutDirection = LocalLayoutDirection.current
+    val density = LocalDensity.current
+    val scope = rememberCoroutineScope()
+    var locateJob by remember { mutableStateOf<Job?>(null) }
+    val locateActionSize = ButtonDefaults.MinHeight
+    val locateActionVisible = showLocateAction && !selectionMode &&
+        miniPlayerBounds.width > 0f && playerContentBounds.width > 0f
+    val currentIndex = displayedTracks.indexOfFirst { it.contentUri == currentTrackContentUri }
+    val locateBottomPadding = if (locateActionVisible) {
+        with(density) {
+            (playerContentBounds.bottom - miniPlayerBounds.top).coerceAtLeast(0f).toDp()
+        } + 12.dp + locateActionSize
+    } else {
+        0.dp
+    }
     PreserveSortScrollPosition(
         sortKey = sortConfig,
         query = query,
@@ -98,11 +136,8 @@ fun MusicListScreen(
         start = contentPadding.calculateStartPadding(layoutDirection),
         top = contentPadding.calculateTopPadding() + 12.dp,
         end = contentPadding.calculateEndPadding(layoutDirection),
-        bottom = contentPadding.calculateBottomPadding() + 12.dp,
+        bottom = maxOf(contentPadding.calculateBottomPadding(), locateBottomPadding) + 12.dp,
     )
-    val showScrollTop by remember {
-        derivedStateOf { scrollBehavior.state.collapsedFraction > 0.01f }
-    }
     val sections = remember(sortConfig.descending) {
         if (sortConfig.descending) AlphabetSections.asReversed() else AlphabetSections
     }
@@ -198,10 +233,9 @@ fun MusicListScreen(
                 },
                 scrollToItem = listState::scrollToItem,
                 sections = sections,
-                showScrollTop = showScrollTop,
                 onTargetIndexChanged = { targetIndex, restoreLargeTitle ->
                     val topBarState = scrollBehavior.state
-                    if (restoreLargeTitle) {
+                    if (restoreLargeTitle && !scrollBehavior.isPinned) {
                         topBarState.heightOffset = 0f
                         topBarState.contentOffset = 0f
                     } else if (topBarState.heightOffsetLimit != -Float.MAX_VALUE) {
@@ -214,11 +248,58 @@ fun MusicListScreen(
                     .padding(
                         top = indexTopPadding + 4.dp,
                         end = contentPadding.calculateEndPadding(layoutDirection),
-                        bottom = contentPadding.calculateBottomPadding() +
-                            indexBottomSpacing,
+                        bottom = LocalAlphabetIndexBottomPadding.current,
                     )
                     .fillMaxHeight()
             )
+        }
+        if (locateActionVisible) {
+            FloatingActionButton(
+                onClick = {
+                    if (currentIndex in displayedTracks.indices) {
+                        locateJob?.cancel()
+                        locateJob = scope.launch {
+                            val paddingBeforeCollapse = listState.layoutInfo.beforeContentPadding
+                            val collapsedPadding = paddingBeforeCollapse +
+                                collapseMusicLocationTopBar(scrollBehavior.state).roundToInt()
+                            // Programmatic list scrolling does not dispatch nested scroll to the bar.
+                            snapshotFlow { listState.layoutInfo.beforeContentPadding }
+                                .first { it <= collapsedPadding + 1 }
+                            listState.animateScrollToItem(
+                                currentIndex,
+                                scrollOffset = with(density) { 12.dp.roundToPx() },
+                            )
+                        }
+                    }
+                },
+                containerColor = CardDefaults.defaultColors().color.copy(alpha = 0.8f),
+                shadowElevation = 0.dp,
+                minWidth = locateActionSize,
+                minHeight = locateActionSize,
+                modifier = Modifier
+                    .offset {
+                        with(density) {
+                            musicLocationOffset(
+                                miniPlayerBounds,
+                                playerContentBounds,
+                                locateActionSize.toPx(),
+                                12.dp.toPx(),
+                                (contentPadding.calculateEndPadding(layoutDirection) +
+                                    TopAppBarDefaults.ActionIconPadding).toPx(),
+                            )
+                        }
+                    }
+                    .semantics { if (currentIndex < 0) disabled() },
+            ) {
+                Icon(
+                    painter = painterResource(R.drawable.ic_locate_current_track),
+                    contentDescription = stringResource(R.string.locate_current_track),
+                    modifier = Modifier.size(24.dp),
+                    tint = MiuixTheme.colorScheme.onSurface.copy(
+                        alpha = if (currentIndex >= 0) 1f else 0.38f,
+                    ),
+                )
+            }
         }
     }
 
@@ -232,8 +313,32 @@ fun MusicListScreen(
         artistGroups = artistGroups,
         onGoToArtist = onGoToArtist,
         onExternalEditReturned = onExternalEditReturned,
+        showMusicTagEditor = showMusicTagEditor,
+        showLyricoEditor = showLyricoEditor,
+        showLunaBeatEditor = showLunaBeatEditor,
     )
 }
+
+internal fun collapseMusicLocationTopBar(state: TopAppBarState): Float {
+    if (state.heightOffsetLimit == -Float.MAX_VALUE) return 0f
+    val heightChange = state.heightOffsetLimit - state.heightOffset
+    state.heightOffset = state.heightOffsetLimit
+    state.contentOffset = state.heightOffsetLimit
+    return heightChange
+}
+
+internal fun musicLocationOffset(
+    miniPlayerBounds: Rect,
+    playerContentBounds: Rect,
+    actionSizePx: Float,
+    gapPx: Float,
+    trailingPaddingPx: Float,
+): IntOffset = IntOffset(
+    (playerContentBounds.width - trailingPaddingPx - actionSizePx)
+        .roundToInt().coerceAtLeast(0),
+    (miniPlayerBounds.top - playerContentBounds.top - gapPx - actionSizePx)
+        .roundToInt().coerceAtLeast(0),
+)
 
 internal fun resolveMusicPlaybackSelection(
     displayedTracks: List<MusicTrack>,

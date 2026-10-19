@@ -42,7 +42,7 @@ val releaseSigningValues = listOf(
 val releaseSigningConfigured = localPropertiesFile.isFile &&
     releaseKeystoreFile?.isFile == true &&
     releaseSigningValues.all { (_, value) -> !value.isNullOrBlank() }
-val appVersionName = "1.2.0-" + ZonedDateTime.now(ZoneId.of("Asia/Shanghai"))
+val appVersionName = "1.3.0-" + ZonedDateTime.now(ZoneId.of("Asia/Shanghai"))
     .format(DateTimeFormatter.ofPattern("yyMMddHHmm"))
 val releaseTaskRequested = gradle.startParameter.taskNames.any { taskName ->
     taskName.equals("assemble", ignoreCase = true) ||
@@ -78,7 +78,7 @@ android {
         applicationId = "com.melox.player"
         minSdk = 28
         targetSdk = 36
-        versionCode = 3
+        versionCode = 5
         versionName = appVersionName
 
         ndk {
@@ -121,6 +121,14 @@ android {
     }
     androidResources {
         localeFilters += setOf("en", "zh-rCN")
+    }
+    packaging {
+        dex {
+            useLegacyPackaging = true
+        }
+        jniLibs {
+            useLegacyPackaging = false
+        }
     }
 }
 
@@ -167,7 +175,7 @@ tasks.matching { task -> task.name == "assembleRelease" }.configureEach {
 }
 
 dependencies {
-    implementation(files("libs/renderscript-intrinsics-replacement-toolkit-344be3f-16k.aar"))
+    implementation(files("libs/renderscript-toolkit-blur-344be3f-arm64-16k.aar"))
     implementation(files("libs/media3-decoder-ffmpeg-1.11.0-ffmpeg9.0-arm64-v8a.aar"))
     implementation(libs.androidx.activity.compose)
     implementation(libs.androidx.appcompat)

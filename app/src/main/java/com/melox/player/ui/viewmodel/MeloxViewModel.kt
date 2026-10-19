@@ -8,6 +8,7 @@ import android.os.Build
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
+import com.melox.player.model.LyricAnimationMode
 import com.melox.player.data.library.AlbumGroup
 import com.melox.player.data.library.AlbumSortConfig
 import com.melox.player.data.library.AlbumSortField
@@ -34,14 +35,22 @@ import com.melox.player.data.library.sortAlbums
 import com.melox.player.data.library.sortArtists
 import com.melox.player.data.library.sortFolders
 import com.melox.player.data.library.sortMusicTracks
+import com.melox.player.data.library.hiddenFolderDisplayPaths
+import com.melox.player.data.library.isMusicFolderHidden
+import com.melox.player.data.library.normalizeHiddenFolderPath
+import com.melox.player.data.library.normalizedHiddenFolderPaths
+import com.melox.player.data.library.visibleMusicTracks
 import com.melox.player.data.repository.MusicRepository
+import com.melox.player.data.repository.CustomBackgroundRepository
 import com.melox.player.data.repository.LyricsRepository
 import com.melox.player.data.repository.LyricsRequest
 import com.melox.player.data.repository.PlaylistRepository
 import com.melox.player.data.repository.SettingsRepository
 import com.melox.player.data.playlist.addTracksToPlaylist
+import com.melox.player.data.playlist.PlaylistSortConfig
 import com.melox.player.data.playlist.removePlaylistEntries
 import com.melox.player.data.playlist.reorderPlaylistEntries
+import com.melox.player.data.playlist.reorderPlaylists
 import com.melox.player.model.AppSettings
 import com.melox.player.model.BottomBarStyle
 import com.melox.player.model.DefaultHomePage
@@ -53,6 +62,7 @@ import com.melox.player.model.LyricsSidecarFormatPriority
 import com.melox.player.model.LyricsSource
 import com.melox.player.model.LyricsSourcePriority
 import com.melox.player.model.MusicTrack
+import com.melox.player.model.PlaybackMode
 import com.melox.player.model.NavigationTransitionStyle
 import com.melox.player.model.LyricsUiState
 import com.melox.player.model.PlaybackUiState
@@ -65,6 +75,8 @@ import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.NonCancellable
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.Flow
@@ -72,12 +84,15 @@ import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asSharedFlow
+import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.channelFlow
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.mapLatest
+import kotlinx.coroutines.flow.onStart
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
@@ -85,6 +100,7 @@ import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import java.util.UUID
+import java.io.IOException
 
 /** Immutable screen state assembled from persisted settings and the current scan session. */
 data class AppUiState(
@@ -198,12 +214,47 @@ data class PlaylistUiState(
     val loaded: Boolean = false,
 )
 
-private data class LibraryProjection(
+internal data class LibraryProjection(
     val tracks: List<MusicTrack> = emptyList(),
     val albums: List<AlbumGroup> = emptyList(),
     val artists: List<ArtistGroup> = emptyList(),
     val folders: List<FolderGroup> = emptyList(),
 )
+
+@OptIn(kotlinx.coroutines.ExperimentalCoroutinesApi::class)
+internal fun visibleLibraryProjections(
+    tracks: Flow<List<MusicTrack>>,
+    hiddenPaths: Flow<List<String>>,
+): Flow<LibraryProjection> = combine(tracks, hiddenPaths) { allTracks, paths ->
+    allTracks to paths
+}.mapLatest { (allTracks, paths) ->
+    withContext(Dispatchers.Default) {
+        val visibleTracks = visibleMusicTracks(allTracks, paths)
+        currentCoroutineContext().ensureActive()
+        val albums = buildAlbumGroups(visibleTracks)
+        currentCoroutineContext().ensureActive()
+        val artists = buildArtistGroups(visibleTracks)
+        currentCoroutineContext().ensureActive()
+        val folders = buildFolderGroups(visibleTracks)
+        currentCoroutineContext().ensureActive()
+        LibraryProjection(visibleTracks, albums, artists, folders)
+    }
+}
+
+internal fun FolderPresentationState.withHiddenFolders(paths: List<String>): FolderPresentationState {
+    if (paths.isEmpty()) return this
+    val prefixes = normalizedHiddenFolderPaths(paths)
+    val visibleFolders = items.filterNot { isMusicFolderHidden(it.path, prefixes) }
+    if (visibleFolders.size == items.size) return this
+    val indices = if (query.isBlank() && sortConfig.field == FolderSortField.NAME) {
+        buildMap {
+            visibleFolders.forEachIndexed { index, folder ->
+                putIfAbsent(folderSectionKey(folder), index)
+            }
+        }
+    } else emptyMap()
+    return copy(items = visibleFolders, sectionIndexMap = indices)
+}
 
 private data class LoadedSettings(
     val value: AppSettings = AppSettings(),
@@ -237,6 +288,10 @@ class MeloxViewModel(application: Application) : AndroidViewModel(application) {
     private val initialSettings = runBlocking(Dispatchers.IO) {
         settingsRepository.loadSettings()
     }
+    // Decode alongside feature initialization, before the first page composition.
+    val customBackground = CustomBackgroundRepository(application)
+        .observeImages(settingsRepository.settings.onStart { emit(initialSettings) })
+        .stateIn(viewModelScope, SharingStarted.Eagerly, null)
     private val musicRepository = MusicRepository(application)
     private val playlistRepository = PlaylistRepository(application)
     private val lyricsRepository = LyricsRepository(application)
@@ -256,7 +311,21 @@ class MeloxViewModel(application: Application) : AndroidViewModel(application) {
             ),
         )
 
-    private val library = MutableStateFlow(LibraryProjection())
+    private val allLibraryTracks = MutableStateFlow<List<MusicTrack>>(emptyList())
+    private val mutableHiddenFolderPaths = MutableStateFlow(initialSettings.blockedFolderPaths)
+    val hiddenFolderPaths: StateFlow<List<String>> = mutableHiddenFolderPaths.asStateFlow()
+    @OptIn(kotlinx.coroutines.ExperimentalCoroutinesApi::class)
+    val hiddenFolderAddresses: StateFlow<Map<String, String>> = combine(allLibraryTracks, hiddenFolderPaths) { tracks, paths ->
+        tracks to paths
+    }.mapLatest { (tracks, paths) ->
+        withContext(Dispatchers.Default) { hiddenFolderDisplayPaths(tracks, paths) }
+    }.stateIn(viewModelScope, SharingStarted.Eagerly, emptyMap())
+    private val hiddenFolderSaveMutex = Mutex()
+    private var persistedHiddenFolderPaths = initialSettings.blockedFolderPaths
+    private val mutableHiddenFolderSaveFailures = MutableSharedFlow<Unit>(extraBufferCapacity = 1)
+    val hiddenFolderSaveFailures = mutableHiddenFolderSaveFailures.asSharedFlow()
+    private val library = visibleLibraryProjections(allLibraryTracks, hiddenFolderPaths)
+        .stateIn(viewModelScope, SharingStarted.Eagerly, LibraryProjection())
     private val scanStatus = MutableStateFlow<ScanStatus>(
         if (hasInitialAudioPermission) ScanStatus.Scanning else ScanStatus.PermissionRequired,
     )
@@ -316,9 +385,9 @@ class MeloxViewModel(application: Application) : AndroidViewModel(application) {
         .distinctUntilChanged()
     val compactPlaybackState: StateFlow<PlaybackUiState> = combine(
         compactControllerPlaybackState,
-        library,
-    ) { playback, projection ->
-        playback.withTrackMetadata(projection.tracks)
+        allLibraryTracks,
+    ) { playback, tracks ->
+        playback.withTrackMetadata(tracks)
     }
         .distinctUntilChanged()
         .stateIn(
@@ -328,17 +397,17 @@ class MeloxViewModel(application: Application) : AndroidViewModel(application) {
                 positionMs = 0L,
                 positionUpdateElapsedRealtimeMs = 0L,
                 bufferedPositionMs = 0L,
-            ).withTrackMetadata(library.value.tracks),
+            ).withTrackMetadata(allLibraryTracks.value),
         )
     private val lyricsRequests = combine(
         playbackState,
-        library,
+        allLibraryTracks,
         lyricsRefreshRevision,
         loadedSettings,
-    ) { playback, projection, refreshRevision, loadedSettings ->
+    ) { playback, tracks, refreshRevision, loadedSettings ->
         val item = playback.currentItem ?: return@combine null
         val track = item.trackId?.let { trackId ->
-            projection.tracks.firstOrNull { it.id == trackId }
+            tracks.firstOrNull { it.id == trackId }
         }
         LyricsRequest(
             mediaId = item.mediaId,
@@ -379,7 +448,9 @@ class MeloxViewModel(application: Application) : AndroidViewModel(application) {
             albums = library.albums,
             artists = library.artists,
             folders = library.folders,
-            scanStatus = scanStatus,
+            scanStatus = if (scanStatus is ScanStatus.Success) {
+                ScanStatus.Success(library.tracks.size)
+            } else scanStatus,
             scanGeneration = scanGeneration,
         )
     }.stateIn(
@@ -546,8 +617,8 @@ class MeloxViewModel(application: Application) : AndroidViewModel(application) {
         viewModelScope.launch {
             combine(
                 playlists,
-                library.map { projection ->
-                    projection.tracks.mapTo(HashSet(), MusicTrack::contentUri)
+                allLibraryTracks.map { tracks ->
+                    tracks.mapTo(HashSet(), MusicTrack::contentUri)
                 }.distinctUntilChanged(),
             ) { playlists, libraryContentUris ->
                 playlists.asSequence()
@@ -607,9 +678,9 @@ class MeloxViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
-    fun setForceWordByWordLyrics(enabled: Boolean) {
+    fun setLyricAnimationMode(mode: LyricAnimationMode) {
         viewModelScope.launch {
-            settingsRepository.setForceWordByWordLyrics(enabled)
+            settingsRepository.setLyricAnimationMode(mode)
         }
     }
 
@@ -649,6 +720,52 @@ class MeloxViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
+    suspend fun setCustomBackground(uri: Uri): Boolean = settingsRepository.setCustomBackground(uri)
+
+    suspend fun deleteCustomBackground(): Boolean = settingsRepository.deleteCustomBackground()
+
+    fun setCustomBackgroundDimPercent(percent: Int) {
+        viewModelScope.launch {
+            settingsRepository.setCustomBackgroundDimPercent(percent)
+        }
+    }
+
+    fun setCustomBackgroundBlurPercent(percent: Int) {
+        viewModelScope.launch {
+            settingsRepository.setCustomBackgroundBlurPercent(percent)
+        }
+    }
+
+    fun setCustomBackgroundCardBlurPercent(percent: Int) {
+        viewModelScope.launch {
+            settingsRepository.setCustomBackgroundCardBlurPercent(percent)
+        }
+    }
+
+    fun setCustomBackgroundCardOpacityPercent(percent: Int) {
+        viewModelScope.launch {
+            settingsRepository.setCustomBackgroundCardOpacityPercent(percent)
+        }
+    }
+
+    fun setShowMusicTagEditor(enabled: Boolean) {
+        viewModelScope.launch {
+            settingsRepository.setShowMusicTagEditor(enabled)
+        }
+    }
+
+    fun setShowLyricoEditor(enabled: Boolean) {
+        viewModelScope.launch {
+            settingsRepository.setShowLyricoEditor(enabled)
+        }
+    }
+
+    fun setShowLunaBeatEditor(enabled: Boolean) {
+        viewModelScope.launch {
+            settingsRepository.setShowLunaBeatEditor(enabled)
+        }
+    }
+
     fun setLyricsSidecarFormatPriority(priority: LyricsSidecarFormatPriority) {
         viewModelScope.launch {
             settingsRepository.setLyricsSidecarFormatPriority(priority)
@@ -670,6 +787,12 @@ class MeloxViewModel(application: Application) : AndroidViewModel(application) {
     fun setProgressiveTopBarBlurEnabled(enabled: Boolean) {
         viewModelScope.launch {
             settingsRepository.setProgressiveTopBarBlurEnabled(enabled)
+        }
+    }
+
+    fun setSmallPlayerBar(enabled: Boolean) {
+        viewModelScope.launch {
+            settingsRepository.setSmallPlayerBar(enabled)
         }
     }
 
@@ -737,30 +860,32 @@ class MeloxViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun addBlockedFolderPath(path: String) {
-        viewModelScope.launch {
-            settingsRepository.addBlockedFolderPath(path)
-            val blocked = loadedSettings.value.value.blockedFolderPaths + path
-            val currentTracks = library.value.tracks
-            val blockedContentUris = currentTracks.asSequence()
-                .filter { track -> isPathBlocked(track.folderPath, blocked) }
-                .mapTo(mutableSetOf(), MusicTrack::contentUri)
-            playbackController.removeContentUris(blockedContentUris)
-            val filtered = currentTracks.filterNot { track ->
-                isPathBlocked(track.folderPath, blocked)
-            }
-            library.value = createLibraryProjection(filtered)
-            musicRepository.cacheMusic(filtered)
-        }
+        updateHiddenFolderPaths(normalizedHiddenFolderPaths(hiddenFolderPaths.value + path))
     }
 
     fun removeBlockedFolderPath(path: String) {
+        val normalized = normalizeHiddenFolderPath(path)
+        updateHiddenFolderPaths(hiddenFolderPaths.value.filterNot {
+            normalizeHiddenFolderPath(it).equals(normalized, ignoreCase = true)
+        })
+    }
+
+    private fun updateHiddenFolderPaths(paths: List<String>) {
+        if (paths == hiddenFolderPaths.value) return
+        mutableHiddenFolderPaths.value = paths
         viewModelScope.launch {
-            settingsRepository.removeBlockedFolderPath(path)
-            startMusicScan(
-                restoreCachedTracks = false,
-                refreshAfterRestore = true,
-                settingsOverride = settingsRepository.loadSettings(),
-            )
+            hiddenFolderSaveMutex.withLock {
+                val requestedPaths = hiddenFolderPaths.value
+                try {
+                    settingsRepository.setBlockedFolderPaths(requestedPaths)
+                    persistedHiddenFolderPaths = requestedPaths
+                } catch (exception: IOException) {
+                    if (hiddenFolderPaths.value === requestedPaths) {
+                        mutableHiddenFolderPaths.value = persistedHiddenFolderPaths
+                    }
+                    mutableHiddenFolderSaveFailures.emit(Unit)
+                }
+            }
         }
     }
 
@@ -851,7 +976,7 @@ class MeloxViewModel(application: Application) : AndroidViewModel(application) {
             nowEpochMillis = now,
             newEntryId = { UUID.randomUUID().toString() },
         )
-        playlists.value = playlists.value + playlist
+        playlists.value = listOf(playlist) + playlists.value
         persistPlaylists()
         return playlistId
     }
@@ -874,6 +999,12 @@ class MeloxViewModel(application: Application) : AndroidViewModel(application) {
         return true
     }
 
+    fun setPlaylistSortConfig(playlistId: String, config: PlaylistSortConfig) {
+        viewModelScope.launch {
+            settingsRepository.setPlaylistSortConfig(playlistId, config)
+        }
+    }
+
     fun deletePlaylist(playlistId: String): Boolean {
         if (!playlistsLoaded.value) return false
         val currentPlaylists = playlists.value
@@ -881,6 +1012,7 @@ class MeloxViewModel(application: Application) : AndroidViewModel(application) {
         if (updated.size == currentPlaylists.size) return false
         playlists.value = updated
         persistPlaylists()
+        setPlaylistSortConfig(playlistId, PlaylistSortConfig())
         return true
     }
 
@@ -945,6 +1077,16 @@ class MeloxViewModel(application: Application) : AndroidViewModel(application) {
         return true
     }
 
+    fun movePlaylists(orderedPlaylistIds: List<String>): Boolean {
+        if (!playlistsLoaded.value) return false
+        val current = playlists.value
+        val updated = reorderPlaylists(current, orderedPlaylistIds) ?: return false
+        if (updated === current) return true
+        playlists.value = updated
+        persistPlaylists()
+        return true
+    }
+
     private fun persistPlaylists() {
         viewModelScope.launch {
             withContext(Dispatchers.IO + NonCancellable) {
@@ -962,18 +1104,27 @@ class MeloxViewModel(application: Application) : AndroidViewModel(application) {
         playbackController.playQueue(tracks, startIndex)
     }
 
+    fun shuffleTracks(tracks: List<MusicTrack>) {
+        if (tracks.isEmpty()) return
+        playbackController.playQueue(
+            tracks = tracks,
+            startIndex = tracks.indices.random(),
+            requestedMode = PlaybackMode.RANDOM,
+        )
+    }
+
     fun refreshTrackAfterExternalEdit(trackId: Long) {
         viewModelScope.launch {
-            val track = library.value.tracks.firstOrNull { it.id == trackId }
+            val track = allLibraryTracks.value.firstOrNull { it.id == trackId }
             try {
                 val refreshedTrack = track?.let { musicRepository.refreshTrack(it) }
                 if (refreshedTrack != null) {
-                    val currentTracks = library.value.tracks
+                    val currentTracks = allLibraryTracks.value
                     if (currentTracks.any { it.id == trackId }) {
                         val updatedTracks = currentTracks.map { currentTrack ->
                             if (currentTrack.id == trackId) refreshedTrack else currentTrack
                         }
-                        library.value = createLibraryProjection(updatedTracks)
+                        allLibraryTracks.value = updatedTracks
                         musicRepository.cacheMusic(updatedTracks)
                     }
                 }
@@ -1068,7 +1219,7 @@ class MeloxViewModel(application: Application) : AndroidViewModel(application) {
             // A scan that began after confirmation is newer than this clear request.
             if (scanJob?.isActive == true) return@launch
             playbackController.clear()
-            library.value = LibraryProjection()
+            allLibraryTracks.value = emptyList()
             scanStatus.value = ScanStatus.Idle
             scanGeneration.value += 1L
         }
@@ -1090,7 +1241,6 @@ class MeloxViewModel(application: Application) : AndroidViewModel(application) {
         restoreCachedTracks: Boolean,
         refreshAfterRestore: Boolean,
         notifyUser: Boolean = false,
-        settingsOverride: AppSettings? = null,
     ) {
         // The UI invokes commands on the main thread, so this debounces repeated scan taps.
         if (scanJob?.isActive == true) return
@@ -1098,7 +1248,7 @@ class MeloxViewModel(application: Application) : AndroidViewModel(application) {
         // Publish loading before launch so an empty initial list can never render as confirmed empty.
         scanStatus.value = ScanStatus.Scanning
         scanJob = viewModelScope.launch {
-            val settings = settingsOverride ?: loadedSettings.value.value
+            val settings = loadedSettings.value.value
             val cachedTracks = if (restoreCachedTracks) {
                 try {
                     musicRepository.loadCachedMusic()
@@ -1110,19 +1260,10 @@ class MeloxViewModel(application: Application) : AndroidViewModel(application) {
             } else {
                 null
             }
-            val visibleCachedTracks = cachedTracks?.filterNot { track ->
-                isPathBlocked(track.folderPath, settings.blockedFolderPaths)
-            }
-            if (visibleCachedTracks != null) {
-                // Publish the lightweight root-page data before grouping. Home and Songs
-                // become usable while the library tabs are prepared off the UI thread.
-                library.value = LibraryProjection(tracks = visibleCachedTracks)
-                library.value = createLibraryProjection(visibleCachedTracks)
-                if (visibleCachedTracks.size != cachedTracks.size) {
-                    musicRepository.cacheMusic(visibleCachedTracks)
-                }
+            if (cachedTracks != null) {
+                allLibraryTracks.value = cachedTracks
                 if (!refreshAfterRestore) {
-                    scanStatus.value = ScanStatus.Success(visibleCachedTracks.size)
+                    scanStatus.value = ScanStatus.Success(cachedTracks.size)
                     scanGeneration.value += 1L
                     return@launch
                 }
@@ -1132,34 +1273,29 @@ class MeloxViewModel(application: Application) : AndroidViewModel(application) {
                 return@launch
             }
 
-            val previousProjection = library.value
-            val previousTracks = visibleCachedTracks ?: previousProjection.tracks
+            val previousTracks = allLibraryTracks.value
             try {
                 val scannedTracks = musicRepository.scanMusic(
                     previousTracks = previousTracks,
                     refreshAudioProperties = false,
                     customFolderUris = settings.customFolderUris,
-                    blockedFolderPaths = settings.blockedFolderPaths,
                     skipShortAudio = settings.skipShortAudio,
                     onInitialTracks = { initialTracks ->
-                        if (initialTracks != library.value.tracks) {
-                            library.value = LibraryProjection(tracks = initialTracks)
-                            library.value = createLibraryProjection(initialTracks)
-                        }
+                        allLibraryTracks.value = initialTracks
                     },
                 )
                 val libraryChanged = scannedTracks != previousTracks
-                if (scannedTracks != library.value.tracks) {
-                    library.value = LibraryProjection(tracks = scannedTracks)
-                    library.value = createLibraryProjection(scannedTracks)
-                }
+                allLibraryTracks.value = scannedTracks
                 if (libraryChanged) {
                     musicRepository.cacheMusic(scannedTracks)
                 }
                 scanStatus.value = ScanStatus.Success(scannedTracks.size)
                 scanGeneration.value += 1L
                 if (shouldEmitScanCompletion(libraryChanged, notifyUser)) {
-                    mutableScanCompletionEvents.emit(scannedTracks.size)
+                    val visibleCount = withContext(Dispatchers.Default) {
+                        visibleMusicTracks(scannedTracks, hiddenFolderPaths.value).size
+                    }
+                    mutableScanCompletionEvents.emit(visibleCount)
                 }
                 if (shouldEmitScanNoChanges(libraryChanged, notifyUser)) {
                     mutableScanNoChangesEvents.emit(Unit)
@@ -1168,7 +1304,7 @@ class MeloxViewModel(application: Application) : AndroidViewModel(application) {
                 throw cancellation
             } catch (exception: Exception) {
                 // A failed refresh keeps the last successful list visible.
-                library.value = previousProjection
+                allLibraryTracks.value = previousTracks
                 scanStatus.value = ScanStatus.Error(
                     exception.message.orEmpty(),
                 )
@@ -1184,17 +1320,6 @@ class MeloxViewModel(application: Application) : AndroidViewModel(application) {
         scanStatus.value = ScanStatus.Idle
     }
 
-    private suspend fun createLibraryProjection(
-        tracks: List<MusicTrack>,
-    ): LibraryProjection = withContext(Dispatchers.Default) {
-        LibraryProjection(
-            tracks = tracks,
-            albums = buildAlbumGroups(tracks),
-            artists = buildArtistGroups(tracks),
-            folders = buildFolderGroups(tracks),
-        )
-    }
-
     private fun hasAudioPermission(): Boolean {
         // Android 13 split audio access from the legacy shared-storage permission.
         val permission = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
@@ -1206,15 +1331,6 @@ class MeloxViewModel(application: Application) : AndroidViewModel(application) {
             getApplication(),
             permission,
         ) == PackageManager.PERMISSION_GRANTED
-    }
-
-    private fun isPathBlocked(path: String?, blockedPaths: List<String>): Boolean {
-        val normalized = path?.trim()?.replace('\\', '/')?.trimEnd('/') ?: return false
-        return blockedPaths.any { blocked ->
-            val prefix = blocked.trim().replace('\\', '/').trimEnd('/').ifEmpty { "/" }
-            prefix == "/" || normalized.equals(prefix, ignoreCase = true) ||
-                normalized.startsWith("$prefix/", ignoreCase = true)
-        }
     }
 
     override fun onCleared() {

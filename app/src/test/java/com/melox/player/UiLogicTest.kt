@@ -75,7 +75,6 @@ import com.melox.player.playback.isValidQueueMove
 import com.melox.player.playback.nextPlaybackMode
 import com.melox.player.playback.nextQueueInsertionIndex
 import com.melox.player.playback.playbackQueueReplacement
-import com.melox.player.playback.queueRemovalIndicesForContentUris
 import com.melox.player.playback.reorderQueueForPlaybackMode
 import com.melox.player.playback.reconcileValidatedPlaybackSnapshot
 import com.melox.player.playback.sourceOrderForPlayNext
@@ -176,7 +175,6 @@ import com.melox.player.ui.screen.playback.characterMotion
 import com.melox.player.ui.screen.playback.characterProgress
 import com.melox.player.ui.screen.playback.shouldUseWordAnimation
 import com.melox.player.ui.screen.playback.wordMotion
-import com.melox.player.ui.screen.playback.forcedLyricRowProgress
 import com.melox.player.ui.screen.playback.lyricBlurRadiusTarget
 import com.melox.player.ui.screen.playback.lyricBlurShouldDisableForBrowsing
 import com.melox.player.ui.screen.playback.lyricCenterScrollDelta
@@ -557,9 +555,9 @@ class UiLogicTest {
     }
 
     @Test
-    fun lyricsUseTwelveDpSpacingWhenTranslationIsVisible() {
+    fun lyricsUseTenDpSpacingWithTranslationAndTwelveDpWithoutIt() {
         assertEquals(
-            12f,
+            10f,
             lyricLineVerticalPaddingDp(
                 hasTimedWords = true,
                 hasTranslation = true,
@@ -568,7 +566,7 @@ class UiLogicTest {
             0f,
         )
         assertEquals(
-            12f,
+            10f,
             lyricLineVerticalPaddingDp(
                 hasTimedWords = false,
                 hasTranslation = true,
@@ -577,7 +575,7 @@ class UiLogicTest {
             0f,
         )
         assertEquals(
-            16f,
+            12f,
             lyricLineVerticalPaddingDp(
                 hasTimedWords = true,
                 hasTranslation = false,
@@ -586,7 +584,7 @@ class UiLogicTest {
             0f,
         )
         assertEquals(
-            16f,
+            12f,
             lyricLineVerticalPaddingDp(
                 hasTimedWords = true,
                 hasTranslation = true,
@@ -595,7 +593,7 @@ class UiLogicTest {
             0f,
         )
         assertEquals(
-            16f,
+            12f,
             lyricLineVerticalPaddingDp(
                 hasTimedWords = false,
                 hasTranslation = false,
@@ -604,7 +602,7 @@ class UiLogicTest {
             0f,
         )
         assertEquals(
-            16f,
+            12f,
             lyricLineVerticalPaddingDp(
                 hasTimedWords = false,
                 hasTranslation = true,
@@ -1132,21 +1130,6 @@ class UiLogicTest {
         )
     }
 
-    @Test
-    fun forcedWordByWordLyricsFinishWrappedRowsInOrder() {
-        val equalRows = listOf(100f, 100f, 100f)
-        assertEquals(0.75f, forcedLyricRowProgress(0.25f, 0, equalRows), 0f)
-        assertEquals(0f, forcedLyricRowProgress(0.25f, 1, equalRows), 0f)
-        assertEquals(1f, forcedLyricRowProgress(0.5f, 0, equalRows), 0f)
-        assertEquals(0.5f, forcedLyricRowProgress(0.5f, 1, equalRows), 0f)
-        assertEquals(0f, forcedLyricRowProgress(0.5f, 2, equalRows), 0f)
-        assertEquals(1f, forcedLyricRowProgress(1f, 2, equalRows), 0f)
-
-        val shorterLastRow = listOf(100f, 100f, 50f)
-        assertEquals(1f, forcedLyricRowProgress(0.5f, 0, shorterLastRow), 0f)
-        assertEquals(0.25f, forcedLyricRowProgress(0.5f, 1, shorterLastRow), 0f)
-        assertEquals(0f, forcedLyricRowProgress(0.5f, 2, shorterLastRow), 0f)
-    }
 
     @Test
     fun legacyLyricFontScaleMapsOldEightyPercentToNewHundredPercent() {
@@ -1291,8 +1274,8 @@ class UiLogicTest {
     }
 
     @Test
-    fun wordAnimationEligibilityDistinguishesCjkAndFastWords() {
-        assertFalse(
+    fun wordAnimationEligibilityIncludesCjkButExcludesFastWords() {
+        assertTrue(
             shouldUseWordAnimation(
                 content = "中文",
                 durationMs = 2_000L,
@@ -1674,16 +1657,16 @@ class UiLogicTest {
             ),
         )
         assertEquals(
-            752.dp,
+            768.dp,
             floatingBottomBarAvailableWidth(
                 windowWidth = 800.dp,
                 windowHeight = 1200.dp,
-                contentMaxWidth = 752.dp,
+                contentMaxWidth = 788.dp,
                 portraitReferenceWidth = 800.dp,
             ),
         )
         assertEquals(
-            352.dp,
+            551.dp,
             floatingBottomBarAvailableWidth(
                 windowWidth = 599.dp,
                 windowHeight = 400.dp,
@@ -2753,31 +2736,31 @@ class UiLogicTest {
     }
 
     @Test
-    fun landscapeFloatingBottomBarUsesNavigationInsetOrTwelveDpFallback() {
+    fun landscapeFloatingBottomBarUsesNavigationInsetOrSixteenDpFallback() {
         assertEquals(24.dp, floatingBottomBarBottomPadding(24.dp))
-        assertEquals(12.dp, floatingBottomBarBottomPadding(0.dp))
+        assertEquals(16.dp, floatingBottomBarBottomPadding(0.dp))
     }
 
     @Test
     fun portraitMiniPlayerStopsAtTheFloatingNavigationBarPosition() {
         assertEquals(
-            24.dp,
+            16.dp,
             floatingMiniPlayerBottomPaddingWhenNavigationIsHidden(
                 navigationBarBottomInset = 0.dp,
                 isPortrait = true,
             ),
         )
-        assertEquals(32.dp, floatingNavigationBarBottomPadding(0.dp))
-        assertEquals(32.dp, floatingNavigationBarBottomPadding(24.dp))
+        assertEquals(24.dp, floatingNavigationBarBottomPadding(0.dp))
+        assertEquals(24.dp, floatingNavigationBarBottomPadding(24.dp))
         assertEquals(
-            0.dp,
+            8.dp,
             floatingMiniPlayerBottomPaddingWhenNavigationIsHidden(
                 navigationBarBottomInset = 0.dp,
                 isPortrait = false,
             ),
         )
         assertEquals(
-            24.dp,
+            16.dp,
             floatingMiniPlayerBottomPaddingWhenNavigationIsHidden(
                 navigationBarBottomInset = 24.dp,
                 isPortrait = true,
@@ -2786,7 +2769,7 @@ class UiLogicTest {
     }
 
     @Test
-    fun homeRecommendationsStopWhenArtworkTracksAreExhausted() = runBlocking {
+    fun homeRecommendationsFillMissingArtworkOnlyAfterArtworkTracksAreExhausted() = runBlocking {
         val tracks = (1L..8L).map { id ->
             musicTrack(id, "Track $id", id, "$id.mp3", id, id)
         }
@@ -2807,9 +2790,11 @@ class UiLogicTest {
             track.id in artworkTrackIds
         }
 
-        assertEquals(artworkTrackIds, recommendations.map(MusicTrack::id).toSet())
-        assertEquals(artworkTrackIds.size, recommendations.size)
-        assertEquals(recommendations.map(MusicTrack::id), repeatedSelection.map(MusicTrack::id))
+        assertEquals(artworkTrackIds, recommendations.tracks.take(3).map(MusicTrack::id).toSet())
+        assertEquals(artworkTrackIds, recommendations.artworkTrackIds)
+        assertEquals(5, recommendations.tracks.size)
+        assertTrue(recommendations.tracks.drop(3).none { it.id in artworkTrackIds })
+        assertEquals(recommendations, repeatedSelection)
     }
 
     @Test
@@ -2832,15 +2817,68 @@ class UiLogicTest {
             tracks = tracks,
             seed = 42,
             count = 5,
-            knownArtworkTrackIds = priorityRecommendations.map(MusicTrack::id).toSet(),
+            knownArtworkTrackIds = priorityRecommendations.artworkTrackIds,
         ) { track ->
             expansionProbeIds += track.id
             true
         }
 
         assertEquals(2, priorityProbeIds.size)
-        assertEquals(priorityRecommendations, expandedRecommendations.take(2))
-        assertTrue(expansionProbeIds.none { it in priorityRecommendations.map(MusicTrack::id) })
+        assertEquals(priorityRecommendations.tracks, expandedRecommendations.tracks.take(2))
+        assertTrue(expansionProbeIds.none { it in priorityRecommendations.artworkTrackIds })
+    }
+
+    @Test
+    fun homeRecommendationsSkipMissingArtworkWhileCoveredCandidatesRemain() = runBlocking {
+        val tracks = (1L..8L).map { id -> musicTrack(id, "Track $id", id, "$id.mp3", id, id) }
+        val coveredIds = tracks.shuffled(Random(42)).takeLast(2).map(MusicTrack::id).toSet()
+        val probedIds = mutableSetOf<Long>()
+        val selected = selectHomeRecommendations(tracks, seed = 42, count = 2, probeBatchSize = 1) {
+            probedIds += it.id
+            it.id in coveredIds
+        }
+        assertEquals(coveredIds, selected.tracks.map(MusicTrack::id).toSet())
+        assertEquals(8, probedIds.size)
+        assertEquals(coveredIds, selected.artworkTrackIds)
+    }
+
+    @Test
+    fun homeRecommendationsShowArtworkFreeLibrariesInStableSeededOrder() = runBlocking {
+        val tracks = (1L..5L).map { id -> musicTrack(id, "Track $id", id, "$id.mp3", id, id) }
+        val probedIds = mutableSetOf<Long>()
+        val selected = selectHomeRecommendations(tracks, seed = 42, count = 3, probeBatchSize = 1) {
+            probedIds += it.id
+            false
+        }
+        assertEquals(tracks.shuffled(Random(42)).take(3), selected.tracks)
+        assertTrue(selected.artworkTrackIds.isEmpty())
+        assertEquals(5, probedIds.size)
+        val expanded = selectHomeRecommendations(
+            tracks, seed = 42, count = 10, knownArtworkTrackIds = selected.artworkTrackIds,
+        ) { false }
+        assertEquals(selected.tracks, expanded.tracks.take(3))
+        assertEquals(5, expanded.tracks.size)
+        assertEquals(5, expanded.tracks.map(MusicTrack::id).distinct().size)
+    }
+
+    @Test
+    fun homeRecommendationExpansionNeverPromotesPlaceholderSelectionsToArtworkHits() = runBlocking {
+        val tracks = (1L..5L).map { id -> musicTrack(id, "Track $id", id, "$id.mp3", id, id) }
+        val coveredId = tracks.shuffled(Random(42)).last().id
+        val initial = selectHomeRecommendations(tracks, seed = 42, count = 2) { it.id == coveredId }
+        assertEquals(setOf(coveredId), initial.artworkTrackIds)
+        val probedIds = mutableSetOf<Long>()
+        val expanded = selectHomeRecommendations(
+            tracks, seed = 42, count = 4, knownArtworkTrackIds = initial.artworkTrackIds,
+            probeBatchSize = 1,
+        ) {
+            probedIds += it.id
+            false
+        }
+        assertEquals(initial.tracks, expanded.tracks.take(2))
+        assertEquals(coveredId, expanded.tracks.first().id)
+        assertTrue(initial.tracks[1].id in probedIds)
+        assertEquals(setOf(coveredId), expanded.artworkTrackIds)
     }
 
     @Test
@@ -3857,28 +3895,6 @@ class UiLogicTest {
         assertFalse(isValidQueueMove(fromIndex = 1, toIndex = 1, itemCount = 3))
         assertFalse(isValidQueueMove(fromIndex = -1, toIndex = 1, itemCount = 3))
         assertFalse(isValidQueueMove(fromIndex = 1, toIndex = 3, itemCount = 3))
-    }
-
-    @Test
-    fun blockedContentUrisRemoveEveryMatchingQueueSlotFromTheEnd() {
-        val queue = listOf(
-            playbackQueueItem("keep"),
-            playbackQueueItem("blocked"),
-            playbackQueueItem("blocked"),
-            playbackQueueItem("tail"),
-        )
-
-        assertEquals(
-            listOf(2, 1),
-            queueRemovalIndicesForContentUris(
-                queue = queue,
-                contentUris = setOf("content://music/blocked"),
-            ),
-        )
-        assertEquals(
-            emptyList<Int>(),
-            queueRemovalIndicesForContentUris(queue, emptySet()),
-        )
     }
 
     @Test

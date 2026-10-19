@@ -73,6 +73,8 @@ import com.melox.player.ui.component.library.PlaybackArtworkFrame
 import com.melox.player.ui.component.library.extractArtworkColor
 import com.melox.player.ui.component.library.loadArtworkBitmap
 import com.melox.player.ui.component.library.rememberArtworkBitmapPixels
+import com.melox.player.ui.component.library.rememberPlaceholderArtworkBitmap
+import com.melox.player.ui.component.library.currentPlaceholderArtworkResId
 import com.melox.player.ui.component.library.responsiveGridColumnCount
 import com.melox.player.ui.component.playlist.PlaylistGridItem
 import com.melox.player.ui.screen.library.MusicLibraryPlaceholder
@@ -84,6 +86,7 @@ import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.withContext
 import top.yukonga.miuix.kmp.basic.BasicComponent
 import top.yukonga.miuix.kmp.basic.Card
+import com.melox.player.ui.component.PageCard
 import top.yukonga.miuix.kmp.basic.CardDefaults
 import top.yukonga.miuix.kmp.basic.HorizontalDivider
 import top.yukonga.miuix.kmp.basic.InfiniteProgressIndicator
@@ -105,6 +108,12 @@ import kotlin.random.Random
 data class HomeRecommendations(
     val tracks: List<MusicTrack>,
     val requestMore: () -> Unit,
+    val artworkTrackIds: Set<Long>,
+)
+
+internal data class HomeRecommendationSelection(
+    val tracks: List<MusicTrack>,
+    val artworkTrackIds: Set<Long>,
 )
 
 @Composable
@@ -249,6 +258,7 @@ fun HomeScreen(
                             val track = recommendationTracks[page]
                             HomeRecommendationCard(
                                 track = track,
+                                hasArtwork = track.id in recommendations.artworkTrackIds,
                                 artworkSize = HomeRecommendationArtworkSize,
                                 blurEnabled = blurEnabled,
                                 onClick = {
@@ -301,7 +311,7 @@ fun HomeScreen(
 
             else -> {
                 items(
-                    items = playlists.chunked(playlistGridColumns),
+                    items = playlists.take(playlistGridColumns * 3).chunked(playlistGridColumns),
                     key = { row -> row.first().id },
                 ) { row ->
                     Row(
@@ -334,7 +344,7 @@ private fun HomeEmptyPlaylistCard(
     onCreatePlaylist: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
-    Card(
+    PageCard(
         modifier = modifier
             .fillMaxWidth()
             .padding(start = 16.dp, end = 16.dp, bottom = 12.dp),
@@ -371,7 +381,7 @@ private fun HomeEmptyRecommendationState(
 
         MusicLibraryPlaceholder.Error,
         MusicLibraryPlaceholder.Empty,
-        -> Card(
+        -> PageCard(
             modifier = modifier
                 .fillMaxWidth()
                 .padding(
@@ -500,6 +510,7 @@ internal fun rememberHomeRecommendations(
         mutableIntStateOf(HomePriorityRecommendationCount)
     }
     var selectedTrackIds by rememberSaveable { mutableStateOf(LongArray(0)) }
+    var artworkTrackIds by rememberSaveable { mutableStateOf(LongArray(0)) }
     val requestMore = remember {
         { requestedRecommendationCount += 1 }
     }
@@ -535,7 +546,7 @@ internal fun rememberHomeRecommendations(
                 tracks = tracks,
                 seed = recommendationSeed,
                 count = requestedRecommendationCount,
-                knownArtworkTrackIds = selectedTrackIds.toSet(),
+                knownArtworkTrackIds = artworkTrackIds.toSet(),
                 probeBatchSize = if (!initialRecommendationExpansionStarted) {
                     HomePriorityRecommendationProbeBatchSize
                 } else {
@@ -551,14 +562,15 @@ internal fun rememberHomeRecommendations(
                 ) != null
             }
         }
-        selectedTrackIds = selected.map(MusicTrack::id).toLongArray()
+        selectedTrackIds = selected.tracks.map(MusicTrack::id).toLongArray()
+        artworkTrackIds = selected.artworkTrackIds.toLongArray()
         selectionComplete = true
     }
 
     return when {
-        tracks.isEmpty() -> HomeRecommendations(emptyList(), requestMore)
+        tracks.isEmpty() -> HomeRecommendations(emptyList(), requestMore, emptySet())
         !selectionComplete -> null
-        else -> HomeRecommendations(selectedTracks, requestMore)
+        else -> HomeRecommendations(selectedTracks, requestMore, artworkTrackIds.toSet())
     }
 }
 
@@ -611,9 +623,13 @@ internal suspend fun selectHomeRecommendations(
     knownArtworkTrackIds: Set<Long> = emptySet(),
     probeBatchSize: Int = HomeRecommendationProbeBatchSize,
     hasArtwork: suspend (MusicTrack) -> Boolean,
-): List<MusicTrack> {
-    if (count <= 0 || probeBatchSize <= 0) return emptyList()
+): HomeRecommendationSelection {
+    if (count <= 0 || probeBatchSize <= 0) {
+        return HomeRecommendationSelection(emptyList(), emptySet())
+    }
     val recommendations = ArrayList<MusicTrack>(count.coerceAtMost(tracks.size))
+    val withoutArtwork = ArrayList<MusicTrack>()
+    val artworkTrackIds = HashSet<Long>()
     val candidates = tracks.shuffled(Random(seed))
     for (batchStart in candidates.indices step probeBatchSize) {
         val batch = candidates.subList(
@@ -628,31 +644,39 @@ internal suspend fun selectHomeRecommendations(
         batch.forEachIndexed { index, track ->
             if (artworkMatches[index]) {
                 recommendations += track
-                if (recommendations.size == count) return recommendations
+                artworkTrackIds += track.id
+                if (recommendations.size == count) {
+                    return HomeRecommendationSelection(recommendations, artworkTrackIds)
+                }
+            } else {
+                if (withoutArtwork.size < count) withoutArtwork += track
             }
         }
     }
-    return recommendations
+    recommendations += withoutArtwork.take(count - recommendations.size)
+    return HomeRecommendationSelection(recommendations, artworkTrackIds)
 }
 
 @Composable
 private fun HomeRecommendationCard(
     track: MusicTrack,
+    hasArtwork: Boolean,
     artworkSize: Dp,
     blurEnabled: Boolean,
     onClick: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
-    val artwork = rememberArtworkBitmapPixels(
+    val artwork = if (hasArtwork) rememberArtworkBitmapPixels(
         contentUri = track.contentUri,
         dateModifiedEpochSeconds = track.dateModifiedEpochSeconds,
         fileSizeBytes = track.fileSizeBytes,
         targetSizePx = HOME_RECOMMENDATION_ARTWORK_SIZE_PX,
-    )
+    ) else rememberPlaceholderArtworkBitmap(artworkSize)
+    val placeholderArtworkResId = if (hasArtwork) null else currentPlaceholderArtworkResId()
     val reflection = rememberHomeRecommendationReflection(
-        contentUri = track.contentUri,
-        dateModifiedEpochSeconds = track.dateModifiedEpochSeconds,
-        fileSizeBytes = track.fileSizeBytes,
+        contentUri = placeholderArtworkResId?.let { "placeholder-artwork:$it" } ?: track.contentUri,
+        dateModifiedEpochSeconds = if (hasArtwork) track.dateModifiedEpochSeconds else 0L,
+        fileSizeBytes = if (hasArtwork) track.fileSizeBytes else 0L,
         sourceBitmap = artwork,
         enabled = blurEnabled,
     )

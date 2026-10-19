@@ -110,14 +110,28 @@ internal fun Modifier.recordPlayerLayer(
     recordingGeneration: Int = 0,
     onRecorded: (generation: Int, size: IntSize) -> Unit = { _, _ -> },
 ): Modifier = drawWithContent {
-    layer.record {
-        this@drawWithContent.drawContent()
-    }
-    onRecorded(recordingGeneration, layer.size)
     if (drawInPlace) {
-        layer.alpha = 1f
-        drawLayer(layer)
+        // Draw descendants into one target per frame across the live handoff.
+        this@drawWithContent.drawContent()
+    } else {
+        layer.record {
+            this@drawWithContent.drawContent()
+        }
+        onRecorded(recordingGeneration, layer.size)
     }
+}
+
+internal fun Modifier.recordMiniPlayerLayer(
+    layer: GraphicsLayer,
+    drawInPlace: Boolean,
+    recordingGeneration: Int,
+    onRecorded: (generation: Int, size: IntSize) -> Unit,
+): Modifier = drawWithContent {
+    // Mini readiness must be reported even while the mini player is visible.
+    // Replay this private, untransformed source instead of drawing children twice.
+    layer.record { this@drawWithContent.drawContent() }
+    onRecorded(recordingGeneration, layer.size)
+    if (drawInPlace) drawLayer(layer)
 }
 
 internal fun Modifier.recordPlayerContentLayer(
@@ -130,10 +144,54 @@ internal fun Modifier.recordPlayerContentLayer(
 }
 
 @Composable
+internal fun PlayerSheetDragInputOverlay(
+    transition: PlayerSheetTransitionState,
+    hasItem: Boolean,
+    modifier: Modifier = Modifier,
+) {
+    if (!transition.sharedLayersReady || !transition.isTransitionActive) return
+    val bounds = sharedContainerRect(
+        transition.miniPlayerBounds,
+        transition.fullPlayerBounds,
+        transition.progress,
+    )
+    val density = LocalDensity.current
+    val dragModifier = rememberPlayerSheetVerticalDragModifier(
+        enabled = true,
+        hasItem = hasItem,
+        onDragStart = transition::beginFullPlayerDrag,
+        onDrag = transition::dragBy,
+        onDragEnd = transition::endDrag,
+        onDragCancel = transition::cancelDrag,
+    )
+    Box(
+        modifier = modifier
+            .offset { IntOffset(bounds.left.roundToInt(), bounds.top.roundToInt()) }
+            .size(
+                width = with(density) { bounds.width.toDp() },
+                height = with(density) { bounds.height.toDp() },
+            )
+            .playerSheetHostLayer(
+                hostBounds = bounds,
+                inputBounds = bounds,
+                miniPlayerBounds = transition.miniPlayerBounds.takeIf {
+                    transition.miniPlayerAcceptsInput
+                },
+            )
+            .then(dragModifier)
+            .pointerInput(Unit) {
+                // Transition snapshots are not live button targets.
+                detectTapGestures { }
+            },
+    )
+}
+
+@Composable
 internal fun PlayerSheetMiniControlsInputOverlay(
     transition: PlayerSheetTransitionState,
     hasItem: Boolean,
     normalChrome: Boolean,
+    smallPlayerBar: Boolean,
     onTogglePlayPause: () -> Unit,
     onOpenQueue: () -> Unit,
     modifier: Modifier = Modifier,
@@ -154,9 +212,12 @@ internal fun PlayerSheetMiniControlsInputOverlay(
         controlsBounds = controls,
     )
     val density = LocalDensity.current
-    val playOffset = with(density) { (-6).dp.toPx() }
-    val queueOffset = with(density) { (if (normalChrome) 0.dp else (-2).dp).toPx() }
-    val controlSize = with(density) { 40.dp.toPx() }
+    val playOffset = with(density) { (if (smallPlayerBar) 0.dp else (-6).dp).toPx() }
+    val queueOffset = with(density) {
+        (if (normalChrome || smallPlayerBar) 0.dp else (-2).dp).toPx()
+    }
+    val controlSizeDp = miniPlayerControlSize(normalChrome, smallPlayerBar)
+    val controlSize = with(density) { controlSizeDp.toPx() }
     val currentOnTogglePlayPause by rememberUpdatedState(onTogglePlayPause)
     val currentOnOpenQueue by rememberUpdatedState(onOpenQueue)
 
@@ -181,7 +242,7 @@ internal fun PlayerSheetMiniControlsInputOverlay(
                             (renderedControls.top - bounds.top).roundToInt(),
                         )
                     }
-                    .size(40.dp)
+                    .size(controlSizeDp)
                     .pointerInput(Unit) {
                         detectTapGestures { currentOnTogglePlayPause() }
                     },
@@ -196,7 +257,7 @@ internal fun PlayerSheetMiniControlsInputOverlay(
                         (renderedControls.top - bounds.top).roundToInt(),
                     )
                 }
-                .size(40.dp)
+                .size(controlSizeDp)
                 .pointerInput(Unit) {
                     detectTapGestures { currentOnOpenQueue() }
                 },

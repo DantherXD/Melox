@@ -45,12 +45,14 @@ import com.melox.player.R
 import com.melox.player.ui.component.BlurredBar
 import com.melox.player.ui.component.effect.AboutEffectBackground
 import com.melox.player.ui.component.rememberBlurBackdrop
-import top.yukonga.miuix.kmp.basic.Card
+import com.melox.player.ui.component.PageCard as Card
+import com.melox.player.ui.component.LocalTopBarWallpaperVisible
+import com.melox.player.ui.component.LocalCustomPageBackground
 import top.yukonga.miuix.kmp.basic.CardDefaults
 import top.yukonga.miuix.kmp.basic.Icon
 import top.yukonga.miuix.kmp.basic.IconButton
 import top.yukonga.miuix.kmp.basic.MiuixScrollBehavior
-import top.yukonga.miuix.kmp.basic.Scaffold
+import com.melox.player.ui.component.PageScaffold
 import top.yukonga.miuix.kmp.basic.SmallTopAppBar
 import top.yukonga.miuix.kmp.basic.Text
 import top.yukonga.miuix.kmp.blur.BlendColorEntry
@@ -70,6 +72,7 @@ import top.yukonga.miuix.kmp.utils.scrollEndHaptic
 @Composable
 fun AboutScreen(
     bottomContentPadding: Dp,
+    customBackgroundSelected: Boolean,
     onBack: () -> Unit,
     onOpenSponsor: () -> Unit,
 ) {
@@ -96,14 +99,15 @@ fun AboutScreen(
         derivedStateOf { scrollProgress == 1f }
     }
     val topBarBackdrop = rememberBlurBackdrop()
-    val barBackdrop = if (collapsed) topBarBackdrop else null
+    val hasCustomBackground = customBackgroundSelected || LocalCustomPageBackground.current != null
+    val barBackdrop = if (collapsed || hasCustomBackground) topBarBackdrop else null
     val barColor = if (collapsed && barBackdrop == null) {
         MiuixTheme.colorScheme.surface
     } else {
         Color.Transparent
     }
 
-    Scaffold(
+    PageScaffold(
         topBar = {
             BlurredBar(
                 backdrop = barBackdrop,
@@ -113,7 +117,7 @@ fun AboutScreen(
                 SmallTopAppBar(
                     title = stringResource(R.string.settings_about_title),
                     scrollBehavior = scrollBehavior,
-                    color = barColor,
+                    color = if (LocalTopBarWallpaperVisible.current) Color.Transparent else barColor,
                     titleColor = MiuixTheme.colorScheme.onSurface.copy(
                         alpha = ((scrollProgress - 0.35f) / 0.65f).coerceIn(0f, 1f),
                     ),
@@ -140,6 +144,7 @@ fun AboutScreen(
                 scrollBehavior = scrollBehavior,
                 scrollProgress = { scrollProgress },
                 bottomContentPadding = bottomContentPadding,
+                customBackgroundSelected = customBackgroundSelected,
                 onOpenSponsor = onOpenSponsor,
             )
         }
@@ -153,6 +158,7 @@ private fun AboutContent(
     scrollBehavior: top.yukonga.miuix.kmp.basic.ScrollBehavior,
     scrollProgress: () -> Float,
     bottomContentPadding: Dp,
+    customBackgroundSelected: Boolean,
     onOpenSponsor: () -> Unit,
 ) {
     val uriHandler = LocalUriHandler.current
@@ -161,6 +167,7 @@ private fun AboutContent(
     val versionName = BuildConfig.VERSION_NAME.ifBlank { "1.0.0" }
     var headerHeight by remember { mutableStateOf(190.dp) }
     val contentBackdrop = rememberBlurBackdrop()
+    val customBackgroundVisible = LocalCustomPageBackground.current != null
     val isDark = MiuixTheme.colorScheme.surface.luminance() < 0.5f
     val logoBlend = remember(isDark) {
         if (isDark) {
@@ -193,6 +200,7 @@ private fun AboutContent(
 
     AboutEffectBackground(
         modifier = Modifier.fillMaxSize(),
+        useCustomBackground = customBackgroundSelected,
         backgroundModifier =
             contentBackdrop?.let { Modifier.layerBackdrop(it) } ?: Modifier,
         alpha = { 1f - scrollProgress() },
@@ -216,7 +224,8 @@ private fun AboutContent(
                 .nestedScroll(scrollBehavior.nestedScrollConnection),
             contentPadding = PaddingValues(
                 start = padding.calculateStartPadding(layoutDirection),
-                top = padding.calculateTopPadding(),
+                top = padding.calculateTopPadding() +
+                    if (customBackgroundSelected || customBackgroundVisible) 12.dp else 0.dp,
                 end = padding.calculateEndPadding(layoutDirection),
                 bottom = maxOf(
                     padding.calculateBottomPadding(),
@@ -241,7 +250,7 @@ private fun AboutContent(
                             .padding(horizontal = 12.dp)
                             .padding(bottom = 12.dp)
                             .then(
-                                contentBackdrop?.let {
+                                contentBackdrop?.takeUnless { customBackgroundVisible }?.let {
                                     Modifier.textureBlur(
                                         backdrop = it,
                                         shape = RoundedCornerShape(16.dp),
@@ -254,7 +263,7 @@ private fun AboutContent(
                                 } ?: Modifier,
                             ),
                         colors = CardDefaults.defaultColors(
-                            color = if (contentBackdrop != null) {
+                            color = if (contentBackdrop != null && !customBackgroundVisible) {
                                 Color.Transparent
                             } else {
                                 MiuixTheme.colorScheme.surfaceContainer

@@ -62,7 +62,7 @@ class PlaybackController(context: Context) {
     val autoExtendSleepTimer: StateFlow<Boolean> = mutableAutoExtendSleepTimer.asStateFlow()
     private val mutablePlaybackPauseFade = MutableStateFlow(false)
     val playbackPauseFade: StateFlow<Boolean> = mutablePlaybackPauseFade.asStateFlow()
-    private val mutableHighPrecisionOutput = MutableStateFlow(true)
+    private val mutableHighPrecisionOutput = MutableStateFlow(false)
     val highPrecisionOutput: StateFlow<Boolean> = mutableHighPrecisionOutput.asStateFlow()
     private var pendingPlaybackSpeed: Float? = null
     private var pendingSpeedTimeoutJob: Job? = null
@@ -96,7 +96,8 @@ class PlaybackController(context: Context) {
                     cancelSleepTimer(interrupted = true)
                 }
             }
-            if (reason == Player.MEDIA_ITEM_TRANSITION_REASON_REPEAT) playbackIteration += 1L
+            // Preserve playback identity even when collectors conflate a rapid A/B/A transition.
+            playbackIteration += 1L
             val previous = mutableState.value
             val requestedDirection = pendingTrackSkip
                 ?.takeIf {
@@ -162,7 +163,11 @@ class PlaybackController(context: Context) {
     }
 
     /** Replaces playback with the visible result set and starts at [startIndex]. */
-    fun playQueue(tracks: List<MusicTrack>, startIndex: Int) {
+    fun playQueue(
+        tracks: List<MusicTrack>,
+        startIndex: Int,
+        requestedMode: PlaybackMode? = null,
+    ) {
         if (startIndex !in tracks.indices) return
         val sourceItems = tracks.mapIndexed { index, track ->
             track.toPlaybackQueueItem(
@@ -172,7 +177,12 @@ class PlaybackController(context: Context) {
             )
         }
         withController { controller ->
-            val playbackMode = controller.currentPlaybackMode()
+            val playbackMode = requestedMode ?: controller.currentPlaybackMode()
+            if (requestedMode != null) {
+                finishPlaybackModeChange()
+                PlaybackModeMemory.set(playbackMode)
+                mutableState.value = mutableState.value.copy(playbackMode = playbackMode)
+            }
             val reordered = reorderQueueForPlaybackMode(
                 queue = sourceItems.map { it.copy(playbackMode = playbackMode) },
                 currentIndex = startIndex,
@@ -538,16 +548,6 @@ class PlaybackController(context: Context) {
         }
     }
 
-    fun removeContentUris(contentUris: Set<String>) {
-        if (contentUris.isEmpty()) return
-        withController { controller ->
-            queueRemovalIndicesForContentUris(
-                queue = controller.currentPlaybackQueue(),
-                contentUris = contentUris,
-            ).forEach(controller::removeMediaItem)
-        }
-    }
-
     fun clear() {
         queueClearPending = true
         mutableState.value = PlaybackUiState(playbackMode = mutableState.value.playbackMode)
@@ -724,13 +724,6 @@ internal fun isValidQueueMove(fromIndex: Int, toIndex: Int, itemCount: Int): Boo
     fromIndex != toIndex &&
         isValidQueueIndex(fromIndex, itemCount) &&
         isValidQueueIndex(toIndex, itemCount)
-
-internal fun queueRemovalIndicesForContentUris(
-    queue: List<PlaybackQueueItem>,
-    contentUris: Set<String>,
-): List<Int> = queue.indices
-    .filter { index -> queue[index].contentUri in contentUris }
-    .asReversed()
 
 internal fun Player.currentPlaybackQueue(): List<PlaybackQueueItem> =
     List(mediaItemCount) { index ->

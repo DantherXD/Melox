@@ -17,6 +17,8 @@ import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.animation.core.AnimationState
+import androidx.compose.animation.core.animateTo
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
@@ -80,7 +82,9 @@ import androidx.compose.ui.platform.LocalLayoutDirection
 import androidx.compose.ui.platform.LocalResources
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.platform.LocalWindowInfo
-import androidx.compose.ui.layout.onSizeChanged
+import androidx.compose.ui.layout.LayoutCoordinates
+import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.ui.layout.boundsInRoot
 import androidx.compose.ui.semantics.CollectionInfo
 import androidx.compose.ui.semantics.CollectionItemInfo
 import androidx.compose.ui.semantics.Role
@@ -99,6 +103,7 @@ import androidx.compose.ui.zIndex
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
+import com.melox.player.model.LyricAnimationMode
 import com.melox.player.R
 import com.melox.player.data.library.AlbumGroup
 import com.melox.player.data.library.MusicSortConfig
@@ -111,11 +116,11 @@ import com.melox.player.data.library.ArtistSortConfig
 import com.melox.player.data.library.ArtistSortField
 import com.melox.player.data.library.FolderSortConfig
 import com.melox.player.data.library.FolderSortField
+import com.melox.player.ui.viewmodel.withHiddenFolders
 import com.melox.player.model.BottomBarStyle
+import com.melox.player.model.normalizeCustomBackgroundDimPercent
 import com.melox.player.model.DefaultHomePage
 import com.melox.player.model.DynamicColorSource
-import com.melox.player.model.LyricsSidecarFormatPriority
-import com.melox.player.model.LyricsSourcePriority
 import com.melox.player.model.PlaybackBackgroundStyle
 import com.melox.player.model.ScanStatus
 import com.melox.player.model.ThemeMode
@@ -123,12 +128,31 @@ import com.melox.player.model.MusicTrack
 import com.melox.player.ui.component.BlurredBar
 import com.melox.player.ui.component.LocalBottomSheetBlurBackdrop
 import com.melox.player.ui.component.LocalTopBarBlurSettings
+import com.melox.player.ui.component.LocalCustomPageBackground
+import com.melox.player.ui.component.LocalCustomBackgroundDimAlpha
+import com.melox.player.ui.component.LocalPageCardBlurRadius
+import com.melox.player.ui.component.pageCardBlurRadius
+import com.melox.player.ui.component.LocalPageCardSurfaceAlpha
+import com.melox.player.ui.component.pageCardSurfaceAlpha
+import com.melox.player.ui.component.topBarContainerColor
+import com.melox.player.ui.component.tabSelectedContainerColor
+import com.melox.player.ui.component.FixedPageBackgroundHost
+import com.melox.player.ui.component.trackFixedWallpaperMotion
+import com.melox.player.ui.component.refreshFixedWallpaperSample
+import com.melox.player.ui.component.rememberCustomPageBackground
+import com.melox.player.ui.component.customPageBackground
+import com.melox.player.ui.component.customPageContainerColor
+import com.melox.player.ui.component.PageScaffold
 import com.melox.player.ui.component.TopBarBlurSettings
 import com.melox.player.ui.component.miuixBarColor
 import com.melox.player.ui.component.rememberBlurBackdrop
+import com.melox.player.ui.component.library.LocalAlphabetIndexBottomPadding
+import com.melox.player.ui.component.library.fixedAlphabetIndexTopPadding
 import com.melox.player.ui.component.library.MusicSortButton
 import com.melox.player.ui.component.library.SelectionActionsAnimatedContent
 import com.melox.player.ui.component.library.SelectionNavigationIconAnimatedContent
+import com.melox.player.ui.component.library.ShufflePlayButton
+import com.melox.player.ui.component.library.rememberSearchTopBarScrollBehavior
 import com.melox.player.ui.component.library.TrackSelectionActions
 import com.melox.player.ui.component.library.extractArtworkColor
 import com.melox.player.ui.component.library.rememberArtworkBitmap
@@ -142,13 +166,13 @@ import com.melox.player.ui.component.library.toggleAllTrackSelection
 import com.melox.player.ui.component.playlist.PlaylistNameDialog
 import com.melox.player.ui.component.playlist.PlaylistPickerOverlay
 import com.melox.player.ui.component.playback.playerNavigationOffset
-import com.melox.player.ui.component.playback.playerSheetInputLayer
-import com.melox.player.ui.component.playback.playerSheetInputTransform
 import com.melox.player.ui.component.playback.MiniPlayer
+import com.melox.player.ui.component.playback.miniPlayerArtworkCornerRadius
 import com.melox.player.ui.component.playback.DynamicFlowBackgroundState
 import com.melox.player.ui.component.playback.PLAYER_FULL_ARTWORK_REQUEST_SIZE
 import com.melox.player.ui.component.playback.PlayerSheetArtworkOverlay
 import com.melox.player.ui.component.playback.PlayerSheetContentOverlay
+import com.melox.player.ui.component.playback.PlayerSheetDragInputOverlay
 import com.melox.player.ui.component.playback.PlayerSheetMiniControlsInputOverlay
 import com.melox.player.ui.component.playback.sharedArtworkTargetIsOnscreen
 import com.melox.player.ui.component.playback.playerSheetUsesFullPlayerStatusBar
@@ -178,6 +202,9 @@ import com.melox.player.ui.screen.settings.MusicStatisticsScreen
 import com.melox.player.ui.screen.settings.AboutScreen
 import com.melox.player.ui.screen.settings.SponsorScreen
 import com.melox.player.ui.screen.settings.ThemeSettingsScreen
+import com.melox.player.ui.screen.settings.MainBackgroundScreen
+import com.melox.player.ui.screen.settings.LyricsSettingsScreen
+import com.melox.player.ui.screen.settings.LyricsInterfaceSettingsScreen
 import com.melox.player.ui.screen.settings.BlockedFoldersScreen
 import com.melox.player.ui.viewmodel.MeloxViewModel
 import com.melox.player.ui.theme.MeloxTheme
@@ -240,6 +267,9 @@ private enum class AppRoute {
     SCAN_SETTINGS,
     MUSIC_STATISTICS,
     THEME_SETTINGS,
+    MAIN_BACKGROUND,
+    LYRICS_SETTINGS,
+    LYRICS_INTERFACE,
     ABOUT,
     ALBUM_DETAIL,
     ARTIST_DETAIL,
@@ -294,13 +324,19 @@ fun MeloxApp(
     viewModel: MeloxViewModel = viewModel(),
 ) {
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
+    val loadedCustomBackground by viewModel.customBackground.collectAsStateWithLifecycle()
     val compactPlayback by viewModel.compactPlaybackState.collectAsStateWithLifecycle()
     val currentTrackId by viewModel.currentTrackId.collectAsStateWithLifecycle()
     val hasCurrentItem by viewModel.hasCurrentItem.collectAsStateWithLifecycle()
     val musicPresentation by viewModel.musicPresentation.collectAsStateWithLifecycle()
     val albumPresentation by viewModel.albumPresentation.collectAsStateWithLifecycle()
     val artistPresentation by viewModel.artistPresentation.collectAsStateWithLifecycle()
-    val folderPresentation by viewModel.folderPresentation.collectAsStateWithLifecycle()
+    val preparedFolderPresentation by viewModel.folderPresentation.collectAsStateWithLifecycle()
+    val hiddenFolderPaths by viewModel.hiddenFolderPaths.collectAsStateWithLifecycle()
+    val hiddenFolderAddresses by viewModel.hiddenFolderAddresses.collectAsStateWithLifecycle()
+    val folderPresentation = remember(preparedFolderPresentation, hiddenFolderPaths) {
+        preparedFolderPresentation.withHiddenFolders(hiddenFolderPaths)
+    }
     val playlistState by viewModel.playlistState.collectAsStateWithLifecycle()
     val settings = uiState.settings
     val context = LocalContext.current
@@ -308,6 +344,12 @@ fun MeloxApp(
     val windowSize = LocalWindowInfo.current.containerSize
     val playbackErrorText = stringResource(R.string.playback_error)
     val scanNoChangesText = stringResource(R.string.scan_no_changes)
+    val hiddenFolderSaveErrorText = stringResource(R.string.hidden_folder_save_error)
+    LaunchedEffect(viewModel, hiddenFolderSaveErrorText) {
+        viewModel.hiddenFolderSaveFailures.collectLatest {
+            Toast.makeText(context, hiddenFolderSaveErrorText, Toast.LENGTH_SHORT).show()
+        }
+    }
     LaunchedEffect(compactPlayback.errorMessage) {
         if (compactPlayback.errorMessage != null) {
             Toast.makeText(
@@ -434,6 +476,7 @@ fun MeloxApp(
     var pendingAlbumGridReset by remember { mutableStateOf<AlbumGridStyle?>(null) }
     var showQueue by rememberSaveable { mutableStateOf(false) }
     val playerTransition = rememberPlayerSheetTransitionState()
+    var playerContentBounds by remember { mutableStateOf(androidx.compose.ui.geometry.Rect.Zero) }
     val sharedPlayerArtworkEnabled = playerTransition.fullPlayerArtworkPageSelected
     val miniPlayerLayer = rememberGraphicsLayer()
     val miniPlayerContentLayer = rememberGraphicsLayer()
@@ -694,6 +737,9 @@ fun MeloxApp(
         val artistsListState = rememberLazyListState()
         val foldersListState = rememberLazyListState()
         val themeSettingsListState = rememberLazyListState()
+        val mainBackgroundListState = rememberLazyListState()
+        val lyricsSettingsListState = rememberLazyListState()
+        val lyricsInterfaceListState = rememberLazyListState()
         var renderedBottomBarStyle by remember {
             mutableStateOf(settings.bottomBarStyle)
         }
@@ -722,10 +768,13 @@ fun MeloxApp(
         val useSmallTopAppBar = landscape
         val rootIndexBottomSpacing = if (miniPlayerUsesNormalChrome) 12.dp else 6.dp
         val homeScrollBehavior = MiuixScrollBehavior()
-        val songsScrollBehavior = MiuixScrollBehavior()
-        val libraryScrollBehavior = MiuixScrollBehavior()
+        val songsScrollBehavior = rememberSearchTopBarScrollBehavior(songSearchVisible)
+        val libraryScrollBehavior = rememberSearchTopBarScrollBehavior(librarySearchVisible)
         val settingsScrollBehavior = MiuixScrollBehavior()
         val themeSettingsScrollBehavior = MiuixScrollBehavior()
+        val mainBackgroundScrollBehavior = MiuixScrollBehavior()
+        val lyricsSettingsScrollBehavior = MiuixScrollBehavior()
+        val lyricsInterfaceScrollBehavior = MiuixScrollBehavior()
         LaunchedEffect(
             pendingAlbumGridReset,
             albumSortConfig.gridStyle,
@@ -828,12 +877,20 @@ fun MeloxApp(
         }
         val content: @Composable (PaddingValues, Boolean) -> Unit =
             { outerPadding, navigationRailExpanded ->
+            FixedPageBackgroundHost(
+                modifier = Modifier.fillMaxSize(),
+                refreshSignal = {
+                    pagerState.currentPage + pagerState.currentPageOffsetFraction +
+                        libraryPagerState.currentPage + libraryPagerState.currentPageOffsetFraction
+                },
+            ) {
             // Each page owns its top bar so the title moves with the Pager, like the Miuix demo.
             HorizontalPager(
                 state = pagerState,
                 modifier = Modifier
                     .fillMaxSize()
-                    .overScrollHorizontal(),
+                    .overScrollHorizontal()
+                    .trackFixedWallpaperMotion(),
                 userScrollEnabled = rootPagerUserScrollEnabled(
                     selectedPage = playerPagerState.selectedPage,
                     homeRecommendationPage = homeRecommendationPage,
@@ -911,6 +968,12 @@ fun MeloxApp(
                                     selectedSongUris = emptySet()
                                     songsSelectionMode = false
                                 },
+                                defaultNavigationIcon = {
+                                    ShufflePlayButton(
+                                        enabled = musicPresentation.items.isNotEmpty(),
+                                        onClick = { viewModel.shuffleTracks(musicPresentation.items) },
+                                    )
+                                },
                             )
                         },
                         actions = {
@@ -948,6 +1011,7 @@ fun MeloxApp(
                                 defaultActions = {
                                     LibrarySearchButton(
                                     visible = songSearchVisible,
+                                    scrollBehavior = songsScrollBehavior,
                                     onClick = {
                                         if (songSearchVisible) {
                                             songSearchVisible = false
@@ -993,6 +1057,10 @@ fun MeloxApp(
                         },
                     ) { contentPadding, scrollBehavior, indexTopPadding ->
                         MusicListScreen(
+                            showLocateAction = true,
+                            currentTrackContentUri = compactPlayback.currentItem?.contentUri,
+                            miniPlayerBounds = playerTransition.miniPlayerBounds,
+                            playerContentBounds = playerContentBounds,
                             onTrackClick = viewModel::playTracks,
                             displayedTracks = musicPresentation.items,
                             queueTracks = musicPresentation.queueItems,
@@ -1011,11 +1079,13 @@ fun MeloxApp(
                             onGoToArtist = openTrackArtist,
                             onExternalEditReturned =
                                 viewModel::refreshTrackAfterExternalEdit,
+                            showMusicTagEditor = settings.showMusicTagEditor,
+                            showLyricoEditor = settings.showLyricoEditor,
+                            showLunaBeatEditor = settings.showLunaBeatEditor,
                             scrollBehavior = scrollBehavior,
                             indexTopPadding = indexTopPadding,
                             listState = songsListState,
                             contentPadding = contentPadding,
-                            indexBottomSpacing = rootIndexBottomSpacing,
                             selectionMode = songsSelectionMode,
                             selectedTrackUris = selectedSongUris,
                             onSelectionChange = { selectedSongUris = it },
@@ -1031,6 +1101,7 @@ fun MeloxApp(
                         actions = {
                             LibrarySearchButton(
                                 visible = librarySearchVisible,
+                                scrollBehavior = libraryScrollBehavior,
                                 contentDescription = when (libraryPagerState.currentPage) {
                                     LIBRARY_ARTISTS_TAB_INDEX ->
                                         stringResource(R.string.artist_search_hint)
@@ -1129,15 +1200,10 @@ fun MeloxApp(
                         },
                     ) { contentPadding, _, indexTopPadding ->
                         val layoutDirection = LocalLayoutDirection.current
-                        val showLibraryScrollTop by remember {
-                            derivedStateOf {
-                                libraryScrollBehavior.state.collapsedFraction > 0.01f
-                            }
-                        }
                         val onLibraryIndexTargetChanged: (Int, Boolean) -> Unit =
                             { _, restoreLargeTitle ->
                                 val state = libraryScrollBehavior.state
-                                if (restoreLargeTitle) {
+                                if (restoreLargeTitle && !libraryScrollBehavior.isPinned) {
                                     state.heightOffset = 0f
                                     state.contentOffset = 0f
                                 } else if (state.heightOffsetLimit != -Float.MAX_VALUE) {
@@ -1151,8 +1217,7 @@ fun MeloxApp(
                                 .padding(
                                     top = indexTopPadding + 4.dp,
                                     end = contentPadding.calculateEndPadding(layoutDirection),
-                                    bottom = contentPadding.calculateBottomPadding() +
-                                        rootIndexBottomSpacing,
+                                    bottom = LocalAlphabetIndexBottomPadding.current,
                                 )
                                 .fillMaxHeight()
                             HorizontalPager(
@@ -1251,7 +1316,6 @@ fun MeloxApp(
                                         } else {
                                             AlphabetSections
                                         },
-                                        showScrollTop = showLibraryScrollTop,
                                         onTargetIndexChanged = onLibraryIndexTargetChanged,
                                         modifier = libraryIndexModifier,
                                     )
@@ -1276,7 +1340,6 @@ fun MeloxApp(
                                         } else {
                                             AlphabetSections
                                         },
-                                        showScrollTop = showLibraryScrollTop,
                                         onTargetIndexChanged = onLibraryIndexTargetChanged,
                                         modifier = libraryIndexModifier,
                                     )
@@ -1301,7 +1364,6 @@ fun MeloxApp(
                                         } else {
                                             AlphabetSections
                                         },
-                                        showScrollTop = showLibraryScrollTop,
                                         onTargetIndexChanged = onLibraryIndexTargetChanged,
                                         modifier = libraryIndexModifier,
                                     )
@@ -1321,7 +1383,13 @@ fun MeloxApp(
                             trackCount = uiState.tracks.size,
                             onDefaultHomePageChange = viewModel::setDefaultHomePage,
                             onOpenThemeSettings = {
+                                themeSettingsListState.requestScrollToItem(0)
+                                themeSettingsScrollBehavior.state.heightOffset = 0f
+                                themeSettingsScrollBehavior.state.contentOffset = 0f
                                 currentRoute = AppRoute.THEME_SETTINGS
+                            },
+                            onOpenLyricsSettings = {
+                                currentRoute = AppRoute.LYRICS_SETTINGS
                             },
                             onOpenAbout = { currentRoute = AppRoute.ABOUT },
                             onOpenScanSettings = {
@@ -1337,6 +1405,7 @@ fun MeloxApp(
 
                     else -> Unit
                 }
+            }
             }
         }
 
@@ -1416,6 +1485,16 @@ fun MeloxApp(
                         depth = 2,
                     ),
                 )
+                currentRoute == AppRoute.MAIN_BACKGROUND -> listOf(
+                    root,
+                    AppNavDestination(AppRoute.THEME_SETTINGS, depth = 1),
+                    AppNavDestination(AppRoute.MAIN_BACKGROUND, depth = 2),
+                )
+                currentRoute == AppRoute.LYRICS_INTERFACE -> listOf(
+                    root,
+                    AppNavDestination(AppRoute.LYRICS_SETTINGS, depth = 1),
+                    AppNavDestination(AppRoute.LYRICS_INTERFACE, depth = 2),
+                )
                 currentRoute == AppRoute.SPONSOR -> listOf(
                     root,
                     AppNavDestination(AppRoute.ABOUT, depth = 1),
@@ -1469,6 +1548,10 @@ fun MeloxApp(
                 returnToArtistParentAlbum(null)
             } else if (currentRoute == AppRoute.BLOCKED_FOLDERS) {
                 currentRoute = AppRoute.SCAN_SETTINGS
+            } else if (currentRoute == AppRoute.LYRICS_INTERFACE) {
+                currentRoute = AppRoute.LYRICS_SETTINGS
+            } else if (currentRoute == AppRoute.MAIN_BACKGROUND) {
+                currentRoute = AppRoute.THEME_SETTINGS
             } else if (currentRoute == AppRoute.SPONSOR) {
                 currentRoute = AppRoute.ABOUT
             } else if (
@@ -1487,7 +1570,39 @@ fun MeloxApp(
             currentRoute = AppRoute.ROOT
             playerPagerState.animateToPage(selectedTab)
         }
+        var customBackgroundBlurPreview by remember(settings.customBackgroundId) {
+            mutableStateOf<Int?>(null)
+        }
+        LaunchedEffect(settings.customBackgroundBlurPercent, customBackgroundBlurPreview) {
+            if (customBackgroundBlurPreview == settings.customBackgroundBlurPercent) {
+                customBackgroundBlurPreview = null
+            }
+        }
+        val customPageBackground = rememberCustomPageBackground(
+            settings, loadedCustomBackground, customBackgroundBlurPreview,
+        )
+        var customBackgroundDimPreview by remember(settings.customBackgroundId) { mutableStateOf<Int?>(null) }
+        LaunchedEffect(settings.customBackgroundDimPercent, customBackgroundDimPreview) {
+            if (customBackgroundDimPreview == settings.customBackgroundDimPercent) customBackgroundDimPreview = null
+        }
+        var customBackgroundCardBlurPreview by remember(settings.customBackgroundId) { mutableStateOf<Int?>(null) }
+        LaunchedEffect(settings.customBackgroundCardBlurPercent, customBackgroundCardBlurPreview) {
+            if (customBackgroundCardBlurPreview == settings.customBackgroundCardBlurPercent) customBackgroundCardBlurPreview = null
+        }
+        var customBackgroundCardOpacityPreview by remember(settings.customBackgroundId) { mutableStateOf<Int?>(null) }
+        LaunchedEffect(settings.customBackgroundCardOpacityPercent, customBackgroundCardOpacityPreview) {
+            if (customBackgroundCardOpacityPreview == settings.customBackgroundCardOpacityPercent) customBackgroundCardOpacityPreview = null
+        }
         CompositionLocalProvider(
+            LocalCustomPageBackground provides customPageBackground,
+            LocalCustomBackgroundDimAlpha provides
+                (normalizeCustomBackgroundDimPercent(customBackgroundDimPreview ?: settings.customBackgroundDimPercent) / 100f),
+            LocalPageCardBlurRadius provides pageCardBlurRadius(
+                customBackgroundCardBlurPreview ?: settings.customBackgroundCardBlurPercent,
+            ),
+            LocalPageCardSurfaceAlpha provides pageCardSurfaceAlpha(
+                customBackgroundCardOpacityPreview ?: settings.customBackgroundCardOpacityPercent,
+            ),
             LocalTopBarBlurSettings provides TopBarBlurSettings(
                 blurEnabled = settings.blurEnabled,
                 progressiveEnabled = settings.progressiveTopBarBlurEnabled,
@@ -1499,7 +1614,8 @@ fun MeloxApp(
                 LocalBottomSheetBlurBackdrop provides bottomSheetBackdrop,
             ) {
                 Scaffold(
-                    containerColor = MiuixTheme.colorScheme.surface,
+                    modifier = Modifier.customPageBackground(),
+                    containerColor = customPageContainerColor(),
                     popupHost = { MiuixPopupHost() },
                 ) { _ ->
                 Box(
@@ -1534,6 +1650,7 @@ fun MeloxApp(
                             persistedNavigationRailExpanded = settings.navigationRailExpanded,
                             onNavigationRailExpandedChange = viewModel::setNavigationRailExpanded,
                             bottomBarStyle = renderedBottomBarStyle,
+                            smallPlayerBar = settings.smallPlayerBar,
                             liquidGlassSupported = liquidGlassSupported,
                             isDark = isDark,
                             blurEnabled = settings.blurEnabled,
@@ -1606,7 +1723,37 @@ fun MeloxApp(
                                 bottom = retainedRootBottomPadding,
                             )
                             val currentRootPadding by rememberUpdatedState(rootPadding)
-                            Box(modifier = Modifier.fillMaxSize()) {
+                            Box(
+                                modifier = Modifier.fillMaxSize().onGloballyPositioned {
+                                    playerContentBounds = it.boundsInRoot()
+                                },
+                            ) {
+                                val songsIndexBottomPadding = maxOf(
+                                    retainedRootBottomPadding + rootIndexBottomSpacing,
+                                    if (playerTransition.miniPlayerBounds.width > 0f && playerContentBounds.width > 0f) {
+                                        with(density) {
+                                            (playerContentBounds.bottom - playerTransition.miniPlayerBounds.top)
+                                                .coerceAtLeast(0f).toDp()
+                                        } + 24.dp + top.yukonga.miuix.kmp.basic.ButtonDefaults.MinHeight
+                                    } else {
+                                        0.dp
+                                    },
+                                )
+                                var retainedSongsIndexBottomPadding by remember(
+                                    windowSize, density, miniPlayerUsesNormalChrome,
+                                ) { mutableStateOf(songsIndexBottomPadding) }
+                                if (currentRoute == AppRoute.ROOT) {
+                                    SideEffect {
+                                        retainedSongsIndexBottomPadding = songsIndexBottomPadding
+                                    }
+                                }
+                                CompositionLocalProvider(
+                                    LocalAlphabetIndexBottomPadding provides if (currentRoute == AppRoute.ROOT) {
+                                        songsIndexBottomPadding
+                                    } else {
+                                        retainedSongsIndexBottomPadding
+                                    },
+                                ) {
                                 PredictiveNavDisplay(
                                     backStack = navBackStack,
                                     predictiveBackEnabled =
@@ -1656,6 +1803,8 @@ fun MeloxApp(
                                                                 viewModel::setBlurEnabled,
                                                             onProgressiveTopBarBlurChange =
                                                                 viewModel::setProgressiveTopBarBlurEnabled,
+                                                            onSmallPlayerBarChange =
+                                                                viewModel::setSmallPlayerBar,
                                                             onHideBottomBarChange =
                                                                 viewModel::setHideBottomBar,
                                                             onFloatingBottomBarChange =
@@ -1666,6 +1815,87 @@ fun MeloxApp(
                                                                 viewModel::setPredictiveBackEnabled,
                                                             onNavigationTransitionStyleChange =
                                                                 viewModel::setNavigationTransitionStyle,
+                                                            onOpenMainBackground = {
+                                                                currentRoute = AppRoute.MAIN_BACKGROUND
+                                                            },
+                                                        )
+
+                                                    AppRoute.MAIN_BACKGROUND ->
+                                                        MainBackgroundScreen(
+                                                            settings = settings,
+                                                            bottomContentPadding = routeBottomPadding,
+                                                            listState = mainBackgroundListState,
+                                                            scrollBehavior = mainBackgroundScrollBehavior,
+                                                            onBack = navigateBack,
+                                                            onImageChange = viewModel::setCustomBackground,
+                                                            onDeleteImage = viewModel::deleteCustomBackground,
+                                                            onDimPercentChange = {
+                                                                customBackgroundDimPreview = it
+                                                                viewModel.setCustomBackgroundDimPercent(it)
+                                                            },
+                                                            onBlurPercentChange = {
+                                                                customBackgroundBlurPreview = it
+                                                                viewModel.setCustomBackgroundBlurPercent(it)
+                                                            },
+                                                            onCardBlurPercentChange = {
+                                                                customBackgroundCardBlurPreview = it
+                                                                viewModel.setCustomBackgroundCardBlurPercent(it)
+                                                            },
+                                                            onCardOpacityPercentChange = {
+                                                                customBackgroundCardOpacityPreview = it
+                                                                viewModel.setCustomBackgroundCardOpacityPercent(it)
+                                                            },
+                                                        )
+
+                                                    AppRoute.LYRICS_SETTINGS ->
+                                                        LyricsSettingsScreen(
+                                                            settings = settings,
+                                                            bottomContentPadding =
+                                                                routeBottomPadding,
+                                                            listState = lyricsSettingsListState,
+                                                            scrollBehavior =
+                                                                lyricsSettingsScrollBehavior,
+                                                            onBack = navigateBack,
+                                                            onLyricsSourcePriorityChange =
+                                                                viewModel::setLyricsSourcePriority,
+                                                            onLyricsSidecarFormatPriorityChange =
+                                                                viewModel::setLyricsSidecarFormatPriority,
+                                                            onShowMusicTagEditorChange =
+                                                                viewModel::setShowMusicTagEditor,
+                                                            onShowLyricoEditorChange =
+                                                                viewModel::setShowLyricoEditor,
+                                                            onShowLunaBeatEditorChange =
+                                                                viewModel::setShowLunaBeatEditor,
+                                                            onOpenLyricsInterface = {
+                                                                currentRoute = AppRoute.LYRICS_INTERFACE
+                                                            },
+                                                        )
+
+                                                    AppRoute.LYRICS_INTERFACE ->
+                                                        LyricsInterfaceSettingsScreen(
+                                                            settings = settings,
+                                                            bottomContentPadding =
+                                                                routeBottomPadding,
+                                                            listState = lyricsInterfaceListState,
+                                                            scrollBehavior =
+                                                                lyricsInterfaceScrollBehavior,
+                                                            onBack = navigateBack,
+                                                            onLeftAlignPlayerTitleChange =
+                                                                viewModel::setLeftAlignPlayerTitle,
+                                                            onCenterLyricsChange =
+                                                                viewModel::setCenterLyrics,
+                                                            onShowLyricsTranslationChange =
+                                                                viewModel::setShowLyricsTranslation,
+                                                            onLyricFontScaleChange =
+                                                                viewModel::setLyricFontScale,
+                                                            onLyricFontWeightChange =
+                                                                viewModel::setLyricFontWeight,
+                                                            onLyricBlurEnabledChange =
+                                                                viewModel::setLyricBlurEnabled,
+                                                            onLyricAnimationModeChange =
+                                                                viewModel::setLyricAnimationMode,
+                                                            onHideControlsOnLyricsChange =
+                                                                viewModel::setHideControlsOnLyrics,
                                                         )
 
                                                     AppRoute.SCAN_SETTINGS ->
@@ -1693,7 +1923,8 @@ fun MeloxApp(
 
                                                     AppRoute.BLOCKED_FOLDERS ->
                                                         BlockedFoldersScreen(
-                                                            paths = settings.blockedFolderPaths,
+                                                            paths = hiddenFolderPaths,
+                                                            displayPaths = hiddenFolderAddresses,
                                                             bottomContentPadding = routeBottomPadding,
                                                             onBack = navigateBack,
                                                             onUnblock = viewModel::removeBlockedFolderPath,
@@ -1709,6 +1940,7 @@ fun MeloxApp(
 
                                                     AppRoute.ABOUT -> AboutScreen(
                                                         bottomContentPadding = routeBottomPadding,
+                                                        customBackgroundSelected = settings.customBackgroundId != null,
                                                         onBack = navigateBack,
                                                         onOpenSponsor = {
                                                             currentRoute = AppRoute.SPONSOR
@@ -1764,6 +1996,9 @@ fun MeloxApp(
                                                                 onGoToArtist = openTrackArtist,
                                                                 onExternalEditReturned =
                                                                     viewModel::refreshTrackAfterExternalEdit,
+                                                                showMusicTagEditor = settings.showMusicTagEditor,
+                                                                showLyricoEditor = settings.showLyricoEditor,
+                                                                showLunaBeatEditor = settings.showLunaBeatEditor,
                                                             )
                                                         }
                                                     }
@@ -1815,6 +2050,9 @@ fun MeloxApp(
                                                                 onGoToArtist = openTrackArtist,
                                                                 onExternalEditReturned =
                                                                     viewModel::refreshTrackAfterExternalEdit,
+                                                                showMusicTagEditor = settings.showMusicTagEditor,
+                                                                showLyricoEditor = settings.showLyricoEditor,
+                                                                showLunaBeatEditor = settings.showLunaBeatEditor,
                                                             )
                                                         }
                                                     }
@@ -1830,6 +2068,7 @@ fun MeloxApp(
                                                         }
                                                         folder?.let {
                                                             FolderDetailScreen(
+                                                                onShufflePlay = viewModel::shuffleTracks,
                                                                 folder = it,
                                                                 artistGroups = uiState.artists,
                                                                 currentTrackId = currentTrackId,
@@ -1863,6 +2102,9 @@ fun MeloxApp(
                                                                 onGoToArtist = openTrackArtist,
                                                                 onExternalEditReturned =
                                                                     viewModel::refreshTrackAfterExternalEdit,
+                                                                showMusicTagEditor = settings.showMusicTagEditor,
+                                                                showLyricoEditor = settings.showLyricoEditor,
+                                                                showLunaBeatEditor = settings.showLunaBeatEditor,
                                                             )
                                                         }
                                                     }
@@ -1871,6 +2113,7 @@ fun MeloxApp(
                                                         PlaylistLibraryScreen(
                                                             playlists = playlistState.playlists,
                                                             loaded = playlistState.loaded,
+                                                            onMovePlaylists = viewModel::movePlaylists,
                                                             landscape = landscape,
                                                             bottomContentPadding =
                                                                 routeBottomPadding,
@@ -1905,7 +2148,13 @@ fun MeloxApp(
                                                         }
                                                         playlist?.let {
                                                             PlaylistDetailScreen(
+                                                                onShufflePlay = viewModel::shuffleTracks,
                                                                 playlist = it,
+                                                                sortConfig = settings.playlistSortConfigs[it.id]
+                                                                    ?: com.melox.player.data.playlist.PlaylistSortConfig(),
+                                                                onSortConfigChange = { config ->
+                                                                    viewModel.setPlaylistSortConfig(it.id, config)
+                                                                },
                                                                 libraryTracks = uiState.tracks,
                                                                 readableContentUris =
                                                                     playlistState.readableContentUris,
@@ -1937,6 +2186,9 @@ fun MeloxApp(
                                                                 onGoToArtist = openTrackArtist,
                                                                 onExternalEditReturned =
                                                                     viewModel::refreshTrackAfterExternalEdit,
+                                                                showMusicTagEditor = settings.showMusicTagEditor,
+                                                                showLyricoEditor = settings.showLyricoEditor,
+                                                                showLunaBeatEditor = settings.showLunaBeatEditor,
                                                                 onRename = { name ->
                                                                     viewModel.renamePlaylist(
                                                                         it.id,
@@ -1972,27 +2224,19 @@ fun MeloxApp(
                                         }
                                     }
                                 }
+                                }
                         }
                     BackHandler(enabled = playerTransition.isMounted) {
                         closePlayer()
                     }
                     if (playerTransition.fullPlayerHostMounted) {
-                        val fullPlayerInputTransform = if (
+                        val fullPlayerRecordingActive =
                             playerTransition.sharedLayersReady &&
                             playerTransition.isTransitionActive
-                        ) {
-                            playerSheetInputTransform(
-                                source = playerTransition.miniPlayerBounds,
-                                target = playerTransition.fullPlayerBounds,
-                                progress = playerTransition.progress,
-                            )
-                        } else {
-                            null
-                        }
                         val fullPlayerHostTranslationY = playerSheetResidentHostTranslationY(
                             miniPlayerAcceptsInput = playerTransition.miniPlayerAcceptsInput,
                             windowHeight = windowSize.height,
-                        ).takeIf { fullPlayerInputTransform == null } ?: 0f
+                        ).takeUnless { fullPlayerRecordingActive } ?: 0f
                         FullPlayerHost(
                             viewModel = viewModel,
                             tracks = uiState.tracks,
@@ -2002,14 +2246,15 @@ fun MeloxApp(
                             dynamicFlowBackgroundState = dynamicFlowBackgroundState,
                             lyricFontScale = settings.lyricFontScale,
                             lyricFontWeight = settings.lyricFontWeight,
-                            forceWordByWordLyrics = settings.forceWordByWordLyrics,
+                            lyricAnimationMode = settings.lyricAnimationMode,
                             lyricBlurEnabled = settings.lyricBlurEnabled,
                             centerLyrics = settings.centerLyrics,
                             leftAlignPlayerTitle = settings.leftAlignPlayerTitle,
                             hideControlsOnLyrics = settings.hideControlsOnLyrics,
                             showLyricsTranslation = settings.showLyricsTranslation,
-                            lyricsSourcePriority = settings.lyricsSourcePriority,
-                            lyricsSidecarFormatPriority = settings.lyricsSidecarFormatPriority,
+                            showMusicTagEditor = settings.showMusicTagEditor,
+                            showLyricoEditor = settings.showLyricoEditor,
+                            showLunaBeatEditor = settings.showLunaBeatEditor,
                             onDismiss = closePlayer,
                             onOpenQueue = { showQueue = true },
                             onAddToPlaylist = { track ->
@@ -2032,11 +2277,7 @@ fun MeloxApp(
                             initialArtworkPageSelected =
                                 playerTransition.fullPlayerArtworkPageSelected,
                             onPlayerDragStart = playerTransition::beginFullPlayerDrag,
-                            onPlayerDrag = { amount ->
-                                playerTransition.dragBy(
-                                    amount * (fullPlayerInputTransform?.scale ?: 1f),
-                                )
-                            },
+                            onPlayerDrag = playerTransition::dragBy,
                             onPlayerDragEnd = playerTransition::endDrag,
                             onPlayerDragCancel = playerTransition::cancelDrag,
                             onBackgroundLayerRecorded = { generation, size ->
@@ -2054,30 +2295,26 @@ fun MeloxApp(
                                 )
                             },
                             onPlayerBoundsChanged = { bounds ->
-                                if (fullPlayerInputTransform == null) {
-                                    playerTransition.updateFullPlayerBounds(
-                                        androidx.compose.ui.geometry.Rect(
-                                            left = bounds.left,
-                                            top = bounds.top - fullPlayerHostTranslationY,
-                                            right = bounds.right,
-                                            bottom = bounds.bottom - fullPlayerHostTranslationY,
-                                        ),
-                                        windowSize,
-                                    )
-                                }
+                                playerTransition.updateFullPlayerBounds(
+                                    androidx.compose.ui.geometry.Rect(
+                                        left = bounds.left,
+                                        top = bounds.top - fullPlayerHostTranslationY,
+                                        right = bounds.right,
+                                        bottom = bounds.bottom - fullPlayerHostTranslationY,
+                                    ),
+                                    windowSize,
+                                )
                             },
                             onArtworkBoundsChanged = { bounds ->
-                                if (fullPlayerInputTransform == null) {
-                                    playerTransition.updateFullArtworkBounds(
-                                        androidx.compose.ui.geometry.Rect(
-                                            left = bounds.left,
-                                            top = bounds.top - fullPlayerHostTranslationY,
-                                            right = bounds.right,
-                                            bottom = bounds.bottom - fullPlayerHostTranslationY,
-                                        ),
-                                        windowSize,
-                                    )
-                                }
+                                playerTransition.updateFullArtworkBounds(
+                                    androidx.compose.ui.geometry.Rect(
+                                        left = bounds.left,
+                                        top = bounds.top - fullPlayerHostTranslationY,
+                                        right = bounds.right,
+                                        bottom = bounds.bottom - fullPlayerHostTranslationY,
+                                    ),
+                                    windowSize,
+                                )
                             },
                             onArtworkPageSelectedChanged =
                                 playerTransition::updateFullPlayerArtworkPageSelected,
@@ -2086,32 +2323,27 @@ fun MeloxApp(
                             },
                             modifier = Modifier
                                 .zIndex(
-                                    if (playerTransition.fullPlayerDrawsAboveRoot) 1f else -1f,
+                                    if (playerTransition.fullPlayerDrawsInPlace) 1f else -1f,
                                 )
-                                .then(
-                                    if (fullPlayerInputTransform != null) {
-                                        Modifier.playerSheetInputLayer(
-                                            transform = fullPlayerInputTransform,
-                                            miniPlayerBounds = playerTransition.miniPlayerBounds
-                                                .takeIf {
-                                                    playerTransition.miniPlayerAcceptsInput
-                                                },
-                                        )
-                                    } else {
-                                        Modifier.graphicsLayer {
-                                            translationY = fullPlayerHostTranslationY
-                                        }
-                                    },
-                                ),
+                                .graphicsLayer {
+                                    // Hidden recording sources must not inherit the animated input clip.
+                                    translationY = fullPlayerHostTranslationY
+                                },
                         )
                     }
+                    PlayerSheetDragInputOverlay(
+                        transition = playerTransition,
+                        hasItem = compactPlayback.currentItem != null,
+                        modifier = Modifier.zIndex(2f),
+                    )
                     PlayerSheetMiniControlsInputOverlay(
                         transition = playerTransition,
                         hasItem = compactPlayback.currentItem != null,
                         normalChrome = miniPlayerUsesNormalChrome,
+                        smallPlayerBar = settings.smallPlayerBar,
                         onTogglePlayPause = viewModel::togglePlayPause,
                         onOpenQueue = { showQueue = true },
-                        modifier = Modifier.zIndex(2f),
+                        modifier = Modifier.zIndex(3f),
                     )
                     PlayerSheetContentOverlay(
                         transition = playerTransition,
@@ -2127,7 +2359,10 @@ fun MeloxApp(
                     PlayerSheetArtworkOverlay(
                         playback = compactPlayback,
                         transition = playerTransition,
-                        collapsedCornerRadius = if (miniPlayerUsesNormalChrome) 7.dp else 8.dp,
+                        collapsedCornerRadius = miniPlayerArtworkCornerRadius(
+                            normalChrome = miniPlayerUsesNormalChrome,
+                            smallPlayerBar = settings.smallPlayerBar,
+                        ),
                         enabled = sharedPlayerArtworkEnabled,
                     )
                 QueueSheetHost(
@@ -2219,14 +2454,15 @@ private fun FullPlayerHost(
     dynamicFlowBackgroundState: DynamicFlowBackgroundState,
     lyricFontScale: Float,
     lyricFontWeight: Int,
-    forceWordByWordLyrics: Boolean,
+    lyricAnimationMode: LyricAnimationMode,
     lyricBlurEnabled: Boolean,
     centerLyrics: Boolean,
     leftAlignPlayerTitle: Boolean,
     hideControlsOnLyrics: Boolean,
     showLyricsTranslation: Boolean,
-    lyricsSourcePriority: LyricsSourcePriority,
-    lyricsSidecarFormatPriority: LyricsSidecarFormatPriority,
+    showMusicTagEditor: Boolean,
+    showLyricoEditor: Boolean,
+    showLunaBeatEditor: Boolean,
     onDismiss: () -> Unit,
     onOpenQueue: () -> Unit,
     onAddToPlaylist: (MusicTrack) -> Unit,
@@ -2272,24 +2508,20 @@ private fun FullPlayerHost(
         dynamicFlowBackgroundState = dynamicFlowBackgroundState,
         lyricFontScale = lyricFontScale,
         lyricFontWeight = lyricFontWeight,
-        forceWordByWordLyrics = forceWordByWordLyrics,
+        lyricAnimationMode = lyricAnimationMode,
         lyricBlurEnabled = lyricBlurEnabled,
         centerLyrics = centerLyrics,
         leftAlignPlayerTitle = leftAlignPlayerTitle,
         hideControlsOnLyrics = hideControlsOnLyrics,
         showLyricsTranslation = showLyricsTranslation,
-        lyricsSourcePriority = lyricsSourcePriority,
-        lyricsSidecarFormatPriority = lyricsSidecarFormatPriority,
         onLyricFontScaleChange = viewModel::setLyricFontScale,
         onLyricFontWeightChange = viewModel::setLyricFontWeight,
-        onForceWordByWordLyricsChange = viewModel::setForceWordByWordLyrics,
+        onLyricAnimationModeChange = viewModel::setLyricAnimationMode,
         onLyricBlurEnabledChange = viewModel::setLyricBlurEnabled,
         onCenterLyricsChange = viewModel::setCenterLyrics,
         onLeftAlignPlayerTitleChange = viewModel::setLeftAlignPlayerTitle,
         onHideControlsOnLyricsChange = viewModel::setHideControlsOnLyrics,
         onShowLyricsTranslationChange = viewModel::setShowLyricsTranslation,
-        onLyricsSourcePriorityChange = viewModel::setLyricsSourcePriority,
-        onLyricsSidecarFormatPriorityChange = viewModel::setLyricsSidecarFormatPriority,
         onDismiss = onDismiss,
         onTogglePlayPause = viewModel::togglePlayPause,
         onPrevious = viewModel::previous,
@@ -2317,6 +2549,9 @@ private fun FullPlayerHost(
         artistGroups = artistGroups,
         onGoToArtist = onGoToArtist,
         onExternalEditReturned = viewModel::refreshTrackAfterExternalEdit,
+        showMusicTagEditor = showMusicTagEditor,
+        showLyricoEditor = showLyricoEditor,
+        showLunaBeatEditor = showLunaBeatEditor,
         backgroundLayer = backgroundLayer,
         contentLayer = contentLayer,
         frameRecordingGeneration = frameRecordingGeneration,
@@ -2480,11 +2715,39 @@ private fun QueueSheetHost(
 @Composable
 internal fun LibrarySearchButton(
     visible: Boolean,
+    scrollBehavior: ScrollBehavior,
     contentDescription: String = stringResource(R.string.music_search_hint),
     onClick: () -> Unit,
 ) {
+    val scope = rememberCoroutineScope()
+    val currentOnClick by rememberUpdatedState(onClick)
+    var collapsing by remember { mutableStateOf(false) }
     IconButton(
-        onClick = onClick,
+        onClick = {
+            collapsing = true
+            scope.launch {
+                try {
+                    val state = scrollBehavior.state
+                    val limit = state.heightOffsetLimit
+                    if (limit != -Float.MAX_VALUE && limit < 0f) {
+                        if (state.heightOffset > limit) {
+                            AnimationState(initialValue = state.heightOffset).animateTo(
+                                targetValue = limit,
+                                animationSpec = scrollBehavior.snapAnimationSpec ?: tween(200),
+                            ) {
+                                state.heightOffset = value
+                            }
+                        }
+                        state.heightOffset = limit
+                        state.contentOffset = limit
+                    }
+                    currentOnClick()
+                } finally {
+                    collapsing = false
+                }
+            }
+        },
+        enabled = !collapsing,
         holdDownState = visible,
     ) {
         Icon(
@@ -2502,6 +2765,7 @@ private fun LibraryTabRow(
     modifier: Modifier = Modifier,
     blurred: Boolean = false,
 ) {
+    val hasWallpaper = LocalCustomPageBackground.current != null
     val progressiveBlurActive = blurred &&
         LocalTopBarBlurSettings.current.progressiveEnabled &&
         isRuntimeShaderSupported()
@@ -2509,11 +2773,7 @@ private fun LibraryTabRow(
         modifier = modifier
             .height(38.dp)
             .background(
-                if (blurred) {
-                    androidx.compose.ui.graphics.Color.Transparent
-                } else {
-                    MiuixTheme.colorScheme.surface
-                },
+                topBarContainerColor(hasWallpaper, blurred, MiuixTheme.colorScheme.surface),
             )
             .semantics {
                 collectionInfo = CollectionInfo(rowCount = 1, columnCount = tabs.size)
@@ -2532,8 +2792,8 @@ private fun LibraryTabRow(
                     .then(
                         if (selected) {
                             Modifier.squircleBackground(
-                                color = MiuixTheme.colorScheme.surfaceContainer.copy(
-                                    alpha = if (progressiveBlurActive) 0.8f else 1f,
+                                color = tabSelectedContainerColor(
+                                    hasWallpaper, progressiveBlurActive, MiuixTheme.colorScheme.surfaceContainer,
                                 ),
                                 cornerRadius = 12.dp,
                             )
@@ -2594,6 +2854,7 @@ internal fun LibrarySearchBar(
     onFocusedChange: (Boolean) -> Unit,
     onVisibleChange: (Boolean) -> Unit,
 ) {
+    val hasWallpaper = LocalCustomPageBackground.current != null
     val topBarBlurSettings = LocalTopBarBlurSettings.current
     val progressiveBlurActive = topBarBlurSettings.blurEnabled &&
         topBarBlurSettings.progressiveEnabled &&
@@ -2637,7 +2898,7 @@ internal fun LibrarySearchBar(
                 InputField(
                     query = query,
                     onQueryChange = { newQuery ->
-                        // Miuix clears its query when `expanded` becomes false.
+                        // Miuix clears its query when input focus is dismissed.
                         // A visible search field may deliberately remain unfocused
                         // while another root page is selected, so retain its query.
                         if (focused || newQuery.isNotEmpty() || query.isEmpty()) {
@@ -2645,11 +2906,11 @@ internal fun LibrarySearchBar(
                         }
                     },
                     onSearch = onQueryChange,
-                    expanded = visible,
-                    onExpandedChange = handleExpandedChange,
+                    expanded = visible && focused,
+                    onExpandedChange = onFocusedChange,
                     label = label,
                     color = MiuixTheme.colorScheme.surfaceContainerHigh.copy(
-                        alpha = if (progressiveBlurActive) 0.8f else 1f,
+                        alpha = if (hasWallpaper || progressiveBlurActive) 0.8f else 1f,
                     ),
                     trailingIcon = {
                         AnimatedVisibility(
@@ -2708,32 +2969,16 @@ private fun PlayerPage(
     content: @Composable (PaddingValues, ScrollBehavior, indexTopPadding: androidx.compose.ui.unit.Dp) -> Unit,
 ) {
     val layoutDirection = LocalLayoutDirection.current
-    val density = LocalDensity.current
-    val windowSize = LocalWindowInfo.current.containerSize
-    val topBarBackdrop = rememberBlurBackdrop()
-    var bottomContentHeightPx by remember { mutableIntStateOf(0) }
-    var bottomContentMeasured by remember { mutableStateOf(false) }
-    var fixedExpandedBarPadding by remember(scrollBehavior, density, windowSize, useSmallTopAppBar) {
-        mutableStateOf<Dp?>(null)
-    }
+    var topBarCaptureCoordinates by remember { mutableStateOf<LayoutCoordinates?>(null) }
+    val topBarBackdrop = rememberBlurBackdrop(captureCoordinates = { topBarCaptureCoordinates })
 
-    Scaffold(
+    PageScaffold(
             topBar = {
             BlurredBar(
                 backdrop = topBarBackdrop,
                 blurEnabled = topBarBackdrop != null,
                 scrollBehavior = scrollBehavior,
             ) {
-                val measuredBottomContent: @Composable () -> Unit = {
-                    Box(
-                        modifier = Modifier.onSizeChanged {
-                            bottomContentHeightPx = it.height
-                            bottomContentMeasured = true
-                        },
-                    ) {
-                        bottomContent()
-                    }
-                }
                 if (useSmallTopAppBar) {
                     SmallTopAppBar(
                         title = title,
@@ -2741,7 +2986,7 @@ private fun PlayerPage(
                         navigationIcon = navigationIcon,
                         actions = actions,
                         scrollBehavior = scrollBehavior,
-                        bottomContent = measuredBottomContent,
+                        bottomContent = bottomContent,
                     )
                 } else {
                     TopAppBar(
@@ -2750,35 +2995,19 @@ private fun PlayerPage(
                         navigationIcon = navigationIcon,
                         actions = actions,
                         scrollBehavior = scrollBehavior,
-                        bottomContent = measuredBottomContent,
+                        bottomContent = bottomContent,
                     )
                 }
             }
         },
         ) { innerPadding ->
-        val bottomContentHeight = with(density) { bottomContentHeightPx.toDp() }
-        val currentBarPadding =
-            (innerPadding.calculateTopPadding() - bottomContentHeight).coerceAtLeast(0.dp)
-        val heightOffset = with(density) {
-            scrollBehavior.state.heightOffset.toDp()
-        }
-        val measuredExpandedBarPadding =
-            (currentBarPadding - heightOffset).coerceAtLeast(currentBarPadding)
-        SideEffect {
-            if (
-                bottomContentMeasured &&
-                fixedExpandedBarPadding == null &&
-                scrollBehavior.state.heightOffsetLimit != -Float.MAX_VALUE
-            ) {
-                fixedExpandedBarPadding = measuredExpandedBarPadding
-            }
-        }
-        val indexTopPadding =
-            (fixedExpandedBarPadding ?: measuredExpandedBarPadding) + bottomContentHeight
+        val indexTopPadding = fixedAlphabetIndexTopPadding()
         // The page bar owns top/system insets; the outer scaffold owns bottom-bar clearance.
         Box(
             modifier = Modifier
                 .fillMaxSize()
+                .onGloballyPositioned { topBarCaptureCoordinates = it }
+                .refreshFixedWallpaperSample()
                 .then(topBarBackdrop?.let { Modifier.layerBackdrop(it) } ?: Modifier),
         ) {
             content(

@@ -1,5 +1,6 @@
 package com.melox.player.ui.screen.library
 
+import com.melox.player.ui.component.library.LocalAlphabetIndexBottomPadding
 import com.melox.player.ui.component.library.PreserveSortScrollPosition
 
 import androidx.compose.foundation.Image
@@ -24,7 +25,6 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.items
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.mutableStateOf
@@ -76,7 +76,6 @@ fun FolderLibraryScreen(
     modifier: Modifier = Modifier,
     contentPadding: PaddingValues = PaddingValues(),
     showIndex: Boolean = true,
-    indexBottomSpacing: Dp = 12.dp,
 ) {
     var pendingBlockFolder by remember { mutableStateOf<FolderGroup?>(null) }
     val layoutDirection = LocalLayoutDirection.current
@@ -93,9 +92,6 @@ fun FolderLibraryScreen(
     }
     val sections = remember(sortConfig.descending) {
         if (sortConfig.descending) AlphabetSections.asReversed() else AlphabetSections
-    }
-    val showScrollTop by remember {
-        derivedStateOf { scrollBehavior.state.collapsedFraction > 0.01f }
     }
 
     Box(modifier = modifier.fillMaxSize()) {
@@ -159,10 +155,9 @@ fun FolderLibraryScreen(
                 },
                 scrollToItem = listState::scrollToItem,
                 sections = sections,
-                showScrollTop = showScrollTop,
                 onTargetIndexChanged = { _, restoreLargeTitle ->
                     val state = scrollBehavior.state
-                    if (restoreLargeTitle) {
+                    if (restoreLargeTitle && !scrollBehavior.isPinned) {
                         state.heightOffset = 0f
                         state.contentOffset = 0f
                     } else if (state.heightOffsetLimit != -Float.MAX_VALUE) {
@@ -175,8 +170,7 @@ fun FolderLibraryScreen(
                     .padding(
                         top = indexTopPadding + 4.dp,
                         end = contentPadding.calculateEndPadding(layoutDirection),
-                        bottom = contentPadding.calculateBottomPadding() +
-                            indexBottomSpacing,
+                        bottom = LocalAlphabetIndexBottomPadding.current,
                     )
                     .fillMaxHeight(),
             )
@@ -186,7 +180,10 @@ fun FolderLibraryScreen(
     OverlayDialog(
         show = pendingBlockFolder != null,
         title = stringResource(R.string.folder_block_title),
-        summary = stringResource(R.string.folder_block_message),
+        summary = stringResource(
+            R.string.folder_block_message,
+            pendingBlockFolder?.path.orEmpty(),
+        ),
         enableWindowDim = true,
         onDismissRequest = { pendingBlockFolder = null },
     ) {
@@ -203,8 +200,9 @@ fun FolderLibraryScreen(
             TextButton(
                 text = stringResource(R.string.clear_queue_confirm_confirm),
                 onClick = {
-                    pendingBlockFolder?.path?.let(onBlockFolder)
+                    val path = pendingBlockFolder?.path
                     pendingBlockFolder = null
+                    path?.let(onBlockFolder)
                 },
                 modifier = Modifier.weight(1f),
                 colors = ButtonDefaults.textButtonColorsPrimary(),
@@ -251,11 +249,7 @@ internal fun FolderListItem(
                 overflow = TextOverflow.Ellipsis,
             )
             Text(
-                text = stringResource(
-                    R.string.folder_description,
-                    songCount,
-                    folder.displayPath,
-                ),
+                text = songCount,
                 style = MiuixTheme.textStyles.footnote1.copy(fontSize = 12.sp),
                 color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
                 maxLines = 1,
